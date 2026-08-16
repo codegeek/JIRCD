@@ -253,3 +253,40 @@
   burst-end signal without opening a real MOTD content/config surface
   this release doesn't need. New `Story1RegistrationBurstTest` (Story 1,
   renumbered — 125 tasks, sequential). 51 FRs total.
+- Did a targeted audit of classic IRC protocol details prompted by one
+  named example (a dot-free `serverName` being ambiguous with a
+  nickname) and found four real gaps, the biggest being the most classic
+  IRC implementation mistake there is: nickname/channel comparisons were
+  never specified as case-insensitive anywhere in this spec. Fixed via
+  FR-052 (RFC 2812 §2.2's "rfc1459" casemapping — ASCII fold plus
+  `[]\^` ↔ `{}|~` — applied to FR-002/FR-003 uniqueness and every
+  command that targets a nickname/channel; original casing is stored
+  and displayed, only comparison folds case). Also fixed: (1) the named
+  example itself — FR-050 amended to require `serverName` contain a
+  `.`, rejected at config-load time if not, with the hostname fallback
+  guaranteeing it too (a synthetic suffix if the host's own hostname
+  lacks one) — nicknames can never contain a `.`, so this is what keeps
+  a server-originated prefix unambiguous from a client one; (2) FR-015
+  amended — command recognition MUST be case-insensitive
+  (`join`/`JOIN`); (3) new FR-053 — numerics sent before a session has
+  claimed a nickname (`431`/`432`/`433`) MUST address `*`, not an empty
+  or unclaimed value. All four fixed across spec.md, data-model.md,
+  research.md, contracts/, and tasks.md (text-only task edits, no
+  renumbering — still 125 tasks). 53 FRs total.
+- Ran `/speckit-clarify` again and closed the one remaining gap the scan
+  found: message-text encoding was never addressed anywhere. Added
+  FR-054 — `PRIVMSG`/`NOTICE` bodies, topics, realnames, and channel
+  names MUST be valid UTF-8, rejected under FR-015's generic
+  malformed-message handling (`421`, specifically — not `461`, since the
+  parameter is present, just invalidly encoded, a different failure than
+  a missing one) if not. Explicitly excludes nicknames and the `USER`
+  command's `<user>` parameter, which already have their own
+  ASCII-oriented grammars. Synced across data-model.md (`realname`,
+  `PendingDelivery.body`, `Channel.topic`/`name`), contracts/ (new
+  `Utf8Validator` referenced alongside `Hostmask`/`ChannelName`; channel
+  names reuse `476` since a UTF-8 failure and a grammar failure are the
+  same "not a legal channel name" case from the client's perspective;
+  everything else reuses `421`, no new numeric invented since none
+  exists in the wild to reuse the way `417`/`476` did), and tasks.md
+  (T017, T066, T067, T069, T071, T021 — all text-only, still 125 tasks).
+  54 FRs total.

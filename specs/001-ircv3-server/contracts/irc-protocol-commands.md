@@ -31,6 +31,30 @@ allowance applies. A line exceeding either budget MUST be rejected with
 error distinct from `421`/`461`'s generic malformed-message handling
 (FR-015, FR-049), not silently truncated or partially processed.
 
+Command names are matched case-insensitively (FR-015) — every command
+below is written in canonical uppercase purely for readability, not
+because case is significant on the wire; `join`/`Join`/`JOIN` are the
+same command. Nicknames and channel names are likewise compared
+case-insensitively wherever a command names one as a target (FR-052,
+research.md "IRC casemapping") — `PRIVMSG alice` and `PRIVMSG Alice`
+reach the same client if that client registered as either casing.
+
+Human-readable message text — `PRIVMSG`/`NOTICE` bodies, channel topics,
+realnames, and channel names — MUST be valid UTF-8 (FR-054). A field
+containing an invalid UTF-8 byte sequence is rejected as malformed
+(FR-015, `421 ERR_UNKNOWNCOMMAND`-style rejection — the same generic
+malformed-message handling as any other unparseable message; unlike the
+line-length/channel-grammar cases, this doesn't get a dedicated numeric
+like `417`/`476`, since RFC 1459/2812 predates UTF-8 entirely and no de
+facto standard numeric for this exists to reuse. Not `461
+ERR_NEEDMOREPARAMS` — the parameter is present, just invalidly encoded,
+a different failure than a missing one)
+rather than passed through, silently mistranscoded, or partially
+accepted. This does not apply to nicknames or the `USER` command's
+`<user>` parameter — both are protocol identifiers with their own
+dedicated, ASCII-oriented grammars ("Connection Registration Grammar"
+below), not human-readable content.
+
 Numeric reply references point to [irc-numeric-replies.md](./irc-numeric-replies.md).
 
 Every command below that includes a sender prefix on its outgoing message
@@ -52,7 +76,7 @@ hostmask prefix — not any client's identity.
 | `CAP REQ :<caps>` | C→S | After `CAP LS` | Server enables requested capabilities it supports, declines the rest | `CAP * ACK`/`CAP * NAK` |
 | `CAP END` | C→S | After negotiation | Ends negotiation; registration may complete | (none; unblocks registration) |
 | `NICK <nickname>` | C→S | Session not yet holding a nickname, or changing an existing one | Atomically claims the nickname (FR-002) | `433 ERR_NICKNAMEINUSE` on conflict; silent success otherwise (reflected via subsequent replies) |
-| `USER <user> <mode> <unused> :<realname>` | C→S | Nickname claimed | Completes registration (FR-001) | Registration Completion Burst (below) |
+| `USER <user> <mode> <unused> :<realname>` | C→S | Nickname claimed; `<realname>` MUST be valid UTF-8 (FR-054) | Completes registration (FR-001) | Registration Completion Burst (below); `421 ERR_UNKNOWNCOMMAND`-style malformed-message rejection (FR-015) if `<realname>` isn't valid UTF-8 |
 
 #### Connection Registration Grammar
 
@@ -121,6 +145,11 @@ defined, the same class of gap the nickname/channel grammars closed for
 - Only `message-tags`, `server-time`, and `echo-message` may appear in the
   `CAP LS` response for this release (FR-025); the SASL capability
   referenced in the spec is deferred with Story 3 and MUST NOT appear.
+- Any numeric reply sent while a session has not yet claimed a nickname
+  — most notably `431`/`432`/`433`, all reachable during `NICK`
+  negotiation before registration completes — MUST address that reply
+  to `*` (FR-053), the standard "no nickname yet" placeholder, not an
+  empty value or a nickname the session hasn't actually claimed.
 
 ### Connection Keep-Alive
 
@@ -146,11 +175,11 @@ defined, the same class of gap the nickname/channel grammars closed for
 |---|---|---|---|---|
 | `JOIN <channel>` | C→S | `REGISTERED` session; `channel` conforms to the Channel Name Grammar (below) | Creates the channel if absent (first joiner becomes operator, FR-013) or joins existing (FR-003) | `JOIN` echoed to all members; `353 RPL_NAMREPLY` + `366 RPL_ENDOFNAMES` to joiner; `476 ERR_BADCHANMASK` if `channel` violates the grammar |
 | `PART <channel> [:reason]` | C→S | Session is a member | Removes membership | `PART` echoed to all (former) members |
-| `PRIVMSG <target> :<text>` | C→S | `REGISTERED` session; for a channel target, membership is NOT required by default — only when that channel's `members-only` restriction is active (FR-004, FR-013/FR-043); for a nickname target, it must be any registered nickname | Delivers to all other channel members (FR-004) or the direct-message recipient (FR-005) | `PRIVMSG` delivered to recipients; `echo-message`-negotiated senders also receive their own message back; `442 ERR_NOTONCHANNEL` if `members-only` is active and the sender isn't a member (FR-013/FR-043) |
+| `PRIVMSG <target> :<text>` | C→S | `REGISTERED` session; for a channel target, membership is NOT required by default — only when that channel's `members-only` restriction is active (FR-004, FR-013/FR-043); for a nickname target, it must be any registered nickname; `<text>` MUST be valid UTF-8 (FR-054) | Delivers to all other channel members (FR-004) or the direct-message recipient (FR-005) | `PRIVMSG` delivered to recipients; `echo-message`-negotiated senders also receive their own message back; `442 ERR_NOTONCHANNEL` if `members-only` is active and the sender isn't a member (FR-013/FR-043); `421 ERR_UNKNOWNCOMMAND`-style malformed-message rejection (FR-015) if `<text>` isn't valid UTF-8 |
 | `NOTICE <target> :<text>` | C→S | Same as `PRIVMSG` | Same delivery semantics as `PRIVMSG`, but MUST NOT trigger automated replies | Delivered like `PRIVMSG` |
 | `QUIT [:reason]` | C→S | Any time | Disconnects; removes all channel memberships (FR-017) | `QUIT` echoed to all affected channels |
 | `TOPIC <channel>` | C→S | `REGISTERED` session; no membership required for a non-private/secret channel, or for a member/administrator of one (FR-040/FR-041's discovery framing, subject to FR-047) | Returns `channel`'s current topic | `332 RPL_TOPIC` if a topic is set, `331 RPL_NOTOPIC` if not; `403 ERR_NOSUCHCHANNEL` if `channel` doesn't exist, or is private/secret and the requester is neither a member nor an administrator (FR-047 — same response either way) |
-| `TOPIC <channel> :<topic>` | C→S | `REGISTERED` session; sender is a channel operator (FR-013) | Sets/changes `channel`'s topic (FR-040) | `TOPIC` echoed to all members on success; `482 ERR_CHANOPRIVSNEEDED` if sender isn't an operator |
+| `TOPIC <channel> :<topic>` | C→S | `REGISTERED` session; sender is a channel operator (FR-013); `<topic>` MUST be valid UTF-8 (FR-054) | Sets/changes `channel`'s topic (FR-040) | `TOPIC` echoed to all members on success; `482 ERR_CHANOPRIVSNEEDED` if sender isn't an operator; `421 ERR_UNKNOWNCOMMAND`-style malformed-message rejection (FR-015) if `<topic>` isn't valid UTF-8 |
 | `NAMES <channel>` | C→S | `REGISTERED` session; no membership required for a non-private/secret channel, or for a member/administrator of one (FR-041, subject to FR-047) | Returns `channel`'s current membership list, the same on-demand query `JOIN` already triggers automatically | `353 RPL_NAMREPLY` + `366 RPL_ENDOFNAMES`; `461 ERR_NEEDMOREPARAMS` if `channel` is omitted; `403 ERR_NOSUCHCHANNEL` under the identical private/secret condition `TOPIC` uses (FR-047) |
 | `LIST` | C→S | `REGISTERED` session | Returns every currently active channel (FR-042), except a private/secret one the requester isn't a member of and isn't an administrator for (FR-047) — silently omitted, not flagged as skipped | One `322 RPL_LIST` per (visible) channel, then `323 RPL_LISTEND` |
 
@@ -178,6 +207,12 @@ was previously missing and needed its own definition (FR-048).
   already claimed still succeeds (joins the existing channel, FR-003);
   a syntactically invalid name is rejected before uniqueness is even
   considered.
+- A third, independent check: the name MUST also be valid UTF-8 (FR-054)
+  — the byte-exclusion grammar above doesn't by itself guarantee
+  well-formed UTF-8, so a name can pass it and still fail this check.
+  Also `476 ERR_BADCHANMASK`, the same numeric a grammar violation uses —
+  both are "this isn't a legal channel name" from the client's point of
+  view, not two different failure classes worth distinguishing.
 
 **Contract notes**:
 - `TOPIC`-viewing, `NAMES`, and `LIST` deliberately do not require channel

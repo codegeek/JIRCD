@@ -28,6 +28,12 @@ FR-002/FR-012/FR-014/FR-015's "clear error" requirements (constitution
 Principle III: error messages state what went wrong and what the
 client/administrator can do about it).
 
+Every numeric reply's target field is the receiving session's current
+nickname — except before one has been claimed, when it MUST be `*`
+(FR-053, irc-protocol-commands.md "Connection Registration") — this
+applies to `431`/`432`/`433` below, the numerics most likely to fire
+during that window.
+
 ## Used in This Release
 
 | Numeric | Name | Triggered by | FR |
@@ -50,7 +56,7 @@ client/administrator can do about it).
 | `401` | `ERR_NOSUCHNICK` | `WHOIS` for a nickname that isn't connected | FR-037 |
 | `403` | `ERR_NOSUCHCHANNEL` | `TOPIC`/`NAMES` for a channel that doesn't exist, or that is private/secret and the requester is neither a member nor an administrator (identical response either way, FR-047) | FR-047 |
 | `417` | `ERR_INPUTTOOLONG` | A line exceeding the 512-byte base limit or the 4096-byte `message-tags` allowance (FR-049) — not part of RFC 1459/2812 (there is no numeric defined in that gap, 416-420), but a widely-adopted de facto standard purpose-built for exactly this case, the same way this project already treats IRCv3's `CAP` numerics as belonging alongside the RFC set | FR-049 |
-| `421` | `ERR_UNKNOWNCOMMAND` | Malformed/unrecognized command, or a wire-protocol-recognized command with no handler in this release | FR-015 |
+| `421` | `ERR_UNKNOWNCOMMAND` | Malformed/unrecognized command, a wire-protocol-recognized command with no handler in this release, or a human-readable-content parameter (`PRIVMSG`/`NOTICE` body, topic, realname, channel name) containing invalid UTF-8 (FR-054) | FR-015, FR-054 |
 | `431` | `ERR_NONICKNAMEGIVEN` | `NICK` with no argument | FR-001 (input validation) |
 | `432` | `ERR_ERRONEUSNICKNAME` | `NICK` violating the nickname grammar (invalid leading/body characters or over 9 characters) | irc-protocol-commands.md "Connection Registration Grammar" |
 | `433` | `ERR_NICKNAMEINUSE` | `NICK` naming an already-claimed nickname | FR-002 |

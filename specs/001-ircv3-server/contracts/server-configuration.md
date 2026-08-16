@@ -12,7 +12,9 @@ validation behavior it MUST provide (FR-011, FR-012, FR-034).
 serverName: irc.example.net  # optional (FR-050) — source prefix on every server-originated
                               # message; if omitted, falls back to the deployment host's own
                               # network hostname (research.md "Server identity") — not a value
-                              # the server refuses to start without
+                              # the server refuses to start without. MUST contain a "." if
+                              # explicitly set (nicknames never can, FR-002/FR-050) — a
+                              # dot-free value here is a validation error, not accepted as-is
 
 listeners:
   - port: 6667
@@ -52,11 +54,15 @@ administratorCredentials:
   `rateLimit` value MUST cause the server to refuse to start with an error
   naming the exact offending key/value (FR-012, SC-008) — not a stack
   trace, not a silent default substitution.
-- **`serverName` has no invalid-value case**: unlike every other key
-  above, any non-empty string is accepted, and omitting it entirely is
-  valid — it is not part of the "refuse to start" validation set (FR-050,
-  research.md "Server identity"); the deployment host's own network
-  hostname is used if it's absent.
+- **`serverName` IS part of the "refuse to start" validation set** if
+  explicitly set: it MUST contain at least one `.` (FR-050, research.md
+  "Server identity" — nicknames, FR-002's grammar, never can, so this is
+  what keeps a server-originated prefix unambiguous); a dot-free value is
+  rejected the same way a malformed listener or rate-limit value is.
+  Omitting `serverName` entirely is valid — the deployment host's own
+  network hostname is used instead, itself guaranteed to satisfy the dot
+  requirement (a synthetic suffix is appended if the host's own hostname
+  lacks one).
 - **Section/kind mismatch is also a load-time validation error**: an id
   MUST appear in the section matching its actual kind — a `ServerExtension`
   id (e.g., `cloak`, `admin`) listed under `capabilities`, or a

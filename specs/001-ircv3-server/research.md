@@ -117,7 +117,12 @@ validating a nickname before sending `NICK` needs the identical rule.
 **Decision**: `ServerConfiguration.serverName` (data-model.md) is the
 source/prefix on every server-originated message, administrator-
 configurable with a zero-configuration fallback to the deployment host's
-own network hostname if unset. `serverVersion` is a sibling field, but
+own network hostname if unset. It MUST contain at least one `.`
+character in either case — an administrator-supplied value without one
+is a load-time validation error (FR-012); the hostname fallback appends
+a fixed synthetic suffix (`.local`) if the host's own hostname lacks a
+dot, rather than only enforcing the rule against explicit input.
+`serverVersion` is a sibling field, but
 *not* administrator-configurable — sourced from the build/release itself
 (e.g., a Gradle-generated build-time property, exact mechanism a
 planning-phase decision) — since it identifies the running software, not
@@ -174,6 +179,55 @@ once a future extension contributes a flag (FR-043).
   (research.md convention: reuse the exact-fit existing numeric, the same
   choice already made for `476`/`417`); sending an empty MOTD body would
   misrepresent that one was configured.
+- *Don't require a dot in `serverName`; leave prefix-parsing ambiguity as
+  a client-side concern*: rejected — this server controls the one input
+  (`serverName`) that determines whether the ambiguity can even arise in
+  the first place; refusing to guarantee it costs nothing to fix here and
+  pushes a real interoperability risk onto every client instead, for no
+  benefit to the administrator (an unrelated string still identifies the
+  server just as well with a dot in it as without).
+
+## IRC casemapping (FR-052)
+
+**Decision**: Nickname and channel name comparisons — uniqueness
+(FR-002, FR-003) and target resolution for every command that names one
+— use IRC's traditional "rfc1459" casemapping: standard ASCII
+letter-folding (`A`-`Z` with `a`-`z`) plus four additional pairs, `[`/`{`,
+`]`/`}`, `\`/`|`, and `^`/`~` (RFC 2812 §2.2). `ClientSession.nickname`
+and `Channel.name` (data-model.md) store the *original* casing a client
+registered/created with — display, hostmasks, and echoes all show that
+original casing — only the *comparison* used for uniqueness and lookup
+folds case; nothing normalizes the stored value itself.
+
+**Rationale**: This is IRC's own, decades-old resolution to a problem
+every deployed network still has to solve: comparing "Alice" and "alice"
+byte-for-byte would let both register, contradicting FR-002's own "single
+namespace" language, and would make `PRIVMSG alice` fail to reach a
+client that registered as "Alice" — a real, immediately-visible
+correctness bug, not an edge case, since case variation in how people
+type nicknames is constant in practice. This was a genuine gap: FR-002/
+FR-003 committed to uniqueness without ever specifying *how* two names
+are compared, an unstated assumption easy to get wrong (naive
+byte-for-byte comparison) precisely because it looks like it needs no
+specification at all. Storing the original casing (not a folded/
+normalized form) matters for the same reason `UserIdentity.presentedForm`
+already distinguishes storage from display elsewhere in this data model:
+a client that typed "Alice" expects to see "Alice," not "alice," even
+though the *server* now treats "alice" as unavailable to anyone else.
+
+**Alternatives considered**:
+- *Plain ASCII case-folding only (no `[]\^` special-character pairs)*:
+  rejected — this is IRCv3's `CASEMAPPING=ascii` variant, a real,
+  supported option on some networks, but "rfc1459" (the fuller mapping)
+  remains the de facto default across the deployed IRC ecosystem this
+  project aims to be compatible with; nothing in this project's scope
+  calls for deviating from the default.
+- *Normalize stored nicknames/channel names to a canonical case*:
+  rejected — would silently rewrite what a client typed into something
+  else, a worse UX than the (correct) alternative of keeping the
+  original casing and only folding case for comparison; also unnecessary
+  extra state (the "canonical form" vs. the "display form") for no
+  benefit over folding at comparison time.
 
 ## Networking model
 

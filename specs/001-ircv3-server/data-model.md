@@ -23,7 +23,7 @@ guarded by this aggregate.
 | `channel` (I/O) | `SocketChannel` | The underlying connection (plaintext or TLS-wrapped, FR-018). |
 | `outboundQueue` | bounded queue of `PendingDelivery` (below) | The *only* path by which any other session delivers a message to this one (FR-004 fan-out); drained exclusively by this session's own writer thread, per research.md "Message fan-out concurrency model". Never written to directly from another session's thread. Queue elements are **not** pre-formatted wire lines — this session's own writer thread does that at drain time, using this session's own `negotiatedCapabilities` (see `PendingDelivery`). |
 | `registrationState` | enum: `CONNECTING`, `REGISTERED`, `CLOSING` | A session must reach `REGISTERED` (nickname + user info accepted, FR-001) before most commands are valid. |
-| `nickname` | string, 0..1 | Present once registration succeeds; unique across all sessions (FR-002); MUST also conform to the nickname grammar (contracts/irc-protocol-commands.md "Connection Registration Grammar") — uniqueness and format are independent checks (`433` vs. `432`). |
+| `nickname` | string, 0..1 | Present once registration succeeds; unique across all sessions (FR-002), compared case-insensitively per FR-052's casemapping (research.md "IRC casemapping"), not stored/compared in a normalized form — the original casing a client registered with is preserved and shown to others, only the *comparison* folds case; MUST also conform to the nickname grammar (contracts/irc-protocol-commands.md "Connection Registration Grammar") — uniqueness and format are independent checks (`433` vs. `432`). |
 | `negotiatedCapabilities` | set of `Capability` names | Populated via CAP negotiation (FR-006, FR-007); empty for clients that never negotiate (FR-008). |
 | `channelMemberships` | set of `Channel` references | Channels this session has joined; drives cleanup on disconnect (FR-017). |
 | `rateLimitBucket` | token bucket state | Per-connection (FR-016); see research.md "Rate limiting". |
@@ -78,7 +78,8 @@ currently holds it).
 | Field | Type | Notes |
 |---|---|---|
 | `nickname` | string | See FR-002 uniqueness rule above. |
-| `username` / `realname` | string | Supplied at registration (FR-001); not independently unique. |
+| `username` | string | Supplied at registration (FR-001); not independently unique; subject to `Hostmask`'s username content rule (contracts/irc-protocol-commands.md "Connection Registration Grammar"), not FR-054's UTF-8 requirement — it becomes `ident` in the wire hostmask, a protocol identifier, not human-readable content. |
+| `realname` | string | Supplied at registration (FR-001); not independently unique; MUST be valid UTF-8 (FR-054) — rejected as malformed (FR-015) if not, the same as an invalid `PRIVMSG` body or topic. |
 | *(computed)* `presentedForm` | string | `nickname!ident@displayHostname` (FR-030) — `displayHostname` is `ClientSession.realHostname` unless the `cloak` `ServerExtension` is currently enabled — live-checked against `ExtensionRegistry` state at computation time, never cached — in which case it is that extension's obfuscated value (FR-031, research.md "Cloak extension boundary"). Never persisted; computed at send time so a mid-session extension toggle is reflected immediately. |
 
 *(Deferred, not modeled here: linking a `UserIdentity` to a persistent
@@ -99,7 +100,7 @@ a channel a `PRIVMSG` was sent to).
 | `senderPresentedForm` | string | The sender's `UserIdentity.presentedForm` at send time — resolved by live-checking the current `cloak` `ServerExtension` state at that moment (FR-031), never cached. Computed once by the sender's thread, not per recipient, since cloaking is a uniform display transform applied identically to every viewer — unlike a negotiated capability, no recipient-specific input ever factors into this value (see Validation rules below). |
 | `command` | string | e.g., `PRIVMSG`, `NOTICE`, `JOIN`, `KICK` — which wire command this delivery represents. |
 | `target` | string | Channel name or nickname the original command targeted. |
-| `body` | string, 0..1 | The message text, where applicable (absent for e.g. a bare `JOIN`/`PART` notification). |
+| `body` | string, 0..1 | The message text, where applicable (absent for e.g. a bare `JOIN`/`PART` notification). MUST be valid UTF-8 (FR-054) — a `PRIVMSG`/`NOTICE` carrying an invalid byte sequence is rejected as malformed (FR-015) before a `PendingDelivery` is ever constructed for it, so this field never holds one. |
 | `sentAt` | instant | Captured once, by the sender's thread, at the moment of sending — the value the `server-time` capability's `time` tag reflects for every recipient (not each recipient's own drain time). |
 
 **Validation rules**: `PendingDelivery` MUST NOT contain a `message-tags`
@@ -128,12 +129,12 @@ enforced at channel-creation time, not left to callers).
 
 | Field | Type | Notes |
 |---|---|---|
-| `name` | string | Unique across the server (FR-003); first JOIN of a name creates it. |
+| `name` | string | Unique across the server (FR-003), compared case-insensitively per FR-052's casemapping (research.md "IRC casemapping") — `#Foo` and `#foo` are the same channel, not two; the casing of whichever `JOIN` created the channel is preserved and shown to others. MUST conform to FR-048's grammar *and* be valid UTF-8 (FR-054) — FR-048's byte-level exclusions (space, comma, control characters) don't by themselves guarantee well-formed UTF-8, so this is an additional, independent check, not implied by the grammar alone. First JOIN of a name creates it. |
 | `members` | set of `ClientSession` references | Current membership; drives message fan-out (FR-004). |
 | `operators` | set of `ClientSession` references (subset of `members`) | Who may perform moderation actions (FR-013, FR-014). |
 | `voiced` | set of `ClientSession` references (subset of `members`, independent of `operators`) | Who, in addition to `operators`, may send while `MODERATED` is active (FR-045). Granted/revoked only by an operator via `MODE +v`/`-v <nickname>` (FR-013, FR-045) — unlike `operators`, nothing grants this at JOIN time; a channel MAY have any number of voiced members, none of whom need to be operators. |
 | `activeModes` | set of `ChannelMode` (below) | Which recognized *channel-scoped* mode flags are currently set on this channel. `MEMBERS_ONLY` and `MODERATED` (FR-013) are the only two flags any code defines in this release, but the type is an open set, not a closed enum — see `ChannelMode` below for why (FR-043, research.md "Channel/user mode extensibility"). The two flags are independent: a channel MAY have neither, either, or both set at once (matches standard IRC's per-flag `MODE` semantics — this replaces an earlier, incorrect single-mutually-exclusive-state design). Set/cleared only by an operator via `MODE` (FR-013, FR-014). `voice` (FR-045) is a *`MEMBER`-scoped* `ChannelMode` (see `ChannelMode.kind` below) — its state lives in `voiced` above, not here, the same way `operator` status lives in `operators` rather than `activeModes`. |
-| `topic` | string, 0..1 | Absent (no topic set) by default. Visible to any client via `TOPIC` regardless of membership (FR-041's discovery framing applies here too); settable only by an `operator` (FR-040). Distinct from `activeModes` — viewing/setting the topic is not a "who may send a `PRIVMSG`" concern. |
+| `topic` | string, 0..1 | Absent (no topic set) by default. Visible to any client via `TOPIC` regardless of membership (FR-041's discovery framing applies here too); settable only by an `operator` (FR-040). Distinct from `activeModes` — viewing/setting the topic is not a "who may send a `PRIVMSG`" concern. MUST be valid UTF-8 (FR-054) — a `TOPIC`-set attempt with an invalid byte sequence is rejected as malformed (FR-015), leaving the previous topic (or absence of one) unchanged. |
 
 **Validation rules**:
 - `name` uniqueness is enforced the same way as nickname uniqueness (single
@@ -393,7 +394,7 @@ extension state changes.
 | `listeners` | list of {port, tlsEnabled} | Plaintext and/or TLS listeners (FR-018 — both may coexist). |
 | `rateLimit` | {bucketSize, refillRate} | FR-016; see research.md "Rate limiting". |
 | `administratorCredentials` | list of {username, hashedPassword} | Verified by FR-034's in-band privilege command; hashed per research.md "Administrator credential storage" — never stored or logged in plain text. |
-| `serverName` | string, 0..1 | FR-050. The source/prefix on every server-originated message (numeric replies, `RPL_WELCOME`, etc.) — the server-side counterpart to a client's `nickname!ident@hostname` (FR-030). Absent (not set by the administrator) is valid; `jircd-server` MUST then fall back to the deployment host's network hostname (research.md "Server identity"), never an empty prefix. |
+| `serverName` | string, 0..1 | FR-050. The source/prefix on every server-originated message (numeric replies, `RPL_WELCOME`, etc.) — the server-side counterpart to a client's `nickname!ident@hostname` (FR-030). Absent (not set by the administrator) is valid; `jircd-server` MUST then fall back to the deployment host's network hostname, appending a fixed synthetic suffix if that hostname itself has no `.` (research.md "Server identity"), never an empty prefix. MUST contain at least one `.` in either case — nicknames (FR-002's grammar) never can, so this is what keeps a server-originated prefix unambiguous from a client one when a message has no `!`/`@` component. |
 | `serverVersion` | string | FR-051. Not administrator-configurable — sourced from the build/release itself (research.md "Server identity"), included in the registration-completion burst (`RPL_YOURHOST`/`RPL_MYINFO`) alongside `serverName`. |
 
 **Validation rules**: An invalid configuration (unknown extension id,
@@ -411,7 +412,11 @@ know which one; only the configuration *file* has two sections.
 `serverVersion` MUST NOT appear in the configuration file schema at all
 — unlike every other field here, it is not administrator input, so there
 is no "invalid value" case for it to participate in load-time
-validation.
+validation. An administrator-supplied `serverName` containing no `.`
+MUST be rejected at load time with the same specific-error treatment
+every other invalid configuration value gets (FR-012) — it is one of
+the values this validation set covers, not exempt from it the way
+`serverVersion` is.
 
 ## Entity Relationships
 

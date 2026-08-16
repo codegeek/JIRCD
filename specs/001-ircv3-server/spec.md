@@ -30,6 +30,7 @@
 - Q: What should the wire-protocol validation rules be for a channel name? → A: RFC 2812 channel grammar — a leading `#` (standard channel type only, no `&`/`+`/`!` variants) followed by 1 to 49 additional characters, excluding space, comma, and control characters (50 characters total, maximum) — the same rigor already applied to nickname format (contracts/irc-protocol-commands.md "Connection Registration Grammar"), rejected with a dedicated error distinct from "nickname in use"-style errors.
 - Q: What should happen when the server is at capacity and a new client tries to connect? → A: No explicit server-level limit — the server does not enforce its own connection cap or send a dedicated rejection message; capacity is bounded only by OS/network resources and whatever an administrator configures at the deployment layer. SC-003's 1,000-connection floor is a sustained-operation target, not a hard ceiling with special in-protocol handling.
 - Q: Should the server enforce a maximum protocol line length, and how should an over-length message be handled? → A: 512-byte base line limit (command+params, CRLF-inclusive, classic IRC), plus the IRCv3 message-tags specification's required server-side allowance of up to 4096 additional bytes for the tags section (since FR-025 already implements message-tags). A line exceeding either budget MUST be rejected under FR-015's existing malformed-message handling, not silently truncated.
+- Q: Should the server enforce/assume a specific character encoding for message text, or treat it as an opaque byte stream? → A: UTF-8, validated — message text (`PRIVMSG`/`NOTICE` bodies, topics, realnames, and channel names) MUST be valid UTF-8; the server MUST reject a message containing an invalid UTF-8 byte sequence in one of these fields as malformed (FR-015), not pass it through, mistranscode it, or silently discard just the invalid portion.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -311,7 +312,12 @@ their presented (not real) hostname.
   excessive length)?
 - What does a client actually receive once registration succeeds, beyond
   a bare "you're welcome here" — and what happens if the administrator
-  never configured a server name at all?
+  never configured a server name at all, or the deployment host's own
+  hostname doesn't contain a "." either?
+- What happens when a client registers "Alice," disconnects, and a
+  different client then tries to register "alice" — does the server
+  treat these as the same nickname (rejecting the second) or two
+  different ones?
 - How does the server handle a client that sends messages faster than an
   acceptable rate (flooding), whether accidental or malicious?
 - What happens when a client disconnects abruptly (no clean quit) while
@@ -394,13 +400,16 @@ their presented (not real) hostname.
   request the same nickname concurrently, exactly one MUST succeed (the
   one the server commits first) and every other request for that name —
   concurrent or later — MUST be rejected with the same "nickname in use"
-  error, with no window in which two clients both hold the name.
+  error, with no window in which two clients both hold the name. This
+  uniqueness check is case-insensitive (FR-052) — "Alice" and "alice"
+  are the same nickname, not two different ones.
 - **FR-003**: The server MUST allow registered clients to create or join
   named channels and to leave channels they have joined. Channel names
   MUST form a single, server-wide unique namespace: a given channel name
   identifies exactly one channel at a time, so joining a name that
   already exists MUST add the client to that existing channel rather than
-  creating a separate, duplicate one.
+  creating a separate, duplicate one. This uniqueness check is
+  case-insensitive (FR-052) — "#Foo" and "#foo" are the same channel.
 - **FR-004**: The server MUST deliver messages sent to a channel to every
   other client currently joined to that channel, attributed to the correct
   sender. Sending a channel message MUST NOT itself require the sender to
@@ -452,7 +461,12 @@ their presented (not real) hostname.
   clients who do not hold the required channel privileges, with a clear
   permissions error.
 - **FR-015**: The server MUST detect and reject malformed protocol
-  messages without crashing or disconnecting unrelated clients.
+  messages without crashing or disconnecting unrelated clients. Command
+  recognition MUST be case-insensitive — `join`, `Join`, and `JOIN` MUST
+  all match the same command — the same way `PRIVMSG`/`NOTICE`/`JOIN`
+  etc. are documented throughout this specification in a single
+  canonical case only for readability, not to imply that case is
+  significant on the wire.
 - **FR-016**: The server MUST limit the rate of messages or commands
   accepted from a single connection to protect overall service
   availability for other clients.
@@ -745,7 +759,14 @@ their presented (not real) hostname.
   client hostmask prefix, but identifying the server, not a user. If the
   administrator has not explicitly configured one, the server MUST fall
   back to a reasonable default rather than sending messages with an
-  empty or malformed source (see Assumptions).
+  empty or malformed source (see Assumptions). The server's name MUST
+  contain at least one "." character, whether administrator-configured
+  or defaulted — an administrator-supplied value without one MUST be
+  rejected the same way any other invalid configuration value is
+  (FR-012). This is not cosmetic: a nickname (FR-002's grammar) can never
+  contain a ".", so a dot-free server name would be indistinguishable
+  from a nickname to a client parsing a message's source, exactly the
+  ambiguity real IRC clients rely on the "." to resolve.
 - **FR-051**: Upon successful registration completion (FR-001), the
   server MUST send the newly registered client a registration-completion
   burst consisting of, in order: a welcome confirmation; the server's own
@@ -758,6 +779,35 @@ their presented (not real) hostname.
   burst-completion signal that will never arrive — a client MUST be able
   to treat this indication as "registration burst finished," not just
   RPL_WELCOME alone.
+- **FR-052**: Nicknames and channel names MUST be compared
+  case-insensitively wherever the server determines whether two names
+  are "the same" — uniqueness checks (FR-002, FR-003), and resolving the
+  target of any command that names a nickname or channel (e.g.,
+  `PRIVMSG`, `WHOIS`, `KICK`, `MODE`, `TOPIC`, `NAMES`) — using IRC's
+  traditional casemapping, not simple byte-for-byte comparison: standard
+  ASCII letters fold together (`A`-`Z` with `a`-`z`), and in addition
+  `[` folds with `{`, `]` with `}`, `\` with `|`, and `^` with `~` (RFC
+  2812 §2.2 — IRC's Scandinavian-origin casemapping, still the
+  near-universal default across deployed IRC networks today). A client
+  registered as "Alice" MUST be reachable via `PRIVMSG alice`, and MUST
+  block a second client from also registering "alice" or "ALICE".
+- **FR-053**: A numeric reply sent to a session that has not yet
+  completed registration (FR-001) — most notably `431`/`432`/`433`, all
+  of which can fire while a client is still negotiating its nickname —
+  MUST address that reply to `*` (the standard placeholder for "no
+  nickname yet"), not an empty value, not a value the client hasn't
+  claimed yet, and not omitted entirely.
+- **FR-054**: Message text the server interprets as human-readable
+  content — `PRIVMSG`/`NOTICE` bodies, channel topics, realnames, and
+  channel names (FR-048's grammar, further constrained by this
+  requirement) — MUST be valid UTF-8. The server MUST reject a message
+  containing an invalid UTF-8 byte sequence in one of these fields as
+  malformed (FR-015), the same way any other malformed protocol message
+  is rejected — not pass the invalid bytes through unvalidated,
+  mistranscode them, or silently discard just the invalid portion while
+  accepting the rest. This does not apply to nicknames, which already
+  have their own strict, ASCII-only grammar (FR-002) that valid UTF-8
+  membership doesn't add anything to.
 
 ### Key Entities
 
@@ -890,10 +940,15 @@ their presented (not real) hostname.
   server falls back to the deployment host's own network hostname rather
   than an empty or placeholder value — a reasonable, zero-configuration
   default consistent with how most real IRC servers behave, not a value
-  requiring administrator action before the server can start. The
-  server's software version (used alongside the name, FR-051) is derived
-  from the build/release itself, not administrator-configured — exact
-  sourcing (e.g., a build-time property) is a planning concern.
+  requiring administrator action before the server can start. If that
+  hostname itself doesn't contain a "." (common for a bare local/
+  container hostname with no domain suffix), the server appends a fixed,
+  clearly-synthetic suffix (e.g., `.local`) so FR-050's dot requirement
+  holds even in the zero-configuration case, rather than only being
+  enforced against explicit administrator input. The server's software
+  version (used alongside the name, FR-051) is derived from the
+  build/release itself, not administrator-configured — exact sourcing
+  (e.g., a build-time property) is a planning concern.
 - Channel modes beyond moderated-mode and members-only (FR-013/FR-043),
   and user modes entirely (FR-044), are recognized at the wire-protocol
   level — a future client library can still parse them from any server —
