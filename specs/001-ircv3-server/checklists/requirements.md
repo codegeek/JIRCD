@@ -290,3 +290,46 @@
   exists in the wild to reuse the way `417`/`476` did), and tasks.md
   (T017, T066, T067, T069, T071, T021 — all text-only, still 125 tasks).
   54 FRs total.
+- Implemented `RPL_ISUPPORT` (numeric `005`), resolving a deferral this
+  project had explicitly left open earlier: "revisit if a future
+  capability needs to advertise server limits/features this way"
+  (irc-numeric-replies.md's original `005` note). FR-054's UTF-8
+  enforcement was exactly that trigger — `UTF8ONLY` is the standard
+  token for declaring it, and a server enforcing UTF-8 without
+  advertising it leaves clients to discover that by trial and error.
+  Added FR-055 and a new `SupportedFeatures` data-model concept (a
+  computed, registration-time snapshot, not stored state) with a
+  deliberately minimal, fixed token set — `CASEMAPPING`, `CHANTYPES`,
+  `NICKLEN`, `CHANNELLEN`, `MODES`, `CHANMODES`, `PREFIX`, `UTF8ONLY` —
+  every token restating a value already committed to elsewhere (FR-052
+  casemapping, FR-048 grammar limits, FR-045/FR-046 prefixes), none a
+  new setting. `CHANMODES` and `004`'s mode-letter list read the same
+  live `ChannelMode` catalog, so they cannot disagree by construction.
+  Tokens with no concrete answer in this spec (`TOPICLEN`, `CHANLIMIT`,
+  `NETWORK`, `TARGMAX`) are deliberately omitted rather than sent with
+  an invented value. Synced across spec.md (FR-055, FR-051 amended),
+  data-model.md (new `SupportedFeatures` section), research.md (new
+  "ISUPPORT / RPL_ISUPPORT" decision), contracts/ (`005`'s Reserved
+  `RPL_BOUNCE`→Used-as-`RPL_ISUPPORT` resolution, Registration
+  Completion Burst table), and tasks.md (T066, T058 — text-only, still
+  125 tasks). 55 FRs total.
+- Corrected a modeling mistake in `SupportedFeatures` caught immediately
+  after introducing it: it was described as computed per `ClientSession`
+  at registration time, mirroring `UserIdentity.presentedForm` — but
+  every one of its tokens is either a fixed constant or derived from
+  server-wide `ExtensionRegistry` state, none varies by session. Fixed
+  to server-scoped: fixed tokens are constants; `CHANMODES`/`PREFIX`
+  (the only tokens with anything to recompute) are recomputed on
+  `ExtensionRegistry` state transitions, not on every registration —
+  avoids SC-003's 1,000 concurrent connections each redundantly walking
+  an unchanged `ChannelMode` catalog. Also fixed a latent contradiction
+  this exposed: an earlier research.md "Alternatives considered" entry
+  had argued *against* caching `CHANMODES` (in favor of reading it fresh
+  every registration) — the opposite of the now-corrected design;
+  rewritten to explain the reconsideration rather than leave the
+  contradiction standing. New Foundational task (`ExtensionRegistry`
+  owns `SupportedFeatures`) inserted before the `USER` handler that
+  reads it; tasks.md renumbered — 126 tasks, sequential. No FR change
+  (FR-055 already described *what* is advertised; this was a
+  data-model/task-level correction of *when* it's computed). 55 FRs
+  total.

@@ -42,6 +42,7 @@ during that window.
 | `002` | `RPL_YOURHOST` | Registration Completion Burst | FR-050, FR-051 |
 | `003` | `RPL_CREATED` | Registration Completion Burst | FR-051 |
 | `004` | `RPL_MYINFO` | Registration Completion Burst | FR-043, FR-044, FR-050, FR-051 |
+| `005` | `RPL_ISUPPORT` | Registration Completion Burst — one or more lines (data-model.md `SupportedFeatures`); de facto meaning, not RFC 2812's `RPL_BOUNCE` | FR-051, FR-055 |
 | `422` | `ERR_NOMOTD` | Registration Completion Burst (this release implements no MOTD content) | FR-051 |
 | `322` | `RPL_LIST` | `LIST` (one per active channel) | FR-042 |
 | `323` | `RPL_LISTEND` | End of a `LIST` reply | FR-042 |
@@ -86,7 +87,7 @@ trigger them is "Recognized only" per irc-protocol-commands.md).
 | `002` | `RPL_YOURHOST` *(Used)* | `212` | `RPL_STATSCOMMANDS` | `322` | `RPL_LIST` *(Used)* |
 | `003` | `RPL_CREATED` *(Used)* | `219` | `RPL_ENDOFSTATS` | `323` | `RPL_LISTEND` *(Used)* |
 | `004` | `RPL_MYINFO` *(Used)* | `221` | `RPL_UMODEIS` | `324` | `RPL_CHANNELMODEIS` |
-| `005` | `RPL_BOUNCE` | `234` | `RPL_SERVLIST` | `325` | `RPL_UNIQOPIS` |
+| `005` | `RPL_BOUNCE` *(Used, as `RPL_ISUPPORT`)* | `234` | `RPL_SERVLIST` | `325` | `RPL_UNIQOPIS` |
 | `200` | `RPL_TRACELINK` | `235` | `RPL_SERVLISTEND` | `331` | `RPL_NOTOPIC` *(Used)* |
 | `201` | `RPL_TRACECONNECTING` | `242` | `RPL_STATSUPTIME` | `332` | `RPL_TOPIC` *(Used)* |
 | `202` | `RPL_TRACEHANDSHAKE` | `243` | `RPL_STATSOLINE` | `341` | `RPL_INVITING` |
@@ -154,8 +155,11 @@ trigger them is "Recognized only" per irc-protocol-commands.md).
 - Moving a Reserved numeric to Used is a `jircd-core`/extension change
   (implementing the feature/command that triggers it), not a
   `jircd-protocol` change — the numeric is already correctly modeled.
-- `005 RPL_BOUNCE` is listed per RFC 2812; the de facto `RPL_ISUPPORT`
-  reuse of numeric `005` (near-universal in deployed IRC servers, not
-  itself in RFC 2812) is out of scope for this release and not modeled
-  separately — revisit if a future capability needs to advertise
-  server limits/features this way.
+- `005` is used for its de facto `RPL_ISUPPORT` meaning (FR-055,
+  research.md "ISUPPORT / RPL_ISUPPORT"), not RFC 2812's original
+  `RPL_BOUNCE` — the `RPL_BOUNCE` name in the catalog reflects the RFC's
+  own naming for historical/parsing-completeness purposes, but this
+  server never emits it with that meaning. This resolves the deferral
+  an earlier version of this note carried ("revisit if a future
+  capability needs to advertise server limits/features this way") —
+  FR-054's UTF-8 enforcement was exactly that trigger.

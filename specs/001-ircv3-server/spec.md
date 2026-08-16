@@ -314,6 +314,10 @@ their presented (not real) hostname.
   a bare "you're welcome here" — and what happens if the administrator
   never configured a server name at all, or the deployment host's own
   hostname doesn't contain a "." either?
+- If a future server extension contributing enough additional
+  channel-mode flags (FR-043) made the feature-support advertisement
+  (FR-055) too long for one line, does the server split it across
+  multiple lines the way real IRC servers do, or truncate/fail?
 - What happens when a client registers "Alice," disconnects, and a
   different client then tries to register "alice" — does the server
   treat these as the same nickname (rejecting the second) or two
@@ -770,11 +774,12 @@ their presented (not real) hostname.
 - **FR-051**: Upon successful registration completion (FR-001), the
   server MUST send the newly registered client a registration-completion
   burst consisting of, in order: a welcome confirmation; the server's own
-  identification (its name, FR-050, and software version); and the set
+  identification (its name, FR-050, and software version); the set
   of user-mode and channel-mode letters currently recognized (core plus
-  any currently-enabled extension's, FR-043/FR-044's mode mechanism).
-  Since this release implements no message-of-the-day content, the
-  server MUST conclude the burst with the standard "no message-of-the-day"
+  any currently-enabled extension's, FR-043/FR-044's mode mechanism);
+  the server's supported-features advertisement (FR-055). Since this
+  release implements no message-of-the-day content, the server MUST
+  conclude the burst with the standard "no message-of-the-day"
   indication rather than leaving the client to wait indefinitely for a
   burst-completion signal that will never arrive — a client MUST be able
   to treat this indication as "registration burst finished," not just
@@ -808,6 +813,26 @@ their presented (not real) hostname.
   accepting the rest. This does not apply to nicknames, which already
   have their own strict, ASCII-only grammar (FR-002) that valid UTF-8
   membership doesn't add anything to.
+- **FR-055**: As part of the registration-completion burst (FR-051), the
+  server MUST advertise its feature/limit support to the newly
+  registered client via the standard `RPL_ISUPPORT` mechanism (the de
+  facto reuse of numeric `005` virtually every deployed IRC server and
+  client relies on today, not RFC 2812's original `RPL_BOUNCE` meaning —
+  see Assumptions), split across as many lines as needed to respect
+  FR-049's line-length limit. At minimum, this release MUST advertise:
+  the casemapping in effect (FR-052); which channel-name prefix
+  character(s) are recognized (FR-048); the maximum nickname length
+  (contracts/irc-protocol-commands.md "Connection Registration
+  Grammar"); the maximum channel name length (FR-048); the
+  currently-recognized channel-mode letters, in the standard
+  grouped-by-parameter-behavior form (FR-043); the member-status prefix
+  characters for operator and voice (FR-045/FR-046); and that the server
+  enforces UTF-8 for message text (FR-054), using the standard
+  `UTF8ONLY` token. A future server extension contributing an additional
+  channel-mode flag (FR-043) MUST be reflected here the same way it is
+  already reflected in `004`'s mode-letter list (FR-051) — one source of
+  truth for which channel-mode flags are currently recognized, not two
+  independently-maintained lists that could drift apart.
 
 ### Key Entities
 
@@ -947,8 +972,18 @@ their presented (not real) hostname.
   holds even in the zero-configuration case, rather than only being
   enforced against explicit administrator input. The server's software
   version (used alongside the name, FR-051) is derived from the
-  build/release itself, not administrator-configured — exact sourcing
-  (e.g., a build-time property) is a planning concern.
+  build/release itself, not administrator-configured — sourced from the
+  build system's own version identifier at build time, never entered or
+  overridden separately.
+- FR-055's `RPL_ISUPPORT` advertisement is deliberately a fixed,
+  minimal set — only tokens this specification already has a concrete,
+  decided answer for. Tokens some real networks advertise but this
+  release has no defined limit or behavior for (e.g., a per-client
+  channel-join limit, an explicit topic-length cap distinct from
+  FR-049's general line-length budget, a network name distinct from
+  FR-050's server name, multi-target `PRIVMSG`) are omitted rather than
+  advertised with an invented value — an absent token is the standard,
+  correct way to say "unspecified," not a gap to fill with a guess.
 - Channel modes beyond moderated-mode and members-only (FR-013/FR-043),
   and user modes entirely (FR-044), are recognized at the wire-protocol
   level — a future client library can still parse them from any server —

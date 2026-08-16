@@ -298,6 +298,46 @@ the same role `Capability` plays for `CAP` (data-model.md "Capability").
   this data model deliberately does not attempt to pre-design without a
   concrete consumer driving the actual requirements.
 
+## SupportedFeatures — *Value Object, Server Extensibility (computed, server-scoped)*
+
+The `RPL_ISUPPORT` token set (FR-055) sent as part of every session's
+Registration Completion Burst (FR-051) — not a stored entity, and
+**not** computed per session. Every token is either a fixed constant or
+derived from server-wide state (the `ChannelMode` catalog); nothing here
+depends on anything about the particular session receiving it, so one
+instance is shared by all of them, the same way `ServerConfiguration`
+itself is one shared instance, not something recomputed per connection.
+This is a different relationship to its source state than
+`UserIdentity.presentedForm` has to *its* — `presentedForm` genuinely
+varies per session (a session's own nickname, its own cloak-affected
+hostname) and is deliberately never cached; `SupportedFeatures` varies
+only with server-wide extension state that changes far less often than
+new sessions register, so caching it (recomputed on that state's own
+transitions, not on every read) is the correct shape, not merely a
+convenient one.
+
+| Token | Derived from |
+|---|---|
+| `CASEMAPPING` | Fixed: `rfc1459` (FR-052, research.md "IRC casemapping") |
+| `CHANTYPES` | Fixed: `#` (`ChannelName`'s grammar, FR-048 — this server has one channel-name prefix) |
+| `NICKLEN` | Fixed: `9` (`Hostmask`'s nickname grammar, contracts/irc-protocol-commands.md "Connection Registration Grammar") |
+| `CHANNELLEN` | Fixed: `50` (`ChannelName`'s grammar, FR-048) |
+| `MODES` | Fixed: `1` — this release's `MODE` command handler accepts exactly one flag (and, for `MEMBER`-kind flags, one target) per invocation; not a value distinct from that behavior, a direct statement of it |
+| `CHANMODES` | Recomputed from the `ChannelMode` catalog whenever `ExtensionRegistry`'s state changes (FR-011/FR-012 — an `EXTENSION` command or config reload enabling/disabling a mode-contributing extension), not on every registration: every currently-recognized (core plus enabled-extension) flag, grouped into ISUPPORT's four parameter-behavior categories (`A,B,C,D`) by `kind` — `BOOLEAN` flags populate `D` (no parameter ever); `VALUE`/`LIST` flags would populate `B`/`C`/`A` respectively, but none exist this release (`ChannelMode` validation rules), so those three groups are empty and this recomputation is a no-op in practice (no extension changes it this release) |
+| `PREFIX` | Same recomputation trigger as `CHANMODES`, from the `MEMBER`-kind `ChannelMode` entries and their established prefix characters: `(ov)@+` this release (`operator`→`@`, `voice`→`+`, FR-045/FR-046, contracts/irc-protocol-commands.md "Channel Operations" `@`/`+` convention) — ordered highest-privilege first, the same order `353 RPL_NAMREPLY` already prefixes with |
+| `UTF8ONLY` | Fixed: present, no value (FR-054 — this server always enforces it, so the token is unconditional) |
+
+**Validation rules**: `CHANMODES`'s `D` group (and `B`/`C`, once either is
+non-empty) MUST list exactly the same flags `004 RPL_MYINFO`'s
+channel-mode-letter list already does (FR-051) — both read the same
+`ChannelMode` catalog, recomputed on the same `ExtensionRegistry` state
+transitions, so they cannot disagree by construction, not by convention
+two independent code paths have to remember to keep in sync. A new
+session's registration burst MUST read the current, already-computed
+`SupportedFeatures` value, never trigger its own recomputation — sending
+`005` to 1,000 concurrently-registering clients (SC-003) MUST NOT mean
+1,000 redundant walks of the same, unchanged `ChannelMode` catalog.
+
 ## Capability — *Value Object, Capability Negotiation*
 
 A named, independently negotiable IRCv3 protocol enhancement. Identified
@@ -395,7 +435,7 @@ extension state changes.
 | `rateLimit` | {bucketSize, refillRate} | FR-016; see research.md "Rate limiting". |
 | `administratorCredentials` | list of {username, hashedPassword} | Verified by FR-034's in-band privilege command; hashed per research.md "Administrator credential storage" — never stored or logged in plain text. |
 | `serverName` | string, 0..1 | FR-050. The source/prefix on every server-originated message (numeric replies, `RPL_WELCOME`, etc.) — the server-side counterpart to a client's `nickname!ident@hostname` (FR-030). Absent (not set by the administrator) is valid; `jircd-server` MUST then fall back to the deployment host's network hostname, appending a fixed synthetic suffix if that hostname itself has no `.` (research.md "Server identity"), never an empty prefix. MUST contain at least one `.` in either case — nicknames (FR-002's grammar) never can, so this is what keeps a server-originated prefix unambiguous from a client one when a message has no `!`/`@` component. |
-| `serverVersion` | string | FR-051. Not administrator-configurable — sourced from the build/release itself (research.md "Server identity"), included in the registration-completion burst (`RPL_YOURHOST`/`RPL_MYINFO`) alongside `serverName`. |
+| `serverVersion` | string | FR-051. Not administrator-configurable — sourced at startup from a Gradle-generated `net/jircd/server/version.properties` classpath resource, itself fed by the root build's `project.version` (research.md "Server identity"), included in the registration-completion burst (`RPL_YOURHOST`/`RPL_MYINFO`) alongside `serverName`. |
 
 **Validation rules**: An invalid configuration (unknown extension id,
 conflicting listener ports, malformed rate-limit values) MUST be rejected
@@ -427,6 +467,11 @@ Channel        1---* ClientSession    (via operators, subset of members)
 Channel        1---* ClientSession    (via voiced, subset of members, independent of operators)
 Channel        *---* ChannelMode      (activeModes)
 ServerExtension 0---* ChannelMode     (optionally contributed; 0 in this release)
+ExtensionRegistry 1---1 SupportedFeatures (server-scoped, one shared instance;
+                                            recomputed on ExtensionRegistry state
+                                            changes, FR-055 — every ClientSession's
+                                            burst reads this same instance, never
+                                            computes its own)
 CapabilityExtension 1---1 Capability  (providedCapability)
 ClientSession  *---* Capability       (negotiatedCapabilities)
 ServerConfiguration 1---* CapabilityExtension (capabilityStates)

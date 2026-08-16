@@ -135,7 +135,8 @@ defined, the same class of gap the nickname/channel grammars closed for
 | `001 RPL_WELCOME` | Welcome confirmation, addressed to the newly registered nickname |
 | `002 RPL_YOURHOST` | `serverName` and `serverVersion` (`ServerConfiguration`, FR-050, data-model.md) |
 | `003 RPL_CREATED` | This running process's start time — not a fixed software release date |
-| `004 RPL_MYINFO` | `serverName`, `serverVersion`, the currently-recognized user-mode letters (empty this release, FR-044), and the currently-recognized channel-mode letters — sourced live from the same `ChannelMode` catalog `MODE` itself consults (research.md "Channel/user mode extensibility"), so this never drifts out of sync with what `MODE` actually recognizes |
+| `004 RPL_MYINFO` | `serverName`, `serverVersion`, the currently-recognized user-mode letters (empty this release, FR-044), and the currently-recognized channel-mode letters — read from the same server-scoped `ChannelMode` catalog snapshot `005`'s `CHANMODES` also reads (data-model.md `SupportedFeatures`), recomputed only when `ExtensionRegistry`'s state changes, not per registration, so this never drifts out of sync with what `MODE` actually recognizes or with what `005` advertises |
+| `005 RPL_ISUPPORT` (one or more lines) | `SupportedFeatures` (FR-055, data-model.md — server-scoped, not computed per session) — `CASEMAPPING=rfc1459`, `CHANTYPES=#`, `NICKLEN=9`, `CHANNELLEN=50`, `MODES=1`, `CHANMODES=,,,mnps` (from the same `ChannelMode` catalog snapshot `004` reads), `PREFIX=(ov)@+`, `UTF8ONLY`; split across additional `005` lines if the full token set wouldn't fit one line within FR-049's 512-byte limit (this release's fixed set always fits in one) |
 | `422 ERR_NOMOTD` | Closes the burst — this release implements no message-of-the-day content (`MOTD` itself remains "Recognized only," Full Command Catalog below); `422` gives clients a defined completion signal instead of an indefinite wait for one |
 
 **Contract notes**:
@@ -145,6 +146,13 @@ defined, the same class of gap the nickname/channel grammars closed for
 - Only `message-tags`, `server-time`, and `echo-message` may appear in the
   `CAP LS` response for this release (FR-025); the SASL capability
   referenced in the spec is deferred with Story 3 and MUST NOT appear.
+- `005`'s token set (FR-055) is deliberately minimal: every token
+  restates a value this specification already committed to elsewhere
+  (casemapping, grammar limits, mode prefixes, UTF-8 enforcement), none
+  is a new setting. Tokens some real networks send but this release has
+  no concrete answer for (`TOPICLEN`, `CHANLIMIT`, `NETWORK`, `TARGMAX`)
+  are omitted rather than sent with an invented value — omission is the
+  standard, correct way to say "unspecified."
 - Any numeric reply sent while a session has not yet claimed a nickname
   — most notably `431`/`432`/`433`, all reachable during `NICK`
   negotiation before registration completes — MUST address that reply

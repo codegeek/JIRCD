@@ -123,18 +123,27 @@ is a load-time validation error (FR-012); the hostname fallback appends
 a fixed synthetic suffix (`.local`) if the host's own hostname lacks a
 dot, rather than only enforcing the rule against explicit input.
 `serverVersion` is a sibling field, but
-*not* administrator-configurable — sourced from the build/release itself
-(e.g., a Gradle-generated build-time property, exact mechanism a
-planning-phase decision) — since it identifies the running software, not
-something an administrator has any reason to override. Upon successful
+*not* administrator-configurable — sourced from the build/release itself,
+since it identifies the running software, not something an administrator
+has any reason to override. Concretely: `jircd-server/build.gradle.kts`
+wires a `generateVersionResource` task, fed by the root build's
+`project.version` (itself the single source of truth, set via root
+`gradle.properties`' `version` property — no separate version string
+duplicated anywhere else), into `processResources`, writing a
+`net/jircd/server/version.properties` classpath resource with one
+`version=<value>` line. `JircdServerApplication` reads that resource via
+`ClassLoader.getResourceAsStream(...)` at startup and fails fast with a
+specific startup error if it's missing or unparsable — the same posture
+as any other invalid-configuration startup failure (FR-012). Upon successful
 registration, `UserCommandHandler` sends a fixed burst using both:
 `001 RPL_WELCOME`, `002 RPL_YOURHOST` (`serverName` + `serverVersion`),
 `003 RPL_CREATED` (this process's start time — not a fixed software
 release date), `004 RPL_MYINFO` (`serverName`, `serverVersion`, and the
-currently-recognized user-mode and channel-mode letters, sourced live
-from the same `ChannelMode` catalog research.md "Channel/user mode
-extensibility" already established — an empty user-mode list this
-release, per FR-044), then `422 ERR_NOMOTD` to close the burst.
+currently-recognized user-mode and channel-mode letters, read from the
+same server-scoped `ChannelMode` catalog snapshot `005`'s `CHANMODES`
+also reads, research.md "ISUPPORT / RPL_ISUPPORT" — an empty user-mode
+list this release, per FR-044), `005 RPL_ISUPPORT` (research.md
+"ISUPPORT / RPL_ISUPPORT"), then `422 ERR_NOMOTD` to close the burst.
 
 **Rationale**: This closes two real gaps at once, not one. First, the
 narrower one: the "Connection Registration" contract had referenced "the
@@ -179,6 +188,17 @@ once a future extension contributes a flag (FR-043).
   (research.md convention: reuse the exact-fit existing numeric, the same
   choice already made for `476`/`417`); sending an empty MOTD body would
   misrepresent that one was configured.
+- *Read the version from the JAR manifest's `Implementation-Version`
+  attribute (`Package.getImplementationVersion()`) instead of a generated
+  properties resource*: rejected — this project's integration tests
+  (`jircd-integration-tests`, research.md "Deterministic testing under
+  concurrency") start a live server in-process against exploded build
+  output, not a packaged JAR; a manifest attribute is only populated when
+  classes are loaded from an actual JAR on the classpath, so it would
+  silently return `null` in that path (and in an IDE run configuration)
+  while working in a packaged deployment — the exact kind of dev/prod
+  divergence a properties resource on the classpath avoids, since it's
+  present identically whether the classes come from a directory or a JAR.
 - *Don't require a dot in `serverName`; leave prefix-parsing ambiguity as
   a client-side concern*: rejected — this server controls the one input
   (`serverName`) that determines whether the ambiguity can even arise in
@@ -228,6 +248,85 @@ though the *server* now treats "alice" as unavailable to anyone else.
   original casing and only folding case for comparison; also unnecessary
   extra state (the "canonical form" vs. the "display form") for no
   benefit over folding at comparison time.
+
+## ISUPPORT / RPL_ISUPPORT (FR-055)
+
+**Decision**: Numeric `005`, sent as one or more lines during the
+Registration Completion Burst (FR-051, right after `004`), is used for
+its de facto `RPL_ISUPPORT` meaning — a list of `TOKEN`/`TOKEN=VALUE`
+feature-and-limit advertisements — not RFC 2812's original `RPL_BOUNCE`
+("try this other server") meaning, which is effectively unused in
+practice across the deployed IRC ecosystem. This release's token set
+(data-model.md `SupportedFeatures`) is fixed and minimal:
+`CASEMAPPING=rfc1459` (FR-052), `CHANTYPES=#` (FR-048), `NICKLEN=9`,
+`CHANNELLEN=50` (FR-048), `MODES=1`, `CHANMODES=,,,mnps` (from the
+`ChannelMode` catalog, FR-043), `PREFIX=(ov)@+` (FR-045/FR-046), and
+`UTF8ONLY` (FR-054) — every token restates a value this project already
+committed to elsewhere, none is a new, independently-configurable
+setting. `SupportedFeatures` itself is server-scoped, not per-session:
+the fixed tokens are constants, and `CHANMODES`/`PREFIX` — the only
+tokens derived from state that can change at all — are recomputed when
+`ExtensionRegistry`'s state changes (an extension enable/disable),
+not on every new registration; every session's burst reads the same,
+already-current shared value.
+
+**Rationale**: This resolves a deferral this project made explicit
+earlier and deliberately left open rather than silently dropped
+(contracts/irc-numeric-replies.md's `005` note: "revisit if a future
+capability needs to advertise server limits/features this way") — FR-054
+(UTF-8 enforcement) is exactly that trigger: `UTF8ONLY` is the standard,
+purpose-built token for declaring it, and a server that enforces UTF-8
+without advertising `UTF8ONLY` leaves every connecting client to
+discover that the hard way, by trial and error, instead of up front.
+Once `005` was being sent at all, advertising the other values this
+project had *already* decided (casemapping, channel-name grammar
+limits, nickname length, the mode-prefix mapping `353` already uses) cost
+nothing further and closes several client-side guessing games at once —
+real IRC clients commonly use `ISUPPORT` to configure their own UI
+(e.g., how to parse `@`/`+` prefixes, what casemapping to fold locally),
+and a server that never sends it forces every client to fall back to
+guessed defaults that may not match this server's actual behavior.
+Modeling `SupportedFeatures` as server-scoped rather than per-session
+matters for the same reason its own tokens are all server-wide facts,
+not client-specific ones: nothing about *which* session is registering
+changes any of them, so recomputing per session would mean SC-003's
+1,000 concurrent connections each redundantly walking the same,
+unchanged `ChannelMode` catalog to produce an identical string — real
+but avoidable work for values that only ever change on the rare
+administrative action (an extension toggle) that already has its own
+well-defined transition point to recompute from instead.
+
+**Alternatives considered**:
+- *Advertise a larger, more "complete" token set (e.g., `TARGMAX`,
+  `TOPICLEN`, `CHANLIMIT`, `NETWORK`) to look more feature-complete*:
+  rejected — this project has no concrete, decided value for any of
+  these (no per-client channel limit is enforced, no topic-length cap
+  exists separate from the general line-length budget, no "network name"
+  concept distinct from `serverName` exists). Advertising a token with
+  an invented value would be worse than omitting it — an absent
+  `ISUPPORT` token already has a well-understood meaning ("unspecified"),
+  matching this project's established discipline of not inventing
+  limits it doesn't actually enforce (the same reasoning `serverVersion`
+  and the max-connections deferral already used).
+- *Recompute `CHANMODES`/`PREFIX` fresh on every registration, reading
+  the `ChannelMode` catalog live at that moment (the original shape this
+  decision was first written with)*: reconsidered and rejected — not
+  because the catalog it reads is wrong (it's still the single shared
+  source `004` also reads, avoiding the "two numerics disagree" bug
+  either way), but because *when* to read it was modeled wrong. Nothing
+  about `CHANMODES`/`PREFIX` varies per session — both are server-wide
+  facts, changing only when `ExtensionRegistry`'s state does — so
+  reading them fresh on every registration is redundant work with no
+  correctness benefit over reading a value already recomputed at the
+  one point that actually changes it. `SupportedFeatures` is
+  server-scoped for this reason; see data-model.md's own note (the
+  "1,000 concurrent connections" argument above).
+- *Send `005` immediately after `001`, before `002`/`003`/`004`*:
+  rejected — every real deployed IRC server sends `ISUPPORT` after the
+  server-identity numerics (`002`-`004`), and clients that parse the
+  registration burst positionally (a minority, but real) expect that
+  order; nothing is gained by deviating from the near-universal
+  convention.
 
 ## Networking model
 
