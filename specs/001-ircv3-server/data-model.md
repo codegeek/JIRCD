@@ -50,6 +50,9 @@ guarded by this aggregate.
   FR-017 cleanup as any other connection loss — a sender MUST NOT block
   waiting for a slow recipient's queue to drain (research.md "Message
   fan-out concurrency model").
+- `ClientSession` deliberately has no user-mode field — FR-044 scopes
+  user modes out of this release entirely, so there is nothing for one to
+  represent yet.
 - A `LivenessMonitor`-detected timeout (no traffic and no `PONG` within
   the configured window since `lastLivenessAt`) MUST transition that
   session to `CLOSING` and run the same FR-017 cleanup as any other
@@ -128,29 +131,120 @@ enforced at channel-creation time, not left to callers).
 | `name` | string | Unique across the server (FR-003); first JOIN of a name creates it. |
 | `members` | set of `ClientSession` references | Current membership; drives message fan-out (FR-004). |
 | `operators` | set of `ClientSession` references (subset of `members`) | Who may perform moderation actions (FR-013, FR-014). |
-| `sendRestriction` | enum: `NONE`, `MEMBERS_ONLY`, `MODERATED` | `NONE`: anyone can send. `MEMBERS_ONLY`: only current `members` may send (non-members' `PRIVMSG` rejected, FR-013). `MODERATED`: only `operators` may send (matches classic IRC's `+m`). Set/cleared only by an operator via `MODE` (FR-013, FR-014). This is core moderation state (FR-036) — never gated by `Extension` state. |
-| `topic` | string, 0..1 | Absent (no topic set) by default. Visible to any client via `TOPIC` regardless of membership (FR-041's discovery framing applies here too); settable only by an `operator` (FR-040). Distinct from `sendRestriction` — viewing/setting the topic is not a "who may send a `PRIVMSG`" concern. |
+| `voiced` | set of `ClientSession` references (subset of `members`, independent of `operators`) | Who, in addition to `operators`, may send while `MODERATED` is active (FR-045). Granted/revoked only by an operator via `MODE +v`/`-v <nickname>` (FR-013, FR-045) — unlike `operators`, nothing grants this at JOIN time; a channel MAY have any number of voiced members, none of whom need to be operators. |
+| `activeModes` | set of `ChannelMode` (below) | Which recognized *channel-scoped* mode flags are currently set on this channel. `MEMBERS_ONLY` and `MODERATED` (FR-013) are the only two flags any code defines in this release, but the type is an open set, not a closed enum — see `ChannelMode` below for why (FR-043, research.md "Channel/user mode extensibility"). The two flags are independent: a channel MAY have neither, either, or both set at once (matches standard IRC's per-flag `MODE` semantics — this replaces an earlier, incorrect single-mutually-exclusive-state design). Set/cleared only by an operator via `MODE` (FR-013, FR-014). `voice` (FR-045) is a *`MEMBER`-scoped* `ChannelMode` (see `ChannelMode.kind` below) — its state lives in `voiced` above, not here, the same way `operator` status lives in `operators` rather than `activeModes`. |
+| `topic` | string, 0..1 | Absent (no topic set) by default. Visible to any client via `TOPIC` regardless of membership (FR-041's discovery framing applies here too); settable only by an `operator` (FR-040). Distinct from `activeModes` — viewing/setting the topic is not a "who may send a `PRIVMSG`" concern. |
 
 **Validation rules**:
 - `name` uniqueness is enforced the same way as nickname uniqueness (single
   atomic namespace, FR-003).
 - The first session to join a not-yet-existing channel is added to
   `operators` (classic first-join-gets-operator default, FR-013); this is
-  the **only** operator-assignment rule in this release (FR-026/FR-027's
-  account-based override is deferred).
+  the **only** *initial* operator-assignment rule in this release
+  (FR-026/FR-027's account-based override is deferred) — an existing
+  operator MAY subsequently grant `operators` membership to another
+  session via `MODE +o`/`-o <nickname>` (FR-046), the same way `voiced`
+  is granted (FR-045). `operators` MAY become empty if every current
+  operator revokes their own status (or another's, down to zero) or
+  leaves without granting a successor first — this release has no
+  automatic reassignment for an already-created channel (unlike the
+  first-join rule, which only applies to *creating* one); the channel
+  simply has no operator until one is granted again or the channel is
+  recreated from zero members (below).
 - A channel with zero members is not a durable entity — the next JOIN of
-  that name creates a fresh channel with default (empty) `operators`, per
-  FR-003 (this release keeps no channel history/state after last-member-
-  leaves, since Story 3's chathistory-adjacent capabilities are deferred).
-  `topic` is reset along with everything else — a recreated channel starts
-  with no topic set, same as a brand-new one.
+  that name creates a fresh channel with default (empty) `operators` and
+  `voiced`, per FR-003 (this release keeps no channel history/state after
+  last-member-leaves, since Story 3's chathistory-adjacent capabilities
+  are deferred). `topic` is reset along with everything else — a
+  recreated channel starts with no topic set, same as a brand-new one.
 - `topic` MUST only be set by a session in `operators` (FR-040); a
   non-operator's attempt MUST be rejected with the same `482
   ERR_CHANOPRIVSNEEDED` error FR-014's other operator-gated actions use,
   not a new error of its own.
+- A sender's `PRIVMSG`/`NOTICE` to this channel MUST be rejected unless it
+  passes every currently-active flag in `activeModes` that restricts
+  sending: `MEMBERS_ONLY` requires the sender to be in `members`;
+  `MODERATED` requires the sender to be in `operators` **or** `voiced`
+  (FR-045) — matching classic IRC's `+m` semantics in full, not just the
+  operator half of it. These are checked independently of each other
+  (`MEMBERS_ONLY` vs. `MODERATED`), not as alternative states of one
+  variable (FR-013); within the `MODERATED` check specifically,
+  `operators`-or-`voiced` *is* the one condition, not two independent
+  ones — an operator does not additionally need to be voiced.
+- `voiced` MUST only be granted or revoked by a session in `operators`
+  (FR-045); a non-operator's attempt MUST be rejected with the same `482
+  ERR_CHANOPRIVSNEEDED` error every other operator-gated action uses.
+  Targeting a nickname that isn't currently a member of the channel MUST
+  be rejected with a specific "not on channel" error rather than
+  silently granting voice to no one.
+- `voiced` is reset the same way `operators` and `topic` are: a member
+  who parts (or otherwise leaves) is removed from `voiced` immediately,
+  and a channel recreated after reaching zero members (below) starts with
+  `voiced` empty, same as `operators` — rejoining does not restore a
+  member's prior voice status; an operator must grant it again.
+- `operators` membership MAY likewise be granted or revoked by an
+  existing operator via `MODE +o`/`-o <nickname>` (FR-046), subject to
+  the identical rules `voiced` grant/revoke uses: operator-only, `482` on
+  an unauthorized attempt, a specific "not on channel" error for a
+  non-member target, and reset (removed from `operators`) on that
+  member's part/leave. An operator MAY revoke their own status; the
+  server MUST NOT reject a self-revocation or treat it specially, even if
+  it leaves the channel with zero operators (see above).
+- `MEMBERS_ONLY` and `MODERATED` are defined by core and MUST always be
+  recognized, unconditionally, never gated by `Extension` state (FR-036).
+  A `ServerExtension` MAY additionally contribute further `ChannelMode`
+  definitions (research.md "Channel/user mode extensibility") — unlike
+  the two core flags, an extension-contributed flag is only recognized
+  while its owning extension is `ENABLED`; a channel's `activeModes` MUST
+  NOT contain a flag whose defining extension is currently disabled.
+  Exactly what happens to a channel that already had such a flag set at
+  the moment its extension is disabled is unresolved in this release,
+  since no extension contributes a mode yet — to be settled when the
+  first one (e.g., a future account module's registered-channel flag)
+  actually exists.
 
 **Lifecycle**: created on first JOIN → members join/part → removed when
 membership reaches zero (no persistence across recreation, per above).
+
+## ChannelMode — *Value Object, Session & Messaging*
+
+One recognized channel-mode flag *definition* — not a flag being on or
+off for a particular channel (that's `Channel.activeModes` membership),
+but the flag's stable identity, wire representation, shape, and who
+defines it. Exists so the set of recognized flags can grow (a
+`ServerExtension` contributing one) without changing `Channel`'s shape,
+the same role `Capability` plays for `CAP` (data-model.md "Capability").
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | Stable, human-readable identifier (e.g. `moderated`, `members-only`), independent of `flag` — the same role `Extension.id`/`Capability.name` play elsewhere in this data model. Unique among every currently-recognized `ChannelMode`. Exists separately from `flag` because the wire-letter namespace is far scarcer (52 possible characters, shared across every current and future flag) than the id namespace, and because error messages and administrator-facing output need something more legible than a single letter (constitution Principle III). |
+| `flag` | character | The wire-protocol mode letter (`m` for `moderated`, `n` for `members-only` — RFC 2811 §4.2.6/§4.2.5). Unique among every currently-recognized flag — core's plus every currently-`ENABLED` extension's — independently of `id` uniqueness; a conflicting registration (either kind) is rejected the same way `Extension.extensionPoint` ownership conflicts are (research.md "Extension-point ownership"). |
+| `kind` | enum: `BOOLEAN`, `VALUE`, `LIST`, `MEMBER` | Classifies the flag's shape, per RFC 2811's own mode taxonomy (contracts/irc-protocol-commands.md "Full Channel Mode Catalog"). `BOOLEAN`: a per-channel on/off flag, represented in `Channel.activeModes`. `VALUE` (e.g. a channel key) and `LIST` (e.g. a ban-mask list) carry data no field on `Channel` holds yet. `MEMBER` (operator, voice) is a per-nickname privilege, not a per-channel flag — its state lives in its own dedicated `Channel` field (`operators` for `operator`, FR-046; `voiced` for `voice`, FR-045), not in `activeModes`. Both `MEMBER`-kind flags this release defines are implemented — unlike `VALUE`/`LIST`, `MEMBER`-kind is fully representable today because it just means "a dedicated per-member set," and `Channel` already has two of those. |
+| `definedBy` | `CORE` or an `Extension` id | `CORE`-defined flags (`moderated`, `members-only`, `voice`, `operator`) are always recognized (FR-036). An extension-defined flag is only recognized while that extension is `ENABLED` — see `Channel.activeModes` validation rules above. |
+
+**Validation rules**:
+- `flag` uniqueness and `id` uniqueness are independent requirements, both
+  enforced at all times: two flags MUST NOT share a `flag` character, and
+  two flags MUST NOT share an `id`, regardless of whether one, both, or
+  neither is core-defined (research.md "Channel/user mode extensibility").
+- This release populates exactly four `ChannelMode`s, all `CORE`-defined:
+  two `BOOLEAN` (`id: moderated, flag: m` and `id: members-only, flag: n`,
+  FR-013/FR-043) and two `MEMBER` (`id: voice, flag: v`, FR-045, granted/
+  revoked via `MODE +v`/`-v <nickname>`, state in `Channel.voiced`;
+  `id: operator, flag: o`, FR-046, granted/revoked via `MODE +o`/`-o
+  <nickname>`, state in `Channel.operators`); no extension in this
+  release contributes one. The mechanism exists now so a future
+  `BOOLEAN` one (e.g., a registered-channel/user flag once the account
+  module exists) doesn't require a `Channel`/`ChannelMode` data-model
+  change to add — only a new extension.
+- A `VALUE`- or `LIST`-kind `ChannelMode` MUST NOT be contributed in this
+  release: `Channel.activeModes`' shape (a plain set) has nowhere to hold
+  a value or a list, and no mechanism here defines one. This is a real,
+  currently-unfilled gap, not an oversight masked by convenient scoping —
+  the first `ServerExtension` that needs one (e.g., a channel-key or
+  ban-list feature) requires a `Channel` shape change alongside it, which
+  this data model deliberately does not attempt to pre-design without a
+  concrete consumer driving the actual requirements.
 
 ## Capability — *Value Object, Capability Negotiation*
 
@@ -200,7 +294,14 @@ split is a compiler-enforced domain distinction, not just documentation:
 Channel moderation and the capability-negotiation mechanism are core,
 always-present behavior (FR-035, FR-036) and are deliberately **not**
 modeled as an `Extension` at all — there is no `Extension` instance for
-them and no `id` an administrator could use to disable them.
+them and no `id` an administrator could use to disable them. This applies
+to the *mechanism* (the fact that `MODE` and `CAP` exist and work), not to
+every individual flag or capability it can carry: core's two `ChannelMode`
+flags (`MEMBERS_ONLY`, `MODERATED`) are unconditional for the same reason,
+but an *additional* flag MAY come from a `ServerExtension`'s
+`contributedChannelModes` — that flag, unlike the two core ones, stops
+being recognized while its extension is `DISABLED`, exactly like any other
+extension-provided behavior (FR-020).
 
 | Field | Type | Notes |
 |---|---|---|
@@ -208,6 +309,7 @@ them and no `id` an administrator could use to disable them.
 | `state` | enum: `ENABLED`, `DISABLED`, `FAILED` | `FAILED` = failed to start/errored at runtime without affecting other extensions (FR-020). |
 | `providedCapability` | `Capability` name, 0..1 | Present only for `CapabilityExtension`; absent for `ServerExtension` (e.g., cloak, admin). |
 | `extensionPoint` | string, 0..1 | Set only for extensions that supply a value core code consumes rather than just adding a capability (e.g., `cloak` claims `hostname-display`). `null` for extensions with no such claim. |
+| `contributedChannelModes` | set of `ChannelMode`, 0..* | `ServerExtension`-only (research.md "Channel/user mode extensibility"). Empty for every extension in this release — no extension contributes a mode yet — but the field exists now so a future one (e.g., a registered-channel flag) is an extension change, not a `Channel`/`ChannelMode` data-model change. Unlike `extensionPoint`, this isn't exclusive single-owner claim: multiple extensions may each contribute different flags, only conflicting if two claim the same `flag` character (`ChannelMode` validation rules). |
 
 **Validation rules**: A transition to `DISABLED` or back to `ENABLED` MUST
 NOT require restarting the server process (FR-011) and MUST take effect for
@@ -260,6 +362,9 @@ know which one; only the configuration *file* has two sections.
 ClientSession *---1 UserIdentity      (nickname, scoped to the session)
 ClientSession *---* Channel           (via channelMemberships / members)
 Channel        1---* ClientSession    (via operators, subset of members)
+Channel        1---* ClientSession    (via voiced, subset of members, independent of operators)
+Channel        *---* ChannelMode      (activeModes)
+ServerExtension 0---* ChannelMode     (optionally contributed; 0 in this release)
 CapabilityExtension 1---1 Capability  (providedCapability)
 ClientSession  *---* Capability       (negotiatedCapabilities)
 ServerConfiguration 1---* CapabilityExtension (capabilityStates)

@@ -136,6 +136,16 @@ which arrived last.
 - `TOPIC`-setting is the one operator-gated action in this section; it
   reuses `Channel.operators` (FR-013), already established at `JOIN` — no
   separate authorization mechanism is introduced for it.
+- `353 RPL_NAMREPLY`'s nickname list MUST prefix each operator's nickname
+  with `@` and each voiced (non-operator) member's nickname with `+`,
+  the standard IRC convention every client already expects — without it,
+  `voice` (FR-045) would be invisible in practice even though it's
+  correctly enforced server-side: a client showing no visual difference
+  between a voiced and a non-voiced member defeats the point of granting
+  voice at all. A member who is both an operator and voiced is prefixed
+  `@` only, matching standard client expectations (operator implies the
+  ability to speak; the `+` prefix communicates *additional* information
+  a plain `@` doesn't).
 
 ### User Queries (Story 7)
 
@@ -162,7 +172,43 @@ which arrived last.
 | Command | Direction | Preconditions | Effect | Replies |
 |---|---|---|---|---|
 | `KICK <channel> <nickname> [:reason]` | C→S | Sender is a channel operator (FR-013) | Removes the target from the channel | `KICK` echoed to all (former) members; `482 ERR_CHANOPRIVSNEEDED` if sender lacks privilege (FR-014) |
-| `MODE <channel> <+/-flag>` | C→S | Sender is a channel operator | Applies a restriction (e.g., moderated-mode, only-members-may-speak per FR-013) | `MODE` echoed to all members; `482 ERR_CHANOPRIVSNEEDED` if unauthorized |
+| `MODE <channel> <+/->m\|n` | C→S | Sender is a channel operator | Sets/clears `moderated` (`m`) or `members-only` (`n`), independently (FR-013; "Full Channel Mode Catalog" below) | `MODE` echoed to all members; `482 ERR_CHANOPRIVSNEEDED` if unauthorized; `472 ERR_UNKNOWNMODE` for any other flag letter, or a bare mode query with no flag argument (FR-043) |
+| `MODE <channel> <+/->v <nickname>` | C→S | Sender is a channel operator; `<nickname>` is a current member of `<channel>` | Grants (`+v`) or revokes (`-v`) `<nickname>`'s voice privilege (FR-045) — while `moderated` (`m`) is active, `<nickname>` may now send in addition to operators | `MODE` echoed to all members; `482 ERR_CHANOPRIVSNEEDED` if sender isn't an operator; `441 ERR_USERNOTINCHANNEL` if `<nickname>` isn't a current member |
+| `MODE <channel> <+/->o <nickname>` | C→S | Sender is a channel operator; `<nickname>` is a current member of `<channel>` | Grants (`+o`) or revokes (`-o`) `<nickname>`'s operator status (FR-046) — in addition to, not a replacement for, first-join-gets-operator (FR-013); `<nickname>` MAY be the sender themselves (self-revocation is permitted, even if it leaves the channel with zero operators) | `MODE` echoed to all members; `482 ERR_CHANOPRIVSNEEDED` if sender isn't an operator; `441 ERR_USERNOTINCHANNEL` if `<nickname>` isn't a current member |
+
+**Contract notes**:
+- This release's channel `MODE` implements exactly the two `BOOLEAN`-kind
+  flags FR-013 defines directly, unconditionally (never gated by an
+  `Extension`, FR-036), plus the two `MEMBER`-kind flags FR-045/FR-046
+  define (`voice`, `operator`). Every other standard channel mode ("Full
+  Channel Mode Catalog" below — invite-only, channel-key, user-limit,
+  ban-mask, secret/private, topic-lock) remains out of scope for this
+  release's behavior (FR-043).
+- `operator` status has two independent paths to acquiring it in this
+  release: first-join-gets-operator (FR-013, how a channel's very first
+  operator is established) and `MODE +o` from an existing operator
+  (FR-046, how it subsequently spreads). Neither supersedes the other —
+  first-join only ever applies at channel creation, and `MODE +o` only
+  ever applies to an already-existing channel with at least one current
+  operator to issue it.
+- `moderated` (`+m`) means "operators **and** voiced members may send,"
+  matching classic IRC's full `+m` semantic — not "operators only." A
+  member who is voiced but not an operator may send while `moderated` is
+  active; an operator never needs to also be voiced.
+- Unlike the "recognized only" commands elsewhere in this catalog, the
+  boundary above isn't meant to be permanent for `BOOLEAN`-kind flags:
+  FR-043 requires the `MODE` mechanism itself to support an optional
+  server extension contributing additional `BOOLEAN` flags later
+  (research.md "Channel/user mode extensibility", data-model.md
+  `ChannelMode`) without a core protocol change — no extension does so in
+  this release. `VALUE`/`LIST`-kind flags (channel-key, user-limit,
+  ban-mask) are a narrower promise: cataloged below, but `Channel`'s
+  shape can't hold one yet, so adding one is a bigger change than adding
+  another `BOOLEAN` flag would be.
+- User-level `MODE` is entirely unimplemented (FR-044), not partially
+  implemented like channel `MODE` — this server has no user-mode concept
+  at all yet, deliberately, not as an oversight. When one is added, it
+  MUST use the same extension-contribution mechanism as channel `MODE`.
 
 ### Administration (Story 6)
 
@@ -220,13 +266,13 @@ any given server to implement it.
 | `NICK` | 3.1.2 | **Implemented** — see "Connection Registration" above |
 | `USER` | 3.1.3 | **Implemented** — see "Connection Registration" above |
 | `OPER` | 3.1.4 | **Implemented**, but with this project's own privilege model, not RFC 2812's O-line concept — see "Administration" above |
-| `MODE` (user) | 3.1.5 | Recognized only — no user modes defined in this release (only channel `MODE`, see below) |
+| `MODE` (user) | 3.1.5 | Recognized only — no user modes defined in this release, deliberately (FR-044; only channel `MODE`, see below) |
 | `SERVICE` | 3.1.6 | Recognized only — this server has no services-framework concept |
 | `QUIT` | 3.1.7 | **Implemented** — see "Connection Registration" above |
 | `SQUIT` | 3.1.8 | Recognized only — server-to-server command; this release has no server-to-server interface at all (FR-021) |
 | `JOIN` | 3.2.1 | **Implemented** — see "Channel Operations" above |
 | `PART` | 3.2.2 | **Implemented** — see "Channel Operations" above |
-| `MODE` (channel) | 3.2.3 | **Implemented** — see "Moderation" above (`+m`/members-only variants only; other channel modes are recognized-only) |
+| `MODE` (channel) | 3.2.3 | **Implemented** — see "Moderation" above (`+m`/members-only variants only; other channel mode flags, and a bare mode query, are scoped out per FR-043, not merely recognized-only-and-forgotten) |
 | `TOPIC` | 3.2.4 | **Implemented** — see "Channel Operations" above |
 | `NAMES` | 3.2.5 | **Implemented** — see "Channel Operations" above (requires a channel argument; a bare, argument-less global `NAMES` is not implemented) |
 | `LIST` | 3.2.6 | **Implemented** — see "Channel Operations" above |
@@ -286,6 +332,60 @@ any given server to implement it.
   it documents what the wire-protocol layer can *parse and represent*.
   Moving a "Recognized only" command to "Implemented" in a future release
   is a `jircd-core`/extension change, not a `jircd-protocol` change.
+
+## Full Channel Mode Catalog (`jircd-protocol` — Wire-Protocol Recognition)
+
+Unlike commands and numerics, an individual `MODE` flag isn't its own
+grammar element — `jircd-protocol` parses any `<+/-letter>` generically,
+so nothing here is about wire-level parsing. This table exists for the
+reason FR-043 requires the `MODE` mechanism to be extension-friendly
+(research.md "Channel/user mode extensibility"): it gives a future core
+release or `ServerExtension` a canonical `id`/`kind` to align a new flag
+with, instead of each independently reinventing one for the same RFC
+2811 concept — and it makes explicit which flags this release's
+`Channel.activeModes: Set<ChannelMode>` (data-model.md) shape can even
+represent.
+
+| Flag | RFC 2811 §4 | `id` | `kind` | Status |
+|---|---|---|---|---|
+| `n` | 4.2.5 | `members-only` | `BOOLEAN` | **Implemented** (`CORE`, FR-013) |
+| `m` | 4.2.6 | `moderated` | `BOOLEAN` | **Implemented** (`CORE`, FR-013) |
+| `p` | 4.2.1 | `private` | `BOOLEAN` | Reserved |
+| `s` | 4.2.2 | `secret` | `BOOLEAN` | Reserved |
+| `i` | 4.2.3 | `invite-only` | `BOOLEAN` | Reserved |
+| `t` | 4.2.4 | `topic-lock` | `BOOLEAN` | Reserved — this release's topic-setting restriction (FR-040) is core and unconditionally operator-only, not toggleable the way real `+t` is; see note below |
+| `l` | 4.2.7 | `user-limit` | `VALUE` | Reserved — not representable by `Channel.activeModes` in this release (data-model.md `ChannelMode` validation rules) |
+| `k` | 4.2.9 | `channel-key` | `VALUE` | Reserved — same limitation as `user-limit` |
+| `b` | 4.2.8 | `ban-mask` | `LIST` | Reserved — same limitation, plus list storage |
+| `o` | 4.1 | `operator` | `MEMBER` | **Implemented** (`CORE`, FR-013/FR-046) — see "Moderation" above; state lives in `Channel.operators` (data-model.md), not `activeModes`; first-join-gets-operator (FR-013) is the only path to a channel's *first* operator, `MODE +o`/`-o` (FR-046) is how it spreads afterward |
+| `v` | 4.1 | `voice` | `MEMBER` | **Implemented** (`CORE`, FR-045) — see "Moderation" above; state lives in `Channel.voiced` (data-model.md), not `activeModes` |
+
+**Contract notes**:
+- Every flag above is `Status: Reserved` except the four this release
+  implements — "Reserved" here means the identical thing it means in the
+  Full Numeric Catalog (irc-numeric-replies.md): a canonical `id` exists
+  for future use, but nothing in this release emits or enforces it.
+- `operator` and `voice` share `kind: MEMBER` and, as of FR-046, both
+  have a `MODE`-based mutator, following the identical pattern: resolve
+  the target to a current member (`441` if not), operator-gate the
+  request (`482` if not), then add/remove from the relevant dedicated
+  `Channel` field. `operator` additionally has the first-join path
+  `voice` never had — it's the only way a channel's very first operator
+  is ever established, since `MODE +o` always requires an existing
+  operator to issue it.
+- `topic-lock` deserves a specific callout: real IRC's `+t` is a
+  *toggleable* flag (some channels run with `-t`, letting anyone set the
+  topic), but this project's FR-040 hardcodes operator-only topic-setting
+  unconditionally. Implementing real `+t` later means FR-040 itself would
+  need revisiting, not just adding a `ChannelMode` — a bigger change than
+  the other reserved rows, flagged here so it isn't mistaken for a
+  same-effort addition.
+- `user-limit`, `channel-key`, and `ban-mask` are exactly the "client
+  limit" and "invite-only"-adjacent modes real IRC clients most commonly
+  expect; cataloging them here without implementing them keeps this
+  release's `MODE` behavior honest (FR-043's `472` on anything else)
+  while giving a future extension author a name to converge on instead of
+  inventing `channel-key` vs. `chan-password` vs. `key` independently.
 
 ## Explicitly Out of Scope for This Plan
 

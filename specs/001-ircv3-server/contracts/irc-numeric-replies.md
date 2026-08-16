@@ -33,8 +33,8 @@ client/administrator can do about it).
 | `332` | `RPL_TOPIC` | `TOPIC` query on a channel with a topic set | FR-040 |
 | `311` | `RPL_WHOISUSER` | Successful `WHOIS` | FR-037, FR-038 |
 | `318` | `RPL_ENDOFWHOIS` | End of a `WHOIS` reply | FR-037 |
-| `353` | `RPL_NAMREPLY` | `JOIN` | FR-003 |
-| `366` | `RPL_ENDOFNAMES` | `JOIN` | FR-003 |
+| `353` | `RPL_NAMREPLY` | `JOIN`, `NAMES` — nicknames prefixed `@` (operator) or `+` (voiced, non-operator) per irc-protocol-commands.md "Channel Operations" | FR-003, FR-041, FR-045, FR-046 |
+| `366` | `RPL_ENDOFNAMES` | `JOIN`, `NAMES` | FR-003, FR-041 |
 | `381` | `RPL_YOUREOPER` | Successful `OPER` | FR-034 |
 | `382` | `RPL_REHASHING` | Successful `REHASH` | FR-011, FR-012 (research.md "Configuration reload mechanism") |
 | `401` | `ERR_NOSUCHNICK` | `WHOIS` for a nickname that isn't connected | FR-037 |
@@ -42,6 +42,7 @@ client/administrator can do about it).
 | `431` | `ERR_NONICKNAMEGIVEN` | `NICK` with no argument | FR-001 (input validation) |
 | `432` | `ERR_ERRONEUSNICKNAME` | `NICK` violating the nickname grammar (invalid leading/body characters or over 9 characters) | irc-protocol-commands.md "Connection Registration Grammar" |
 | `433` | `ERR_NICKNAMEINUSE` | `NICK` naming an already-claimed nickname | FR-002 |
+| `441` | `ERR_USERNOTINCHANNEL` | `MODE +v`/`-v` or `+o`/`-o <nickname>` naming a nickname that isn't a current member of the target channel | FR-045, FR-046 |
 | `442` | `ERR_NOTONCHANNEL` | `PART`/`PRIVMSG`/`KICK`/`MODE` on a channel the sender hasn't joined (where membership is required) | FR-003, FR-014 |
 | `461` | `ERR_NEEDMOREPARAMS` | Command missing required parameters | FR-015 |
 | `464` | `ERR_PASSWDMISMATCH` | Failed `OPER` (also logged as a security event, FR-019) | FR-034 |
@@ -103,7 +104,7 @@ trigger them is "Recognized only" per irc-protocol-commands.md).
 | `414` | `ERR_WILDTOPLEVEL` | `415` | `ERR_BADMASK` | `421` | `ERR_UNKNOWNCOMMAND` *(Used)* |
 | `422` | `ERR_NOMOTD` | `423` | `ERR_NOADMININFO` | `424` | `ERR_FILEERROR` |
 | `431` | `ERR_NONICKNAMEGIVEN` *(Used)* | `432` | `ERR_ERRONEUSNICKNAME` *(Used)* | `433` | `ERR_NICKNAMEINUSE` *(Used)* |
-| `436` | `ERR_NICKCOLLISION` | `437` | `ERR_UNAVAILRESOURCE` | `441` | `ERR_USERNOTINCHANNEL` |
+| `436` | `ERR_NICKCOLLISION` | `437` | `ERR_UNAVAILRESOURCE` | `441` | `ERR_USERNOTINCHANNEL` *(Used)* |
 | `442` | `ERR_NOTONCHANNEL` *(Used)* | `443` | `ERR_USERONCHANNEL` | `444` | `ERR_NOLOGIN` |
 | `445` | `ERR_SUMMONDISABLED` | `446` | `ERR_USERSDISABLED` | `451` | `ERR_NOTREGISTERED` |
 | `461` | `ERR_NEEDMOREPARAMS` *(Used)* | `462` | `ERR_ALREADYREGISTRED` | `463` | `ERR_NOPERMFORHOST` |

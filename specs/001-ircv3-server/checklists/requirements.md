@@ -93,3 +93,79 @@
   operator may set the topic — reusing FR-013's existing operator concept
   rather than introducing a new authorization mechanism. Added `Channel.topic`
   to the data model and two new Acceptance Scenarios to Story 1.
+- Closed a spec-coverage gap for user/channel modes: the wire-protocol
+  contract already noted channel `MODE` as partially implemented and user
+  `MODE` as "Recognized only," but spec.md never acknowledged either as a
+  deliberate scope decision — unlike `AUTHENTICATE`/SASL and `NickServ`/
+  `ChanServ`, which are explicitly documented as deferred. Added FR-043
+  (channel `MODE` scoped to exactly FR-013's two flags; anything else,
+  including a bare mode query, rejected with the same specific error) and
+  FR-044 (user modes entirely unimplemented, not partially like channel
+  `MODE`), an Edge Case, and an Assumptions bullet giving both the same
+  deferred-scope treatment `AUTHENTICATE`/`NickServ`/`ChanServ` already
+  get. No behavior changed — this release's actual `MODE` implementation
+  (Story 5) is unaffected; only the spec's honesty about what's
+  deliberately out of scope changed.
+- Corrected a real data-model flaw surfaced by the mode-coverage review
+  above: `Channel.sendRestriction` was a closed 3-value enum, which both
+  blocked the FR-043 extensibility just added (a future account-module
+  extension wanting a registered-channel flag would have forced a core
+  code change) and was already subtly wrong on its own terms
+  (`MEMBERS_ONLY`/`MODERATED` are independent flags on real IRC servers,
+  not mutually-exclusive states). Replaced with `Channel.activeModes: Set
+  <ChannelMode>`, a new Value Object naming a flag and its defining
+  source (core, unconditionally, for the two built-in flags; optionally a
+  `ServerExtension` for any future one, via a new `contributedChannelModes`
+  field on `Extension`). Rewrote FR-043/FR-044 to require this
+  extensibility explicitly rather than only stating a scope boundary.
+- Validated a follow-up data-model trade-off: `ChannelMode` identified
+  only by `flag` + `definedBy` (no separate name) vs. giving it its own
+  stable `id`, matching `Extension.id`/`Capability.name`. Chose `id` —
+  the wire-letter namespace (52 characters, shared by every current and
+  future flag) is too scarce and too illegible to double as identity for
+  actionable conflict errors (constitution Principle III). Surveying the
+  rest of RFC 2811's standard channel modes in the process surfaced a
+  more important finding: most of them (`l` user-limit, `k` channel-key,
+  `b` ban-mask, `o`/`v` operator/voice) aren't simple on/off flags —
+  `Channel.activeModes: Set<ChannelMode>` can't represent a value or a
+  list. Added `ChannelMode.kind` (`BOOLEAN`/`VALUE`/`LIST`/`MEMBER`) to
+  classify this explicitly rather than let it surface as a surprise gap
+  later, added a "Full Channel Mode Catalog" to contracts (mirroring the
+  Full Command/Numeric catalogs) cataloging all eleven RFC 2811 modes,
+  and fixed a related pre-existing gap: `members-only`'s wire letter had
+  never actually been pinned to `n` anywhere. Also fixed a misplaced
+  `Channel` lifecycle note that had been left stranded under the
+  `ChannelMode` heading by an earlier edit.
+- Validated (and found incomplete) `moderated` mode's definition: it was
+  specified as "operators only may send," but standard IRC's `+m` is
+  "operators **and voiced members** may send" — a real correctness gap in
+  an already-`Implemented` feature, not a deferred-scope one. Confirmed
+  mode-*setting* was already correctly operator-gated throughout (FR-013/
+  FR-014, and structurally via a `Channel.activeModes`-level rule that
+  already covers any future extension-contributed flag too, not just the
+  two named ones). Added FR-045 (voice grant/revoke, restricted to
+  operators; moderated-mode's complete op-or-voice definition), a new
+  `Channel.voiced` field, promoted `voice` (`v`) from Reserved to
+  Implemented in the Channel Mode Catalog, added `MODE +v`/`-v
+  <nickname>` to the contract (`441 ERR_USERNOTINCHANNEL` for a
+  non-member target), and closed a related visibility gap: `353
+  RPL_NAMREPLY` never documented the standard `@`/`+` operator/voice
+  nickname-prefix convention clients rely on to show the privilege at
+  all — without it, voice would have been correctly enforced but
+  invisible in any real client.
+- Extended operator status the same way voice was extended: added FR-046
+  (an existing operator MAY grant/revoke operator status on another
+  member, or revoke their own, via `MODE +o`/`-o <nickname>`) alongside
+  first-join-gets-operator (FR-013), which remains the only path to a
+  channel's *first* operator. Reused the existing `Channel.operators`
+  field (no new field needed, unlike `voiced`); flipped `operator`'s
+  Channel Mode Catalog entry from Reserved to Implemented and corrected
+  two notes elsewhere (research.md, contracts/irc-protocol-commands.md)
+  that had explicitly and correctly stated, before this change, that
+  `operator` had no `MODE` mutator — now stale and rewritten. Fixed a
+  data-model claim that first-join was "the only operator-assignment
+  rule in this release," now scoped to "the only *initial* assignment
+  rule," and documented the resulting edge case: an existing channel can
+  end up with zero operators if every operator revokes their own status
+  (or leaves) without granting a successor — no automatic reassignment,
+  by design, mirroring how first-join only applies at channel creation.

@@ -93,7 +93,7 @@ Configuration loading plus its manual reload mechanism.
 - [ ] T024 Implement the connection lifecycle state machine (`CONNECTING` → `REGISTERED` → `CLOSING`, FR-001) in `jircd-core/src/main/java/net/jircd/core/session/ConnectionLifecycle.java`
 - [ ] T025 Implement the nickname registry with atomic claim/uniqueness — exactly one winner on a concurrent claim, no window where two sessions hold the same name (FR-002); scope the uniqueness check behind a single interface so it can later be widened from server-local to network-wide without callers changing (FR-022) in `jircd-core/src/main/java/net/jircd/core/session/NicknameRegistry.java`
 - [ ] T026 [P] Unit tests for `NicknameRegistry`, including a concurrent-claim race asserting exactly one winner (FR-002) in `jircd-core/src/test/java/net/jircd/core/session/NicknameRegistryTest.java`
-- [ ] T027 Define the `Channel` aggregate root (`name`, `members`, `operators`, `sendRestriction`, `topic`, first-join-gets-operator invariant enforced at creation, FR-013) in `jircd-core/src/main/java/net/jircd/core/session/Channel.java`
+- [ ] T027 Define the `Channel` aggregate root (`name`, `members`, `operators`, `voiced` — subset of `members`, independent of `operators`, FR-045 — `activeModes` — a `Set<ChannelMode>`, not a closed enum, so a `ServerExtension` can later contribute additional `BOOLEAN`-kind flags without a data-model change, FR-043, research.md "Channel/user mode extensibility" — `topic`, first-join-gets-operator invariant enforced at creation, FR-013). Also define the `ChannelMode` value type itself (`id`, `flag`, `kind`, `definedBy`, data-model.md) in the same package in `jircd-core/src/main/java/net/jircd/core/session/Channel.java`
 - [ ] T028 Implement the channel registry with atomic name uniqueness and create-on-first-join (FR-003); scope membership lookups behind a single interface so they can later span servers without callers changing (FR-022) in `jircd-core/src/main/java/net/jircd/core/session/ChannelRegistry.java`
 - [ ] T029 [P] Unit tests for `ChannelRegistry` covering name uniqueness and first-join-gets-operator assignment in `jircd-core/src/test/java/net/jircd/core/session/ChannelRegistryTest.java`
 
@@ -120,7 +120,7 @@ Configuration loading plus its manual reload mechanism.
 
 - [ ] T040 [P] Define the `Extension` base interface (`start(ServerContext)`, `stop()`, `id`, `state`) in `jircd-core/src/main/java/net/jircd/core/extension/Extension.java`
 - [ ] T041 [P] Define the `CapabilityExtension` role interface (extends `Extension`; exposes exactly one `Capability`) in `jircd-core/src/main/java/net/jircd/core/extension/CapabilityExtension.java`
-- [ ] T042 [P] Define the `ServerExtension` role interface (extends `Extension`; no `Capability`) in `jircd-core/src/main/java/net/jircd/core/extension/ServerExtension.java`
+- [ ] T042 [P] Define the `ServerExtension` role interface (extends `Extension`; no `Capability`; MAY optionally expose `contributedChannelModes`, empty for every extension in this release, data-model.md `Extension`) in `jircd-core/src/main/java/net/jircd/core/extension/ServerExtension.java`
 - [ ] T043 Implement a per-extension `URLClassLoader` with parent-first delegation for `net.jircd.protocol.*` and `net.jircd.core.*` types (research.md "Delegation model") in `jircd-core/src/main/java/net/jircd/core/extension/ExtensionClassLoader.java` (depends on T040-T042)
 - [ ] T044 Implement `ExtensionRegistry`: `ServiceLoader`-based discovery, `ENABLED`/`DISABLED`/`FAILED` lifecycle, and quiesce-before-unload with a bounded timeout on in-flight calls before releasing a classloader (research.md "Quiesce before unload", FR-020) in `jircd-core/src/main/java/net/jircd/core/extension/ExtensionRegistry.java` (depends on T043)
 - [ ] T045 Add extension-point ownership enforcement to `ExtensionRegistry` — at most one `ENABLED` extension per `extensionPoint`, rejecting a conflicting enable with a specific error naming both ids (research.md "Extension-point ownership", FR-012) in `jircd-core/src/main/java/net/jircd/core/extension/ExtensionRegistry.java` (extends T044)
@@ -136,7 +136,7 @@ Configuration loading plus its manual reload mechanism.
 
 - [ ] T050 Define the `ServerConfiguration` aggregate root (`capabilityStates`, `serverExtensionStates`, `listeners`, `rateLimit`, `administratorCredentials` — data-model.md) in `jircd-core/src/main/java/net/jircd/core/config/ServerConfiguration.java`
 - [ ] T051 Implement the YAML configuration loader and validation — unknown extension id, section/kind mismatch (a `ServerExtension` id under `capabilities` or vice versa), malformed `listeners`/`rateLimit`, and plain-text/unrecognized credential hash format all rejected with a specific, actionable error, leaving any previously-active configuration untouched on failure (contracts/server-configuration.md, FR-012, SC-008) in `jircd-core/src/main/java/net/jircd/core/config/ConfigurationLoader.java` (depends on T050)
-- [ ] T052 Implement the core, manually-triggered reload operation — re-run `ConfigurationLoader`, and on success reconcile the result against `ExtensionRegistry`; on failure, leave the running configuration untouched and surface the same specific error `ConfigurationLoader` produced (research.md "Configuration reload mechanism", contracts/server-configuration.md "Live reload"). This is explicitly **not** automatic file-watching — it only runs when invoked by a trigger (T056, T102) in `jircd-core/src/main/java/net/jircd/core/config/ConfigurationReloader.java` (depends on T044, T051)
+- [ ] T052 Implement the core, manually-triggered reload operation — re-run `ConfigurationLoader`, and on success reconcile the result against `ExtensionRegistry`; on failure, leave the running configuration untouched and surface the same specific error `ConfigurationLoader` produced (research.md "Configuration reload mechanism", contracts/server-configuration.md "Live reload"). This is explicitly **not** automatic file-watching — it only runs when invoked by a trigger (T056, T107) in `jircd-core/src/main/java/net/jircd/core/config/ConfigurationReloader.java` (depends on T044, T051)
 - [ ] T053 [P] Unit tests for `ConfigurationLoader` validation errors: unknown id, section/kind mismatch, malformed listener, malformed rate-limit, plain-text credential rejected in `jircd-core/src/test/java/net/jircd/core/config/ConfigurationLoaderTest.java`
 
 ### Security-event logging
@@ -178,12 +178,12 @@ sent by the other within a second (quickstart.md Story 1).
 
 - [ ] T064 [US1] Implement the `NICK` command handler: validate against `Hostmask`'s nickname grammar (T017) before attempting a claim via `NicknameRegistry` — format (`432`) and uniqueness (`433`) are independent, sequential checks; `431` for a missing argument in `jircd-core/src/main/java/net/jircd/core/session/command/NickCommandHandler.java`
 - [ ] T065 [US1] Implement the `USER` command handler completing registration (`001 RPL_WELCOME` burst); apply `Hostmask`'s username content rule (T017) to derive `ClientSession.ident`, truncating to 9 characters rather than rejecting (contracts/irc-protocol-commands.md "Connection Registration Grammar") in `jircd-core/src/main/java/net/jircd/core/session/command/UserCommandHandler.java` (depends on T064)
-- [ ] T066 [US1] Implement the `JOIN` command handler (create-or-join via `ChannelRegistry`; `353`/`366` replies) in `jircd-core/src/main/java/net/jircd/core/session/command/JoinCommandHandler.java`
+- [ ] T066 [US1] Implement the `JOIN` command handler (create-or-join via `ChannelRegistry`; `353`/`366` replies, prefixing each member's nickname with `@` if in `operators` or `+` if in `voiced` — neither prefix for a plain member, `@` taking precedence over `+` if both, FR-045, contracts/irc-protocol-commands.md "Channel Operations") in `jircd-core/src/main/java/net/jircd/core/session/command/JoinCommandHandler.java`
 - [ ] T067 [US1] Implement the `PART` command handler in `jircd-core/src/main/java/net/jircd/core/session/command/PartCommandHandler.java`
 - [ ] T068 [US1] Implement `PRIVMSG`/`NOTICE` command handlers: build the recipient set (channel members, or the direct-message target), construct one shared `PendingDelivery` (hostmask-prefixed sender, FR-030) per data-model.md — resolving `senderPresentedForm` by live-checking current `cloak` `ServerExtension` state at that moment, never cached, and never from any recipient's own state (data-model.md `PendingDelivery` validation rules) — and enqueue it onto every recipient's `SessionWriter` queue — this handler MUST NOT itself apply any capability-dependent (`message-tags`/`server-time`) formatting, that happens per-recipient in `SessionWriter` (T023) (FR-004, FR-005) in `jircd-core/src/main/java/net/jircd/core/session/command/MessageCommandHandler.java`
 - [ ] T069 [US1] Implement the `QUIT` command handler and abrupt-disconnect cleanup (membership removal, `PART`/`QUIT` notification to affected channels, FR-017) in `jircd-core/src/main/java/net/jircd/core/session/command/QuitCommandHandler.java`
 - [ ] T070 [US1] Implement the `TOPIC` command handler: with no trailing argument, returns the channel's current topic (`332`) or `331` if unset, open to any registered client regardless of membership; with a trailing argument, sets `Channel.topic` and echoes `TOPIC` to all members, rejecting a non-operator with `482 ERR_CHANOPRIVSNEEDED` (FR-040, data-model.md `Channel.topic`) in `jircd-core/src/main/java/net/jircd/core/session/command/TopicCommandHandler.java`
-- [ ] T071 [US1] Implement the `NAMES` command handler, reusing the same `353`/`366` reply logic `JOIN` (T066) already produces, open to any registered client regardless of membership (FR-041) in `jircd-core/src/main/java/net/jircd/core/session/command/NamesCommandHandler.java`
+- [ ] T071 [US1] Implement the `NAMES` command handler, reusing the same `353`/`366` reply logic `JOIN` (T066) already produces — including the `@`/`+` nickname prefixing — open to any registered client regardless of membership (FR-041) in `jircd-core/src/main/java/net/jircd/core/session/command/NamesCommandHandler.java`
 - [ ] T072 [US1] Implement the `LIST` command handler, iterating `ChannelRegistry`'s currently active channels (FR-042) in `jircd-core/src/main/java/net/jircd/core/session/command/ListCommandHandler.java`
 - [ ] T073 [US1] Register the `NICK`/`USER`/`JOIN`/`PART`/`PRIVMSG`/`NOTICE`/`QUIT`/`TOPIC`/`NAMES`/`LIST` handlers in `ConnectionHandler`'s command dispatch table in `jircd-core/src/main/java/net/jircd/core/session/ConnectionHandler.java` (depends on T064-T072)
 
@@ -265,13 +265,18 @@ they're no longer a member and all remaining members are notified
 - [ ] T085 [P] [US5] Integration test: a non-operator's `KICK` attempt is rejected with `482 ERR_CHANOPRIVSNEEDED`, and the target is not removed (FR-014) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story5KickPermissionTest.java`
 - [ ] T086 [P] [US5] Integration test: an operator sets moderated mode (`MODE +m`); a non-permitted member's `PRIVMSG` is not delivered and they receive a clear explanation (FR-013) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story5ModeRestrictionTest.java`
 - [ ] T087 [P] [US5] Integration test: `KICK` is available immediately after server startup with no configuration step required (FR-036) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story5AlwaysAvailableTest.java`
+- [ ] T088 [P] [US5] Integration test: an operator grants voice (`MODE +v`) to a non-operator member of a moderated channel; that member's `PRIVMSG` is now delivered, unlike a non-voiced, non-operator member's (FR-045); a non-operator's `MODE +v` attempt is rejected with `482 ERR_CHANOPRIVSNEEDED`; `MODE +v` naming a nickname not currently in the channel is rejected with `441 ERR_USERNOTINCHANNEL` in `jircd-integration-tests/src/test/java/net/jircd/integration/Story5VoiceTest.java`
+- [ ] T089 [P] [US5] Integration test: `353 RPL_NAMREPLY` (via `JOIN` or `NAMES`) prefixes an operator's nickname with `@`, a voiced non-operator's with `+`, and a plain member's with neither (FR-045, contracts/irc-protocol-commands.md "Channel Operations") in `jircd-integration-tests/src/test/java/net/jircd/integration/Story5NamesPrefixTest.java`
+- [ ] T090 [P] [US5] Integration test: an operator grants operator status (`MODE +o`) to a non-operator member; that member can now perform a moderation action (e.g., `KICK`), the same as the original operator (FR-046); a non-operator's `MODE +o` attempt is rejected with `482 ERR_CHANOPRIVSNEEDED`; `MODE +o` naming a nickname not currently in the channel is rejected with `441 ERR_USERNOTINCHANNEL`; an operator revoking their own status (`MODE -o` on themselves) succeeds even if it leaves the channel with zero operators in `jircd-integration-tests/src/test/java/net/jircd/integration/Story5OperatorGrantTest.java`
 
 ### Implementation for User Story 5
 
-- [ ] T088 [US5] Implement the `KICK` command handler (operator-only, removes target, notifies the channel, `482` on unauthorized, logs rejected attempts via `SecurityEventLog`, FR-013/FR-014/FR-019) in `jircd-core/src/main/java/net/jircd/core/session/command/KickCommandHandler.java`
-- [ ] T089 [US5] Implement the `MODE` command handler for `Channel.sendRestriction` (`+m` moderated / members-only variants; `472` on an unknown flag, `482` on unauthorized, logs rejected attempts via `SecurityEventLog`) in `jircd-core/src/main/java/net/jircd/core/session/command/ModeCommandHandler.java`
-- [ ] T090 [US5] Enforce `Channel.sendRestriction` in the `PRIVMSG`/`NOTICE` path, rejecting non-permitted senders with a clear error (depends on T068) in `jircd-core/src/main/java/net/jircd/core/session/command/MessageCommandHandler.java`
-- [ ] T091 [US5] Register the `KICK`/`MODE` handlers in `ConnectionHandler`'s command dispatch table (depends on T073, T088, T089) in `jircd-core/src/main/java/net/jircd/core/session/ConnectionHandler.java`
+- [ ] T091 [US5] Implement the `KICK` command handler (operator-only, removes target, notifies the channel, `482` on unauthorized, logs rejected attempts via `SecurityEventLog`, FR-013/FR-014/FR-019) in `jircd-core/src/main/java/net/jircd/core/session/command/KickCommandHandler.java`
+- [ ] T092 [US5] Implement the `MODE` command handler against `Channel.activeModes`: set/clear `+m`/`-m` (`moderated`) and `+n`/`-n` (`members-only`) independently (both may be active at once, FR-013, contracts/irc-protocol-commands.md "Full Channel Mode Catalog"); `472` on a flag matching neither a core-defined nor a currently-`ENABLED` extension-defined `ChannelMode`, or on a bare mode query with no flag argument (FR-043); `482` on unauthorized; logs rejected attempts via `SecurityEventLog` in `jircd-core/src/main/java/net/jircd/core/session/command/ModeCommandHandler.java`
+- [ ] T093 [US5] Extend the `MODE` command handler with `+v`/`-v <nickname>` (FR-045): resolve `<nickname>` to a current member of the channel — `441 ERR_USERNOTINCHANNEL` if not — then add/remove it from `Channel.voiced` (not `activeModes`, since `voice` is `MEMBER`-kind, data-model.md `ChannelMode`); `482` on unauthorized; logs rejected attempts via `SecurityEventLog` in `jircd-core/src/main/java/net/jircd/core/session/command/ModeCommandHandler.java` (depends on T092)
+- [ ] T094 [US5] Extend the `MODE` command handler with `+o`/`-o <nickname>` (FR-046), the same shape as `+v`/`-v` (T093): resolve `<nickname>` to a current member — `441` if not — then add/remove it from `Channel.operators` (not `activeModes`); `482` on unauthorized; a sender MAY target themselves, including a self-revocation that leaves the channel with zero operators (data-model.md `Channel` validation rules); logs rejected attempts via `SecurityEventLog` in `jircd-core/src/main/java/net/jircd/core/session/command/ModeCommandHandler.java` (depends on T092)
+- [ ] T095 [US5] Enforce `Channel.activeModes` in the `PRIVMSG`/`NOTICE` path: reject unless the sender passes every currently-active restrictive flag independently — `MEMBERS_ONLY` requires membership; `MODERATED` requires the sender to be in `operators` **or** `voiced` (FR-045, matching classic IRC's full `+m` semantic, data-model.md `Channel` validation rules) — with a clear error (depends on T068, T093) in `jircd-core/src/main/java/net/jircd/core/session/command/MessageCommandHandler.java`
+- [ ] T096 [US5] Register the `KICK`/`MODE` handlers in `ConnectionHandler`'s command dispatch table (depends on T073, T091, T092, T093, T094) in `jircd-core/src/main/java/net/jircd/core/session/ConnectionHandler.java`
 
 **Checkpoint**: User Stories 1, 2, 4, and 5 all work independently.
 
@@ -293,24 +298,24 @@ in-band and confirm the effect matches the configuration-file path
 
 > **Write these tests FIRST, ensure they FAIL before implementation.**
 
-- [ ] T092 [P] [US6] Integration test: a non-privileged session's `EXTENSION` command is rejected with `481 ERR_NOPRIVILEGES` (FR-033) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story6PrivilegeGateTest.java`
-- [ ] T093 [P] [US6] Integration test: `OPER` with valid credentials returns `381 RPL_YOUREOPER`; with invalid credentials returns `464 ERR_PASSWDMISMATCH` and the failure is logged as a security event (FR-019, FR-034) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story6OperTest.java`
-- [ ] T094 [P] [US6] Integration test: a privileged session's `EXTENSION DISABLE message-tags` has the same observable effect as Story 4's config-file path, with no config file edit involved, within SC-009's budget (path equivalence, contracts/server-configuration.md) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story6ExtensionToggleTest.java`
-- [ ] T095 [P] [US6] Integration test: `EXTENSION DISABLE moderation` and `EXTENSION DISABLE capability-negotiation` are both rejected as unknown/non-toggleable, not silently accepted (FR-035, FR-036) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story6NonToggleableRejectionTest.java`
-- [ ] T096 [P] [US6] Integration test: `WHOHOST` returns a target's real hostname to a privileged admin even while the `cloak` extension obscures it for other clients (FR-031, FR-032) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story6WhohostTest.java`
-- [ ] T097 [P] [US6] Integration test: `EXTENSION DISABLE admin`, issued by a privileged session, succeeds; that session's subsequent admin commands are then rejected with `481`, while the configuration-file/`SIGHUP` path still works (contracts/irc-protocol-commands.md "Self-lockout") in `jircd-integration-tests/src/test/java/net/jircd/integration/Story6SelfLockoutTest.java`
-- [ ] T098 [P] [US6] Integration test: a privileged session edits nothing but sends `REHASH` after the config file's `rateLimit.bucketSize` was changed on disk; the new value takes effect and `382 RPL_REHASHING` is returned — the in-band equivalent of Story 4's `SIGHUP` path (research.md "Configuration reload mechanism"); a `REHASH` against an invalid file returns the specific validation error directly to the session and leaves the running configuration untouched in `jircd-integration-tests/src/test/java/net/jircd/integration/Story6RehashTest.java`
+- [ ] T097 [P] [US6] Integration test: a non-privileged session's `EXTENSION` command is rejected with `481 ERR_NOPRIVILEGES` (FR-033) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story6PrivilegeGateTest.java`
+- [ ] T098 [P] [US6] Integration test: `OPER` with valid credentials returns `381 RPL_YOUREOPER`; with invalid credentials returns `464 ERR_PASSWDMISMATCH` and the failure is logged as a security event (FR-019, FR-034) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story6OperTest.java`
+- [ ] T099 [P] [US6] Integration test: a privileged session's `EXTENSION DISABLE message-tags` has the same observable effect as Story 4's config-file path, with no config file edit involved, within SC-009's budget (path equivalence, contracts/server-configuration.md) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story6ExtensionToggleTest.java`
+- [ ] T100 [P] [US6] Integration test: `EXTENSION DISABLE moderation` and `EXTENSION DISABLE capability-negotiation` are both rejected as unknown/non-toggleable, not silently accepted (FR-035, FR-036) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story6NonToggleableRejectionTest.java`
+- [ ] T101 [P] [US6] Integration test: `WHOHOST` returns a target's real hostname to a privileged admin even while the `cloak` extension obscures it for other clients (FR-031, FR-032) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story6WhohostTest.java`
+- [ ] T102 [P] [US6] Integration test: `EXTENSION DISABLE admin`, issued by a privileged session, succeeds; that session's subsequent admin commands are then rejected with `481`, while the configuration-file/`SIGHUP` path still works (contracts/irc-protocol-commands.md "Self-lockout") in `jircd-integration-tests/src/test/java/net/jircd/integration/Story6SelfLockoutTest.java`
+- [ ] T103 [P] [US6] Integration test: a privileged session edits nothing but sends `REHASH` after the config file's `rateLimit.bucketSize` was changed on disk; the new value takes effect and `382 RPL_REHASHING` is returned — the in-band equivalent of Story 4's `SIGHUP` path (research.md "Configuration reload mechanism"); a `REHASH` against an invalid file returns the specific validation error directly to the session and leaves the running configuration untouched in `jircd-integration-tests/src/test/java/net/jircd/integration/Story6RehashTest.java`
 
 ### Implementation for User Story 6
 
-- [ ] T099 [US6] Implement administrator-credential verification against `ServerConfiguration.administratorCredentials` using the password-hashing library (research.md "Administrator credential storage", FR-034) in `jircd-server-extensions/admin/src/main/java/net/jircd/serverextensions/admin/AdminCredentialVerifier.java`
-- [ ] T100 [US6] Implement the `OPER` command handler (grants `ClientSession.administratorPrivilege` on success; `381`/`464`; logs failures via `SecurityEventLog`) in `jircd-server-extensions/admin/src/main/java/net/jircd/serverextensions/admin/OperCommandHandler.java` (depends on T099)
-- [ ] T101 [US6] Implement the `EXTENSION` command handler (`ENABLE`/`DISABLE` via `ExtensionRegistry`; `481` if unprivileged; specific error for unknown or non-toggleable ids) in `jircd-server-extensions/admin/src/main/java/net/jircd/serverextensions/admin/ExtensionCommandHandler.java`
-- [ ] T102 [US6] Implement the `REHASH` command handler — admin-privilege gated, invokes `ConfigurationReloader`; `382 RPL_REHASHING` on success, the reloader's specific validation error on failure, `481` if unprivileged (research.md "Configuration reload mechanism", FR-012) in `jircd-server-extensions/admin/src/main/java/net/jircd/serverextensions/admin/RehashCommandHandler.java` (depends on T052)
-- [ ] T103 [US6] Implement the `WHOHOST` command handler (reads `ClientSession.realHostname` directly, bypassing any cloak extension) in `jircd-server-extensions/admin/src/main/java/net/jircd/serverextensions/admin/WhohostCommandHandler.java`
-- [ ] T104 [US6] Implement the `admin` `ServerExtension` wiring, registering the `OPER`/`EXTENSION`/`REHASH`/`WHOHOST` handlers with `jircd-core`'s command dispatch when enabled (depends on T100-T103) in `jircd-server-extensions/admin/src/main/java/net/jircd/serverextensions/admin/AdminExtension.java`
-- [ ] T105 [US6] Implement the `cloak` `ServerExtension`, claiming the `hostname-display` extension point (research.md "Cloak extension boundary", FR-031) in `jircd-server-extensions/cloak/src/main/java/net/jircd/serverextensions/cloak/CloakExtension.java`
-- [ ] T106 [P] [US6] Register `admin` and `cloak` as `ServiceLoader` providers via `META-INF/services/net.jircd.core.extension.ServerExtension` in `jircd-server-extensions/admin/src/main/resources/` and `jircd-server-extensions/cloak/src/main/resources/`
+- [ ] T104 [US6] Implement administrator-credential verification against `ServerConfiguration.administratorCredentials` using the password-hashing library (research.md "Administrator credential storage", FR-034) in `jircd-server-extensions/admin/src/main/java/net/jircd/serverextensions/admin/AdminCredentialVerifier.java`
+- [ ] T105 [US6] Implement the `OPER` command handler (grants `ClientSession.administratorPrivilege` on success; `381`/`464`; logs failures via `SecurityEventLog`) in `jircd-server-extensions/admin/src/main/java/net/jircd/serverextensions/admin/OperCommandHandler.java` (depends on T104)
+- [ ] T106 [US6] Implement the `EXTENSION` command handler (`ENABLE`/`DISABLE` via `ExtensionRegistry`; `481` if unprivileged; specific error for unknown or non-toggleable ids) in `jircd-server-extensions/admin/src/main/java/net/jircd/serverextensions/admin/ExtensionCommandHandler.java`
+- [ ] T107 [US6] Implement the `REHASH` command handler — admin-privilege gated, invokes `ConfigurationReloader`; `382 RPL_REHASHING` on success, the reloader's specific validation error on failure, `481` if unprivileged (research.md "Configuration reload mechanism", FR-012) in `jircd-server-extensions/admin/src/main/java/net/jircd/serverextensions/admin/RehashCommandHandler.java` (depends on T052)
+- [ ] T108 [US6] Implement the `WHOHOST` command handler (reads `ClientSession.realHostname` directly, bypassing any cloak extension) in `jircd-server-extensions/admin/src/main/java/net/jircd/serverextensions/admin/WhohostCommandHandler.java`
+- [ ] T109 [US6] Implement the `admin` `ServerExtension` wiring, registering the `OPER`/`EXTENSION`/`REHASH`/`WHOHOST` handlers with `jircd-core`'s command dispatch when enabled (depends on T105-T108) in `jircd-server-extensions/admin/src/main/java/net/jircd/serverextensions/admin/AdminExtension.java`
+- [ ] T110 [US6] Implement the `cloak` `ServerExtension`, claiming the `hostname-display` extension point (research.md "Cloak extension boundary", FR-031) in `jircd-server-extensions/cloak/src/main/java/net/jircd/serverextensions/cloak/CloakExtension.java`
+- [ ] T111 [P] [US6] Register `admin` and `cloak` as `ServiceLoader` providers via `META-INF/services/net.jircd.core.extension.ServerExtension` in `jircd-server-extensions/admin/src/main/resources/` and `jircd-server-extensions/cloak/src/main/resources/`
 
 **Checkpoint**: All five mandatory user stories (1, 2, 4, 5, 6) work
 independently.
@@ -332,15 +337,15 @@ that same user's information and confirm you receive their presented
 
 > **Write these tests FIRST, ensure they FAIL before implementation.**
 
-- [ ] T107 [P] [US7] Integration test: a client performs a self-lookup (no target) and receives its own real hostname/IP, even while the `cloak` extension is currently obscuring it from other clients (FR-038 case 1) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story7SelfLookupTest.java`
-- [ ] T108 [P] [US7] Integration test: a privileged session looks up a *different* connected client and receives that client's real hostname/IP, consistent with `WHOHOST` (FR-038 case 2) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story7AdminLookupTest.java`
-- [ ] T109 [P] [US7] Integration test: a non-privileged session looks up a *different* connected client and receives only that client's presented hostname (the same value its message hostmask shows) — never the real value, whether or not `cloak` is enabled (FR-038 case 3, SC-010) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story7RegularLookupTest.java`
-- [ ] T110 [P] [US7] Integration test: a lookup for a nickname that isn't connected returns `401 ERR_NOSUCHNICK`, no user data (FR-037) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story7NoSuchNickTest.java`
+- [ ] T112 [P] [US7] Integration test: a client performs a self-lookup (no target) and receives its own real hostname/IP, even while the `cloak` extension is currently obscuring it from other clients (FR-038 case 1) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story7SelfLookupTest.java`
+- [ ] T113 [P] [US7] Integration test: a privileged session looks up a *different* connected client and receives that client's real hostname/IP, consistent with `WHOHOST` (FR-038 case 2) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story7AdminLookupTest.java`
+- [ ] T114 [P] [US7] Integration test: a non-privileged session looks up a *different* connected client and receives only that client's presented hostname (the same value its message hostmask shows) — never the real value, whether or not `cloak` is enabled (FR-038 case 3, SC-010) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story7RegularLookupTest.java`
+- [ ] T115 [P] [US7] Integration test: a lookup for a nickname that isn't connected returns `401 ERR_NOSUCHNICK`, no user data (FR-037) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story7NoSuchNickTest.java`
 
 ### Implementation for User Story 7
 
-- [ ] T111 [US7] Implement the `WHOIS` command handler: resolve the target session (the sender's own if no argument given), apply FR-038's real-vs-presented resolution by reusing `UserIdentity.presentedForm`'s existing computation and `ClientSession.realHostname` (never a new, independent resolution — research.md "Cloak extension boundary"), reply `311 RPL_WHOISUSER` + `318 RPL_ENDOFWHOIS`, or `401 ERR_NOSUCHNICK` if the target isn't connected. Core protocol behavior (FR-037), never an optional extension in `jircd-core/src/main/java/net/jircd/core/session/command/WhoisCommandHandler.java`
-- [ ] T112 [US7] Register the `WHOIS` handler in `ConnectionHandler`'s command dispatch table (depends on T073, T111) in `jircd-core/src/main/java/net/jircd/core/session/ConnectionHandler.java`
+- [ ] T116 [US7] Implement the `WHOIS` command handler: resolve the target session (the sender's own if no argument given), apply FR-038's real-vs-presented resolution by reusing `UserIdentity.presentedForm`'s existing computation and `ClientSession.realHostname` (never a new, independent resolution — research.md "Cloak extension boundary"), reply `311 RPL_WHOISUSER` + `318 RPL_ENDOFWHOIS`, or `401 ERR_NOSUCHNICK` if the target isn't connected. Core protocol behavior (FR-037), never an optional extension in `jircd-core/src/main/java/net/jircd/core/session/command/WhoisCommandHandler.java`
+- [ ] T117 [US7] Register the `WHOIS` handler in `ConnectionHandler`'s command dispatch table (depends on T073, T116) in `jircd-core/src/main/java/net/jircd/core/session/ConnectionHandler.java`
 
 **Checkpoint**: All six mandatory user stories (1, 2, 4, 5, 6, 7) work
 independently.
@@ -352,11 +357,11 @@ independently.
 **Purpose**: Whole-system validation and documentation that spans
 multiple stories.
 
-- [ ] T113 [P] Load-tagged (`@Tag("load")`) test: the server sustains 1,000 simultaneous connections without channel message delivery delay exceeding SC-002's target (SC-003) in `jircd-integration-tests/src/test/java/net/jircd/integration/ConcurrentConnectionScaleLoadTest.java`
-- [ ] T114 [P] Load-tagged (`@Tag("load")`) test: during a sustained flood from one connection, delivery latency for other well-behaved clients does not increase beyond SC-002's target (SC-006) in `jircd-integration-tests/src/test/java/net/jircd/integration/RateLimitLoadTest.java`
-- [ ] T115 [P] Update `README.md`'s "Getting started" section with real build/run instructions now that the project builds (`./gradlew build`, `./gradlew :jircd-server:run`), replacing the pre-implementation placeholder
-- [ ] T116 Run the full `specs/001-ircv3-server/quickstart.md` validation pass manually against a running `./gradlew :jircd-server:run` instance, covering Stories 1, 2, 4, 5, 6, and 7 end-to-end (constitution UX Consistency principle's required manual usage-scenario check)
-- [ ] T117 [P] Code cleanup pass: remove any dead code/TODOs introduced during implementation and confirm `./gradlew build` runs Spotless and SpotBugs clean across all subprojects (constitution Code Quality principle)
+- [ ] T118 [P] Load-tagged (`@Tag("load")`) test: the server sustains 1,000 simultaneous connections without channel message delivery delay exceeding SC-002's target (SC-003) in `jircd-integration-tests/src/test/java/net/jircd/integration/ConcurrentConnectionScaleLoadTest.java`
+- [ ] T119 [P] Load-tagged (`@Tag("load")`) test: during a sustained flood from one connection, delivery latency for other well-behaved clients does not increase beyond SC-002's target (SC-006) in `jircd-integration-tests/src/test/java/net/jircd/integration/RateLimitLoadTest.java`
+- [ ] T120 [P] Update `README.md`'s "Getting started" section with real build/run instructions now that the project builds (`./gradlew build`, `./gradlew :jircd-server:run`), replacing the pre-implementation placeholder
+- [ ] T121 Run the full `specs/001-ircv3-server/quickstart.md` validation pass manually against a running `./gradlew :jircd-server:run` instance, covering Stories 1, 2, 4, 5, 6, and 7 end-to-end (constitution UX Consistency principle's required manual usage-scenario check)
+- [ ] T122 [P] Code cleanup pass: remove any dead code/TODOs introduced during implementation and confirm `./gradlew build` runs Spotless and SpotBugs clean across all subprojects (constitution Code Quality principle)
 
 ---
 
@@ -384,14 +389,14 @@ multiple stories.
   `Channel` aggregate from Foundational.
 - **User Story 6 (P4)**: No dependencies on other stories, but — like
   Story 4 — is most demonstrable once Story 2 exists. Its `REHASH`
-  command (T102) depends only on Foundational's `ConfigurationReloader`
+  command (T107) depends only on Foundational's `ConfigurationReloader`
   (T052), not on Story 4.
 - **User Story 7 (P2)**: No dependencies on other stories to compile or
-  run — the self-lookup case (T107) needs nothing beyond Foundational.
-  Its administrator-lookup test (T108) is most meaningful once Story 6's
-  `OPER` exists, and its cloak-interaction assertions (T107/T109) are most
+  run — the self-lookup case (T112) needs nothing beyond Foundational.
+  Its administrator-lookup test (T113) is most meaningful once Story 6's
+  `OPER` exists, and its cloak-interaction assertions (T112/T114) are most
   meaningful once Story 6's `cloak` extension exists, but the `WHOIS`
-  handler itself (T111) only depends on `ClientSession.realHostname` and
+  handler itself (T116) only depends on `ClientSession.realHostname` and
   `UserIdentity.presentedForm`, both Foundational — it does not call into
   `WHOHOST` or any Story 6 code.
 
@@ -482,7 +487,7 @@ With multiple developers/agents, once Foundational is done:
   mechanism from Foundational, so pairing them reduces cross-agent
   coordination)
 
-Watch for the one known cross-story file touch: Story 5's T090 extends
+Watch for the one known cross-story file touch: Story 5's T095 extends
 `MessageCommandHandler.java`, which Story 1's T068 creates — sequence
 those two specifically, even if the stories otherwise run in parallel.
 
@@ -498,13 +503,13 @@ those two specifically, even if the stories otherwise run in parallel.
   Clarifications — no tasks are generated for them. Likewise FR-028/
   FR-029 (federation consistency) — federation itself is out of scope.
 - Configuration reload is manually triggered only (`SIGHUP` or `REHASH`,
-  T052/T056/T102) — there is deliberately no automatic file-watching task;
+  T052/T056/T107) — there is deliberately no automatic file-watching task;
   see research.md "Configuration reload mechanism" for why.
 - Verify each story's tests fail before implementing that story.
 - Commit after each task or logical group.
 - Stop at any checkpoint to validate a story independently before
   continuing.
 - The two `[P]`-marked capability/server-extension `ServiceLoader`
-  registration tasks (T079, T106) are each one task covering multiple
+  registration tasks (T079, T111) are each one task covering multiple
   small resource files (one per extension in that group) — split further
   only if working across them in true parallel by different people.

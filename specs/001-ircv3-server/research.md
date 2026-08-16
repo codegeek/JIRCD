@@ -316,6 +316,125 @@ capabilities (offering something in `CAP LS`) can require a
   can still affect the whole process) and doesn't give a clean "reload"
   story.
 
+## Channel/user mode extensibility (FR-043/FR-044)
+
+**Decision**: `Channel.activeModes` is a `Set` of `ChannelMode` (data-model.md)
+— a Value Object with its own stable `id`, a wire `flag` character, a
+`kind` (`BOOLEAN`/`VALUE`/`LIST`/`MEMBER`), and who defines it (`CORE` or a
+`ServerExtension`) — not a closed enum. Core unconditionally contributes
+exactly two, both `BOOLEAN`: `moderated` (`m`) and `members-only` (`n`)
+(FR-013), never gated by `Extension` state (FR-036), the same guarantee
+the "Extension system" decision above already gives channel moderation as
+a mechanism. A `ServerExtension` MAY additionally contribute further
+`BOOLEAN` flags via a new `contributedChannelModes` field (data-model.md
+`Extension`) — the same "an extension contributes a named thing core
+aggregates" pattern already established for `CapabilityExtension`/
+`Capability`, not a new mechanism. No extension contributes one in this
+release; the field exists so a future one (e.g., an account module's
+registered-channel/user flag, à la classic IRC `+r`) is purely an
+extension addition, not a core data-model change. User modes (FR-044) are
+expected to follow the identical pattern once the first one is actually
+designed, rather than a separate, incompatible mechanism — nothing is
+modeled for them yet since none exist.
+
+**Rationale**: The original `sendRestriction` enum (`NONE`/`MEMBERS_ONLY`/
+`MODERATED`) was a real design flaw, not just a naming choice: standard
+IRC channel modes are an open, per-flag namespace (RFC 2811), and this
+project's own roadmap already names a concrete future consumer — Story
+3's account module wanting a registered-channel/user flag. A closed enum
+would force a core code change (and a new release) for exactly the kind
+of extension FR-011 exists to add without one. It was also already subtly
+wrong even without that future case: `MEMBERS_ONLY` and `MODERATED` are
+independent flags on real IRC servers (a channel can have both, either,
+or neither), and a mutually-exclusive enum couldn't represent that —
+fixed as part of the same change, not a separate concern.
+
+**`id` vs. `definedBy`-only identity**: An earlier draft of `ChannelMode`
+identified a flag only by its `flag` character plus `definedBy` (`CORE` or
+an extension id) — no separate name of its own. Validated and rejected in
+favor of adding a proper `id`, for three concrete reasons, not just
+"consistency for its own sake":
+1. **The wire-letter namespace is the actually scarce resource, and
+   conflating it with identity makes conflicts harder to report.**
+   `flag` has only 52 possible values, shared by every current and future
+   core and extension flag combined; two independently-developed
+   extensions choosing the same letter for *different* concepts is a real
+   collision risk (unlike, say, `Capability` names, which are long enough
+   that IRCv3's own convention of vendor-prefixing, e.g. `draft/multiline`,
+   makes collisions rare in practice). When that collision happens, the
+   rejection error needs to name *what* conflicts, not just *which letter*
+   — "extension `registered-channel-plus`'s `registered` flag conflicts
+   with extension `read-only-mode`'s `readonly` flag, both claiming `r`"
+   is the kind of specific, actionable error the constitution's Principle
+   III requires; "flag `r` is claimed twice" is not.
+2. **Every other extensible, administrator-facing concept in this data
+   model already has a stable `id` independent of its wire form**:
+   `Extension.id`, `Capability.name`. A `ChannelMode` identified only by a
+   single wire letter would be the one exception, for no principled
+   reason — administrators and logs would have no legible way to refer to
+   a specific mode.
+3. **It costs one field.** `ChannelMode` is already a new Value Object
+   with a defining-source field the closed enum didn't have; adding `id`
+   alongside `flag` is a marginal addition to a type already being
+   introduced, not a separate migration.
+
+**Considering the rest of RFC 2811's standard channel modes surfaced a
+second, more important finding**: most of them are not simple on/off
+flags. `l` (user limit) and `k` (channel key) each carry a value;
+`b`/`e`/`I` (ban/exception/invite-exception) are each a list of masks;
+`o`/`v` (operator/voice) are per-*nickname* privileges, not per-channel
+state at all — `o` is already exactly what `Channel.operators` models,
+just not yet mutable via `MODE`. `Channel.activeModes: Set<ChannelMode>`
+can only represent the on/off case. Rather than silently ignoring this
+until someone tries to build a `VALUE`/`LIST`-kind extension and discovers
+the shape doesn't fit, `ChannelMode.kind` classifies every flag now
+(contracts/irc-protocol-commands.md "Full Channel Mode Catalog" catalogs
+all eleven), and the `ChannelMode` validation rules explicitly forbid
+contributing a `VALUE`/`LIST`-kind flag in this release: `Channel`'s shape
+would need to grow (e.g. a `modeParameters` map) to hold one, and that
+shape change is deliberately left undesigned until a real consumer
+exists, rather than speculatively built for zero current uses — the same
+judgment call "Alternatives considered" below already makes for a
+general-purpose data bag, applied one layer more specifically.
+
+**`MEMBER`-kind flags in practice (FR-045/FR-046)**: `voice` was this
+release's first `MEMBER`-kind `ChannelMode`, and it validated the
+taxonomy above: its state doesn't live in `activeModes` at all (a `Set`
+can't express "which members," only "which flags") but in its own
+dedicated `Channel.voiced` field. `operator` follows the identical
+pattern via `MODE +o`/`-o <nickname>` (FR-046) and `Channel.operators` —
+originally scoped out on the grounds that first-join-gets-operator
+(FR-013) already answers "how does a member become one" and nothing
+required a second path, but revisited once "an operator can grant
+operator status to another member" was named as an explicit requirement.
+Adding it cost nothing new: `Channel.operators` already existed (FR-013
+depends on it), so unlike `voice`, no new `Channel` field was needed —
+only a `ChannelMode` catalog entry and a `MODE` handler branch identical
+in shape to `voice`'s. First-join-gets-operator (FR-013) remains the
+*only* way a channel's first operator is established; `MODE +o` is how
+operator status subsequently spreads to other members, the same
+relationship voice's grant mechanism has to moderated-mode's send-check.
+
+**Alternatives considered**:
+- *Keep the enum, widen it each time a new mode is needed*: rejected —
+  exactly the "requires core codebase changes" outcome the Extension
+  system exists to avoid (FR-011).
+- *A raw `Set<Character>` with no defining-source metadata*: rejected —
+  loses the ability to say a flag stops being recognized when its owning
+  extension is disabled (FR-020), and loses a place to attach each flag's
+  semantics; `ChannelMode` costs one small Value Object for that.
+- *Identify a `ChannelMode` by `flag` + `definedBy` alone, no separate
+  `id`*: rejected — see "`id` vs. `definedBy`-only identity" above.
+- *Pre-design `VALUE`/`LIST` storage on `Channel` now, since RFC 2811
+  already defines what they'd need*: rejected as premature — no extension
+  needs one yet, and guessing the right shape (a map? a richer per-flag
+  state object?) without a concrete consumer risks designing the wrong
+  thing and having to redesign it anyway once one exists.
+- *A general-purpose "arbitrary key-value extension data" bag on
+  `Channel`*: rejected as premature generality — `ChannelMode` solves the
+  one concrete, named case (mode flags) this decision exists for, without
+  inventing a schema-less mechanism nothing else in this project needs.
+
 ## Deterministic testing under concurrency
 
 **Decision**: Success criteria expressed as wall-clock budgets (SC-002's 1s

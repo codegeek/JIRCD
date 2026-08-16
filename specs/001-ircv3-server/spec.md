@@ -202,6 +202,14 @@ confirm other channel members see the removal reflected.
    **When** a non-permitted member attempts to send a message, **Then**
    the message is not delivered and the sender receives a clear
    explanation.
+4. **Given** a channel is under moderated-mode restriction (Scenario 3)
+   and an operator grants a member the voice privilege, **When** that
+   voiced member sends a message, **Then** it is delivered — unlike a
+   non-voiced, non-operator member's message under the same restriction.
+5. **Given** an operator grants operator status to another member,
+   **When** that member performs a moderation action (e.g., removing a
+   disruptive user), **Then** it succeeds, the same as if the original
+   operator had performed it.
 
 ---
 
@@ -300,9 +308,27 @@ their presented (not real) hostname.
   does the server ever notice and clean it up?
 - How does the server respond to a malformed or incomplete protocol
   message that cannot be parsed?
+- What happens when a client sends a channel mode flag other than the two
+  this release implements (moderated-mode, members-only) — e.g.,
+  invite-only or a channel key — or queries a channel's current modes
+  with no flag argument at all? What happens when a client sends a
+  user-level mode change or query, which this release doesn't implement
+  at all?
 - How does the server behave when an optional extension fails to start or
   encounters an internal error while running — does the rest of the
   server continue operating?
+- *(Applies once a mode-contributing extension exists — no extension
+  contributes one in this release)* What happens to a channel that
+  already has an extension-contributed mode flag set when the
+  administrator disables that extension — does the flag disappear, does
+  it linger inertly, or something else?
+- What happens to a member's voice privilege (FR-045) when they leave a
+  channel and rejoin — do they keep it, or does an operator need to grant
+  it again?
+- What happens if every operator of a channel revokes their own operator
+  status (or leaves) without first granting it to anyone else (FR-046) —
+  does the server automatically promote a remaining member, or can an
+  existing channel end up with members but no operator at all?
 - What happens when a client negotiates a capability, and mid-session the
   administrator disables the extension providing that capability?
 - How does the server respond when a channel or nickname name exceeds
@@ -588,6 +614,56 @@ their presented (not real) hostname.
   currently a member of that channel.
 - **FR-042**: The server MUST allow a registered client to request a list
   of the server's currently active channels.
+- **FR-043**: The server's channel mode mechanism MUST directly and
+  unconditionally implement exactly the two moderation flags FR-013
+  defines (moderated-mode, members-only) as core behavior — never gated
+  by whether any optional extension is enabled (FR-036). That mechanism
+  MUST also be built so that an optional server extension can introduce
+  additional channel-mode flags without requiring a change to the
+  server's core codebase (FR-011's existing guarantee, applied to mode
+  flags specifically) — for example, a future extension supporting
+  registered-channel identity could add a flag for that, the way classic
+  IRC networks use a registered-channel mode. A mode flag with no
+  definition at all — neither core's nor a currently-enabled extension's
+  — and a mode query with no flag argument, MUST both be rejected with
+  the same specific, actionable "unsupported mode" error FR-013's other
+  operator-gated actions use — never silently ignored, misapplied, or
+  answered with a fabricated result. No extension in this release defines
+  an additional flag; the mechanism exists now so one can be added later
+  without revisiting this requirement. This extensibility guarantee
+  covers simple on/off flags like the two FR-013 already defines; a
+  channel mode that instead carries a value (e.g., a numeric limit) or a
+  list (e.g., a set of masks) is a structurally different case this
+  requirement does not promise a mechanism for yet — see Assumptions.
+- **FR-044**: The server MUST NOT implement any user-level mode in this
+  release, and has no user-level equivalent of an "operator" concept to
+  gate one — a user-level mode command MUST receive the same standard
+  "not supported" handling any other unimplemented-but-recognized
+  command receives (see Assumptions), not be silently accepted, ignored,
+  or treated as a channel mode command. When a user-level mode is
+  introduced, whether by a future core release or an optional extension,
+  it MUST use the same open, extension-friendly mechanism FR-043
+  establishes for channel modes, not a separate, incompatible one.
+- **FR-045**: The server MUST allow a channel operator to grant a "voice"
+  privilege to a specific member, and to later revoke it, the same way
+  standard IRC does — restricted to operators, the same as every other
+  moderation action (FR-013, FR-014). While moderated-mode restriction
+  (FR-013) is active, the server MUST permit a voiced member to send
+  channel messages in addition to operators — moderated mode's complete
+  definition is "operators and voiced members may send," not
+  "operators only." A non-existent target, or one who isn't currently a
+  member of the channel, MUST be rejected with a clear error rather than
+  silently granting a privilege to no one.
+- **FR-046**: The server MUST allow a channel operator to grant operator
+  status to another member, and to revoke operator status (including
+  their own), the same way voice is granted and revoked (FR-045) —
+  restricted to operators, the same as every other moderation action
+  (FR-013, FR-014). This is in addition to, not a replacement for,
+  first-join-gets-operator (FR-013) as how a channel's very first
+  operator is established: it's how operator status subsequently spreads
+  to other members. A non-existent target, or one who isn't currently a
+  member of the channel, MUST be rejected with a clear error rather than
+  silently granting a privilege to no one.
 
 ### Key Entities
 
@@ -626,10 +702,13 @@ their presented (not real) hostname.
   that a client may request; has an availability state (offered/not
   offered) determined by which extensions are currently enabled.
 - **Extension**: An independently enableable/disableable unit of optional
-  server functionality (e.g., an individual capability, a command set)
-  configured by the administrator. Core protocol behavior — channel
-  moderation (FR-036) and the capability-negotiation mechanism itself
-  (FR-035) — is never modeled as an Extension; it is always present.
+  server functionality (e.g., an individual capability, a command set, or
+  an additional channel/user-mode flag, FR-043/FR-044) configured by the
+  administrator. Core protocol behavior — channel moderation's two
+  built-in mode flags (FR-036) and the capability-negotiation mechanism
+  itself (FR-035) — is never modeled as an Extension; it is always
+  present. An *additional* mode flag beyond those two, once one exists,
+  would be — the mechanism, not the two built-in flags, is what's core.
 - **Server Configuration**: The administrator-controlled settings
   determining which extensions are active and how core and optional
   behavior is tuned.
@@ -703,6 +782,27 @@ their presented (not real) hostname.
   administrator-configurable Server Configuration setting in this
   release — unlike rate limiting's thresholds, which FR-016 already
   requires to be tunable.
+- Channel modes beyond moderated-mode and members-only (FR-013/FR-043),
+  and user modes entirely (FR-044), are recognized at the wire-protocol
+  level — a future client library can still parse them from any server —
+  but their behavior is deferred past this release, the same treatment
+  already given to `AUTHENTICATE`/SASL (Story 3) and `NickServ`/`ChanServ`-
+  style commands. This is a scope boundary, not an oversight: FR-013's
+  two implemented flags are what channel moderation (Story 5) actually
+  needs, and nothing in this release depends on any other mode existing.
+  Unlike those other deferrals, though, FR-043/FR-044 also commit to *how*
+  a later mode gets added: via an optional server extension contributing
+  it (research.md "Channel/user mode extensibility"), not a core-codebase
+  change — so a later release (or a third-party extension) can add, say,
+  a registered-channel/user flag once account registration exists,
+  without this specification needing to be revisited first. That
+  commitment covers simple on/off flags only. Standard IRC's
+  value-carrying (e.g. a numeric limit) and list-type (e.g. a mask list)
+  channel modes are cataloged for reference (contracts/
+  irc-protocol-commands.md "Full Channel Mode Catalog") but have no
+  extension mechanism defined yet — deliberately: no extension needs one,
+  and guessing the right shape without a concrete consumer risks building
+  the wrong thing.
 - No mobile app, web client, or GUI is in scope — this specification
   covers the server and its protocol behavior only; any client software
   is out of scope.
