@@ -1,37 +1,121 @@
-# Contract: Server-to-Client Numeric Replies (In Scope)
+# Contract: Server-to-Client Numeric Replies
 
-Numeric replies this server MUST produce for the commands in
-[irc-protocol-commands.md](./irc-protocol-commands.md), per RFC 1459/2812
-where a standard numeric exists. Error replies MUST be worded specifically
-enough to satisfy FR-002/FR-012/FR-014/FR-015's "clear error" requirements
-(constitution Principle III: error messages state what went wrong and what
-the client/administrator can do about it).
+Like [irc-protocol-commands.md](./irc-protocol-commands.md), this contract
+has two layers:
+
+1. **Wire-protocol recognition** (`jircd-protocol`) — the complete RFC
+   1459/2812 numeric reply catalog. `jircd-protocol`'s `NumericReply` model
+   MUST represent all of these, for the same reason its command model
+   covers the full command set: a future client library needs to parse
+   `311 RPL_WHOISUSER` from *any* server, not only one that happens to
+   also implement `WHOIS`.
+2. **Server behavior** (`jircd-core` and extensions) — only the numerics
+   marked **Used** below are actually sent by this release. Every other
+   numeric in the full catalog is defined (correct code, correct name,
+   parseable/serializable) but never emitted by this server, because
+   nothing in this release triggers it (its command is "Recognized only"
+   per irc-protocol-commands.md, or the feature behind it doesn't exist
+   yet).
+
+Error replies MUST be worded specifically enough to satisfy
+FR-002/FR-012/FR-014/FR-015's "clear error" requirements (constitution
+Principle III: error messages state what went wrong and what the
+client/administrator can do about it).
+
+## Used in This Release
 
 | Numeric | Name | Triggered by | FR |
 |---|---|---|---|
 | `001` | `RPL_WELCOME` | Successful registration | FR-001 |
 | `353` | `RPL_NAMREPLY` | `JOIN` | FR-003 |
 | `366` | `RPL_ENDOFNAMES` | `JOIN` | FR-003 |
-| `421` | `ERR_UNKNOWNCOMMAND` | Malformed/unrecognized command | FR-015 |
+| `381` | `RPL_YOUREOPER` | Successful `OPER` | FR-034 |
+| `382` | `RPL_REHASHING` | Successful `REHASH` | FR-011, FR-012 (research.md "Configuration reload mechanism") |
+| `421` | `ERR_UNKNOWNCOMMAND` | Malformed/unrecognized command, or a wire-protocol-recognized command with no handler in this release | FR-015 |
 | `431` | `ERR_NONICKNAMEGIVEN` | `NICK` with no argument | FR-001 (input validation) |
-| `432` | `ERR_ERRONEUSNICKNAME` | `NICK` violating format rules (invalid chars/length) | Edge case: nickname format |
+| `432` | `ERR_ERRONEUSNICKNAME` | `NICK` violating the nickname grammar (invalid leading/body characters or over 9 characters) | irc-protocol-commands.md "Connection Registration Grammar" |
 | `433` | `ERR_NICKNAMEINUSE` | `NICK` naming an already-claimed nickname | FR-002 |
 | `442` | `ERR_NOTONCHANNEL` | `PART`/`PRIVMSG`/`KICK`/`MODE` on a channel the sender hasn't joined (where membership is required) | FR-003, FR-014 |
 | `461` | `ERR_NEEDMOREPARAMS` | Command missing required parameters | FR-015 |
-| `472` | `ERR_UNKNOWNMODE` | `MODE` given a flag the core moderation command set doesn't define | FR-015, FR-036 (core input validation — `MODE` is never extension-gated) |
-| `482` | `ERR_CHANOPRIVSNEEDED` | `KICK`/`MODE` attempted by a non-operator | FR-014 |
-| `381` | `RPL_YOUREOPER` | Successful `OPER` | FR-034 |
 | `464` | `ERR_PASSWDMISMATCH` | Failed `OPER` (also logged as a security event, FR-019) | FR-034 |
-| `481` | `ERR_NOPRIVILEGES` | `MODULE`/`WHOHOST` (or any admin command) attempted without administrator privilege | FR-033 |
+| `472` | `ERR_UNKNOWNMODE` | `MODE` given a flag the core moderation command set doesn't define | FR-015, FR-036 (core input validation — `MODE` is never extension-gated) |
+| `481` | `ERR_NOPRIVILEGES` | `EXTENSION`/`WHOHOST`/`REHASH` (or any admin command) attempted without administrator privilege | FR-033 |
+| `482` | `ERR_CHANOPRIVSNEEDED` | `KICK`/`MODE` attempted by a non-operator | FR-014 |
 | `CAP * LS` | (IRCv3, not a numeric) | `CAP LS` | FR-006 |
 | `CAP * ACK` / `CAP * NAK` | (IRCv3) | `CAP REQ` | FR-007 |
+
+## Full Numeric Catalog (`jircd-protocol` — Wire-Protocol Recognition)
+
+Every reply/error numeric RFC 1459/2812 defines. Entries not listed above
+under "Used in This Release" are **Reserved** — defined in the catalog,
+never sent by this server this release (the command or feature that would
+trigger them is "Recognized only" per irc-protocol-commands.md).
+
+### Command responses (`RPL_*`)
+
+| Numeric | Name | Numeric | Name | Numeric | Name |
+|---|---|---|---|---|---|
+| `001` | `RPL_WELCOME` *(Used)* | `211` | `RPL_STATSLINKINFO` | `321` | `RPL_LISTSTART` |
+| `002` | `RPL_YOURHOST` | `212` | `RPL_STATSCOMMANDS` | `322` | `RPL_LIST` |
+| `003` | `RPL_CREATED` | `219` | `RPL_ENDOFSTATS` | `323` | `RPL_LISTEND` |
+| `004` | `RPL_MYINFO` | `221` | `RPL_UMODEIS` | `324` | `RPL_CHANNELMODEIS` |
+| `005` | `RPL_BOUNCE` | `234` | `RPL_SERVLIST` | `325` | `RPL_UNIQOPIS` |
+| `200` | `RPL_TRACELINK` | `235` | `RPL_SERVLISTEND` | `331` | `RPL_NOTOPIC` |
+| `201` | `RPL_TRACECONNECTING` | `242` | `RPL_STATSUPTIME` | `332` | `RPL_TOPIC` |
+| `202` | `RPL_TRACEHANDSHAKE` | `243` | `RPL_STATSOLINE` | `341` | `RPL_INVITING` |
+| `203` | `RPL_TRACEUNKNOWN` | `251` | `RPL_LUSERCLIENT` | `342` | `RPL_SUMMONING` |
+| `204` | `RPL_TRACEOPERATOR` | `252` | `RPL_LUSEROP` | `346` | `RPL_INVITELIST` |
+| `205` | `RPL_TRACEUSER` | `253` | `RPL_LUSERUNKNOWN` | `347` | `RPL_ENDOFINVITELIST` |
+| `206` | `RPL_TRACESERVER` | `254` | `RPL_LUSERCHANNELS` | `348` | `RPL_EXCEPTLIST` |
+| `207` | `RPL_TRACESERVICE` | `255` | `RPL_LUSERME` | `349` | `RPL_ENDOFEXCEPTLIST` |
+| `208` | `RPL_TRACENEWTYPE` | `256` | `RPL_ADMINME` | `351` | `RPL_VERSION` |
+| `209` | `RPL_TRACECLASS` | `257` | `RPL_ADMINLOC1` | `352` | `RPL_WHOREPLY` |
+| `210` | `RPL_TRACERECONNECT` | `258` | `RPL_ADMINLOC2` | `353` | `RPL_NAMREPLY` *(Used)* |
+| `261` | `RPL_TRACELOG` | `259` | `RPL_ADMINEMAIL` | `364` | `RPL_LINKS` |
+| `262` | `RPL_TRACEEND` | `265` | `RPL_LOCALUSERS` | `365` | `RPL_ENDOFLINKS` |
+| `263` | `RPL_TRYAGAIN` | `266` | `RPL_GLOBALUSERS` | `366` | `RPL_ENDOFNAMES` *(Used)* |
+| `300` | `RPL_NONE` | `301` | `RPL_AWAY` | `367` | `RPL_BANLIST` |
+| `302` | `RPL_USERHOST` | `303` | `RPL_ISON` | `368` | `RPL_ENDOFBANLIST` |
+| `305` | `RPL_UNAWAY` | `306` | `RPL_NOWAWAY` | `369` | `RPL_ENDOFWHOWAS` |
+| `311` | `RPL_WHOISUSER` | `312` | `RPL_WHOISSERVER` | `371` | `RPL_INFO` |
+| `313` | `RPL_WHOISOPERATOR` | `314` | `RPL_WHOWASUSER` | `372` | `RPL_MOTD` |
+| `315` | `RPL_ENDOFWHO` | `317` | `RPL_WHOISIDLE` | `374` | `RPL_ENDOFINFO` |
+| `318` | `RPL_ENDOFWHOIS` | `319` | `RPL_WHOISCHANNELS` | `375` | `RPL_MOTDSTART` |
+| `376` | `RPL_ENDOFMOTD` | `381` | `RPL_YOUREOPER` *(Used)* | `382` | `RPL_REHASHING` *(Used)* |
+| `383` | `RPL_YOURESERVICE` | `391` | `RPL_TIME` | `392` | `RPL_USERSSTART` |
+| `393` | `RPL_USERS` | `394` | `RPL_ENDOFUSERS` | `395` | `RPL_NOUSERS` |
+
+### Error responses (`ERR_*`)
+
+| Numeric | Name | Numeric | Name | Numeric | Name |
+|---|---|---|---|---|---|
+| `401` | `ERR_NOSUCHNICK` | `402` | `ERR_NOSUCHSERVER` | `403` | `ERR_NOSUCHCHANNEL` |
+| `404` | `ERR_CANNOTSENDTOCHAN` | `405` | `ERR_TOOMANYCHANNELS` | `406` | `ERR_WASNOSUCHNICK` |
+| `407` | `ERR_TOOMANYTARGETS` | `408` | `ERR_NOSUCHSERVICE` | `409` | `ERR_NOORIGIN` |
+| `411` | `ERR_NORECIPIENT` | `412` | `ERR_NOTEXTTOSEND` | `413` | `ERR_NOTOPLEVEL` |
+| `414` | `ERR_WILDTOPLEVEL` | `415` | `ERR_BADMASK` | `421` | `ERR_UNKNOWNCOMMAND` *(Used)* |
+| `422` | `ERR_NOMOTD` | `423` | `ERR_NOADMININFO` | `424` | `ERR_FILEERROR` |
+| `431` | `ERR_NONICKNAMEGIVEN` *(Used)* | `432` | `ERR_ERRONEUSNICKNAME` *(Used)* | `433` | `ERR_NICKNAMEINUSE` *(Used)* |
+| `436` | `ERR_NICKCOLLISION` | `437` | `ERR_UNAVAILRESOURCE` | `441` | `ERR_USERNOTINCHANNEL` |
+| `442` | `ERR_NOTONCHANNEL` *(Used)* | `443` | `ERR_USERONCHANNEL` | `444` | `ERR_NOLOGIN` |
+| `445` | `ERR_SUMMONDISABLED` | `446` | `ERR_USERSDISABLED` | `451` | `ERR_NOTREGISTERED` |
+| `461` | `ERR_NEEDMOREPARAMS` *(Used)* | `462` | `ERR_ALREADYREGISTRED` | `463` | `ERR_NOPERMFORHOST` |
+| `464` | `ERR_PASSWDMISMATCH` *(Used)* | `465` | `ERR_YOUREBANNEDCREEP` | `466` | `ERR_YOUWILLBEBANNED` |
+| `467` | `ERR_KEYSET` | `471` | `ERR_CHANNELISFULL` | `472` | `ERR_UNKNOWNMODE` *(Used)* |
+| `473` | `ERR_INVITEONLYCHAN` | `474` | `ERR_BANNEDFROMCHAN` | `475` | `ERR_BADCHANNELKEY` |
+| `476` | `ERR_BADCHANMASK` | `477` | `ERR_NOCHANMODES` | `478` | `ERR_BANLISTFULL` |
+| `481` | `ERR_NOPRIVILEGES` *(Used)* | `482` | `ERR_CHANOPRIVSNEEDED` *(Used)* | `483` | `ERR_CANTKILLSERVER` |
+| `484` | `ERR_RESTRICTED` | `485` | `ERR_UNIQOPPRIVSNEEDED` | `491` | `ERR_NOOPERHOST` |
+| `501` | `ERR_UMODEUNKNOWNFLAG` | `502` | `ERR_USERSDONTMATCH` | | |
 
 **Contract notes**:
 - Every error reply's trailing `:<text>` parameter MUST name the specific
   problem (e.g., "Nickname is already in use" for `433`, not a generic
   "Error") — this is the testable form of FR-002/FR-012/FR-014/FR-015's
   "clear error" requirement and of the constitution's UX Consistency
-  principle.
+  principle. This applies to every numeric in the "Used" set; Reserved
+  numerics have no wording to get right yet since this server never sends
+  them.
 - Reply wording for a given numeric MUST be identical regardless of which
   subsystem produced it. `482` is now always sourced from core channel
   moderation (FR-036) rather than an extension, so this mainly applies to
@@ -39,3 +123,11 @@ the client/administrator can do about it).
   command set or by a future `jircd-server-extensions/*` extension that
   also gates an action on administrator privilege — satisfying
   FR-011/FR-020's extension-consistency intent at the protocol level.
+- Moving a Reserved numeric to Used is a `jircd-core`/extension change
+  (implementing the feature/command that triggers it), not a
+  `jircd-protocol` change — the numeric is already correctly modeled.
+- `005 RPL_BOUNCE` is listed per RFC 2812; the de facto `RPL_ISUPPORT`
+  reuse of numeric `005` (near-universal in deployed IRC servers, not
+  itself in RFC 2812) is out of scope for this release and not modeled
+  separately — revisit if a future capability needs to advertise
+  server limits/features this way.

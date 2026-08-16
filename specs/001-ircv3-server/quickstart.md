@@ -61,8 +61,11 @@ schema in `contracts/server-configuration.md`.
 ## Story 4 — Tailor the Server with Optional Extensions
 
 1. With the server running, edit the config file's
-   `capabilities.message-tags` from `enabled` to `disabled` and apply the
-   change (see contracts/server-configuration.md "Live reload").
+   `capabilities.message-tags` from `enabled` to `disabled`, then trigger a
+   reload by sending the server process `SIGHUP` (e.g., `kill -HUP <pid>`)
+   — reload is manually triggered, never automatic (research.md
+   "Configuration reload mechanism"). No IRC connection is needed for this
+   step, keeping this path independent of Story 6.
 2. From a capability-negotiating connection (as in Story 2), request
    `CAP LS 302` again.
    - **Expected**: within SC-005's 1-minute budget, `message-tags` no
@@ -71,11 +74,14 @@ schema in `contracts/server-configuration.md`.
      the process was never stopped/started). Note that `KICK` (core
      moderation, FR-036) remains available throughout — it is not part of
      `capabilities` or `server-extensions` at all.
-3. Re-enable `message-tags` and confirm it's offered again without a
-   restart.
-4. Edit the config with an invalid value and attempt to apply/start —
-   confirm each of the following produces a specific error naming the
-   offending key, not a generic failure (FR-012, SC-008):
+3. Re-enable `message-tags` in the file, send `SIGHUP` again, and confirm
+   it's offered again without a restart.
+4. Edit the config with an invalid value and send `SIGHUP` — confirm each
+   of the following produces a specific error naming the offending key
+   (surfaced in the server's log, since there's no IRC session in this
+   scenario), and that the server keeps running on its previously-valid
+   configuration rather than crashing or partially applying the change
+   (FR-012, SC-008):
    - `capabilities.nonexistent: enabled` (unknown id)
    - `capabilities.moderation: disabled` (moderation isn't an extension at
      all, see FR-035/FR-036)
@@ -115,6 +121,18 @@ schema in `contracts/server-configuration.md`.
    - **Expected**: the real hostname is returned, even though other
      channel members see the obfuscated form in that client's message
      prefixes (FR-031) — validates Story 6 Acceptance Scenario 4.
+5. Edit the config file's `rateLimit.bucketSize` to a new value, then —
+   without restarting or sending `SIGHUP` — send `REHASH` as the
+   privileged session.
+   - **Expected**: `382 RPL_REHASHING`, and the new rate limit is in
+     effect — the in-band equivalent of Story 4's `SIGHUP` path (research.md
+     "Configuration reload mechanism"), with no shell access used.
+6. Introduce an invalid value into the config file (e.g.,
+   `capabilities.nonexistent: enabled`) and send `REHASH` again.
+   - **Expected**: a specific error naming the offending key is returned
+     directly to this session (unlike Story 4 Step 4's log-only error,
+     since there's an active IRC session to reply to here), and the
+     server continues running on its previous, still-valid configuration.
 
 ## Out of Scope for This Validation Pass
 

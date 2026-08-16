@@ -55,16 +55,24 @@ administratorCredentials:
   which section it belongs in instead — not silently accepted or moved.
   This is the config-file expression of the `CapabilityExtension`/
   `ServerExtension` distinction (data-model.md "Extension").
-- **Live reload**: changing an entry's value from `enabled` to `disabled`
-  (or back) in either section and applying the change (mechanism — e.g.,
-  SIGHUP, admin command, file-watch — is an implementation decision for
-  the tasks phase) MUST take effect for already-connected and new clients
-  within the SC-005 budget (1 minute), without restarting the process
-  (FR-011). Changes to `listeners` or `rateLimit` MAY require a
-  listener-level restart (rebinding a port) without violating FR-011,
-  since FR-011 scopes "no restart" to *extension* state, not listener
-  reconfiguration — this distinction should be revisited if a future
-  clarification narrows it further.
+- **Live reload is manually triggered, never automatic** (research.md
+  "Configuration reload mechanism"): editing this file alone does nothing
+  until the administrator explicitly triggers a reload — either by
+  sending the process a `SIGHUP` signal (no IRC connection required,
+  keeping this file-based path independent of the in-band administration
+  path) or, once available, by issuing the in-band `REHASH` command
+  (contracts/irc-protocol-commands.md, Story 6). Either trigger re-reads
+  and re-validates the file the same way startup does, then reconciles
+  the result against live state. A successful reload MUST take effect for
+  already-connected and new clients within the SC-005 budget (1 minute),
+  without restarting the process (FR-011); a failed reload (invalid file)
+  MUST leave the previously-active configuration untouched and report the
+  same specific, actionable error startup validation would (FR-012,
+  SC-008) — never a partially-applied state. Changes to `listeners` or
+  `rateLimit` MAY require a listener-level restart (rebinding a port)
+  without violating FR-011, since FR-011 scopes "no restart" to
+  *extension* state, not listener reconfiguration — this distinction
+  should be revisited if a future clarification narrows it further.
 - **Partial-failure isolation**: if one extension (from either section)
   fails to start after being set to `enabled` (e.g., a coding error in
   that extension), the server MUST still start and serve all other
@@ -77,8 +85,14 @@ administratorCredentials:
 - **Path equivalence**: an extension state change applied via the
   `EXTENSION` in-band command (Story 6) MUST be observably identical to
   one applied by editing this file's `capabilities` or `server-extensions`
-  section (Story 4), whichever the id belongs to — same effect, same
-  no-restart guarantee (FR-011) — so an administrator can freely mix both
-  access paths. The in-band `EXTENSION` command addresses both sections
-  through one shared id space (data-model.md's `Extension.id`); it does
-  not need a client to know or state which section an id lives in.
+  section and reloading it (Story 4), whichever the id belongs to — same
+  effect, same no-restart guarantee (FR-011) — so an administrator can
+  freely mix both access paths. The in-band `EXTENSION` command addresses
+  both sections through one shared id space (data-model.md's
+  `Extension.id`); it does not need a client to know or state which
+  section an id lives in, and — unlike `REHASH` — it does not read this
+  file at all, so it has nothing to reload. `REHASH` is the in-band
+  equivalent of a `SIGHUP`-triggered reload of this whole file (including
+  `rateLimit`, `listeners`, and `administratorCredentials`, none of which
+  `EXTENSION` touches); `EXTENSION` is the narrower, file-independent
+  equivalent scoped to a single extension's state.

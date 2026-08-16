@@ -21,9 +21,9 @@ guarded by this aggregate.
 |---|---|---|
 | `connectionId` | opaque identifier | Internal correlation key; never sent on the wire. |
 | `channel` (I/O) | `SocketChannel` | The underlying connection (plaintext or TLS-wrapped, FR-018). |
-| `outboundQueue` | bounded queue of formatted messages | The *only* path by which any other session delivers a message to this one (FR-004 fan-out); drained exclusively by this session's own writer thread, per research.md "Message fan-out concurrency model". Never written to directly from another session's thread. |
+| `outboundQueue` | bounded queue of `PendingDelivery` (below) | The *only* path by which any other session delivers a message to this one (FR-004 fan-out); drained exclusively by this session's own writer thread, per research.md "Message fan-out concurrency model". Never written to directly from another session's thread. Queue elements are **not** pre-formatted wire lines — this session's own writer thread does that at drain time, using this session's own `negotiatedCapabilities` (see `PendingDelivery`). |
 | `registrationState` | enum: `CONNECTING`, `REGISTERED`, `CLOSING` | A session must reach `REGISTERED` (nickname + user info accepted, FR-001) before most commands are valid. |
-| `nickname` | string, 0..1 | Present once registration succeeds; unique across all sessions (FR-002). |
+| `nickname` | string, 0..1 | Present once registration succeeds; unique across all sessions (FR-002); MUST also conform to the nickname grammar (contracts/irc-protocol-commands.md "Connection Registration Grammar") — uniqueness and format are independent checks (`433` vs. `432`). |
 | `negotiatedCapabilities` | set of `Capability` names | Populated via CAP negotiation (FR-006, FR-007); empty for clients that never negotiate (FR-008). |
 | `channelMemberships` | set of `Channel` references | Channels this session has joined; drives cleanup on disconnect (FR-017). |
 | `rateLimitBucket` | token bucket state | Per-connection (FR-016); see research.md "Rate limiting". |
@@ -72,6 +72,34 @@ currently holds it).
 
 *(Deferred, not modeled here: linking a `UserIdentity` to a persistent
 `Account` — see spec.md's Account entity, FR-023/FR-024/FR-026/FR-027.)*
+
+## PendingDelivery — *Value Object, Session & Messaging*
+
+The element type of `ClientSession.outboundQueue` (research.md "Message
+fan-out concurrency model"). Represents one message on its way to one
+recipient, holding only the parts that are the same for every recipient of
+that message — never a finished wire line. It has no identity of its own
+and is immutable once created, so the same instance can be safely shared
+across every recipient's queue for a single fan-out (e.g., every member of
+a channel a `PRIVMSG` was sent to).
+
+| Field | Type | Notes |
+|---|---|---|
+| `senderPresentedForm` | string | The sender's `UserIdentity.presentedForm` at send time — already cloak-resolved (FR-031), since cloaking is a uniform display transform, not a per-recipient one. Computed once by the sender's thread. |
+| `command` | string | e.g., `PRIVMSG`, `NOTICE`, `JOIN`, `KICK` — which wire command this delivery represents. |
+| `target` | string | Channel name or nickname the original command targeted. |
+| `body` | string, 0..1 | The message text, where applicable (absent for e.g. a bare `JOIN`/`PART` notification). |
+| `sentAt` | instant | Captured once, by the sender's thread, at the moment of sending — the value the `server-time` capability's `time` tag reflects for every recipient (not each recipient's own drain time). |
+
+**Validation rules**: `PendingDelivery` MUST NOT contain a `message-tags`
+prefix, a `time` tag, or any other capability-dependent decoration —
+those are computed by each recipient's own writer thread at drain time
+(research.md "Message fan-out concurrency model"), by re-checking that
+recipient's `ClientSession.negotiatedCapabilities` against the live state
+of the corresponding `CapabilityExtension` (`Capability` validation rules,
+above). A `PendingDelivery` is capability-agnostic by construction — that
+is what makes sharing one instance across recipients with different
+negotiated capabilities safe and correct.
 
 ## Channel — *Aggregate Root, Session & Messaging*
 
@@ -217,4 +245,6 @@ ServerConfiguration 1---* ServerExtension     (serverExtensionStates)
 ServerConfiguration 1---* administratorCredentials (FR-034)
 ClientSession   1---1 realHostname    (always on core; FR-030/031's display
                                         value is computed, not a separate entity)
+ClientSession   1---* PendingDelivery (outboundQueue; one shared instance may
+                                        appear in many recipients' queues at once)
 ```

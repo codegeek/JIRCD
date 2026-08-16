@@ -30,6 +30,88 @@ library would require extracting it later anyway, and nothing would stop
 server-specific concerns from creeping into the parsing code in the
 meantime).
 
+## Wire-protocol command & numeric completeness
+
+**Decision**: `jircd-protocol`'s `Command` and `NumericReply` catalogs
+cover the complete RFC 1459/2812 command and numeric-reply sets (plus the
+IRCv3 framework commands this project uses — `CAP`, `AUTHENTICATE`,
+`TAGMSG`), regardless of which commands `jircd-core` actually implements a
+handler for in this release. contracts/irc-protocol-commands.md and
+contracts/irc-numeric-replies.md each carry the full catalog, with a
+"Used in this release" subset called out separately from the
+"Recognized/Reserved" remainder.
+
+**Rationale**: This is a direct consequence of the "Protocol/server
+boundary" decision above, not a separate scope expansion — if
+`jircd-protocol` is genuinely meant to be reusable by a future IRC
+*client* library, that library needs to parse `311 RPL_WHOISUSER` or a
+`WHOIS` line from *any* server it connects to, not only from this one.
+Scoping the catalog down to "whatever `jircd-core` currently implements"
+would silently couple a supposedly-generic library to this release's
+feature set, and would force a breaking model change every time a future
+release adds a command this server didn't originally implement (e.g.,
+`TOPIC` or `WHOIS`) — versus just flipping that command from
+"Recognized only" to "Implemented" against a catalog that already has it.
+The cost of building the catalog complete now is low (it's enum-style
+data, not behavior); the cost of discovering it's incomplete later, after
+a client library already depends on it, is not.
+
+**Alternatives considered**: Scope the catalog to only the commands/
+numerics this release's stories actually use (the original approach) —
+rejected per above: it undermines the entire stated reason
+`jircd-protocol` exists as a separate module in the first place, and
+defers real rework (extending the catalog under a live client-library
+dependency) rather than avoiding it.
+
+## Connection registration grammar
+
+**Decision**: `NICK`/`USER` get generic line parsing (`Command`
+arity metadata, T014, same as any other fixed-arity command) rather than
+a dedicated grammar class — unlike `CAP`, which does get one
+(`CapabilityNegotiationGrammar`, T018). What *does* get its own defined
+grammar is the **nickname format** itself (RFC 2812 §2.3.1: one leading
+letter/`special` character, up to 8 more letters/digits/`special`/`-`,
+9 characters total) and the **username** content rule (any octet except
+NUL/CR/LF/space/`@`, truncated to 9 characters for the `ident` shown in
+the hostmask) — both now spelled out in
+contracts/irc-protocol-commands.md's "Connection Registration Grammar".
+Registration *completion sequencing* (what combination/order of `NICK`,
+`USER`, and optional `CAP` negotiation triggers `001 RPL_WELCOME`) is a
+`jircd-core`/`ConnectionLifecycle` state-machine concern, not a
+wire-protocol grammar concern, and is documented there instead.
+
+**Rationale**: `CAP` needed a dedicated grammar component because its
+subcommands (`LS`/`REQ`/`ACK`/`NAK`/`END`) branch into genuinely different
+follow-on syntax within one line — a real sub-language. `NICK`/`USER`
+don't have that: fixed parameter counts, no branching, so the generic
+parser plus arity metadata already covers *how many parameters* a
+well-formed line has. What was actually missing — and is a different kind
+of thing — is *what characters are legal inside* the nickname parameter.
+`432 ERR_ERRONEUSNICKNAME` (contracts/irc-numeric-replies.md) referenced
+"nickname format rules" from the very first draft of this plan without
+those rules ever being defined anywhere, which is a real gap this closes:
+a `jircd-core` handler can't correctly reject a malformed nickname against
+a rule that was never written down. Defining it in `jircd-protocol`
+(alongside `Hostmask`, T017, which already needs to know what a nickname
+looks like when composing `nickname!ident@hostname`) rather than inline
+in `jircd-core`'s `NICK` handler keeps it reusable by the same future
+client library the rest of `jircd-protocol` is built for — a client
+validating a nickname before sending `NICK` needs the identical rule.
+
+**Alternatives considered**:
+- *A dedicated `RegistrationGrammar` class mirroring
+  `CapabilityNegotiationGrammar`*: rejected — there's no sub-language to
+  justify it; would be a class that just re-does what generic parsing
+  plus arity metadata already does, adding indirection without adding
+  correctness.
+- *Leave nickname format as an inline check inside the `NICK` handler
+  (`jircd-core`)*: works for this server alone, but ties a wire-protocol-
+  level rule to `jircd-core` specifically, unlike everything else
+  `Hostmask` already centralizes — and silently reopens the same "never
+  formally defined" gap the moment anyone other than that one handler
+  needs the rule (e.g., a future client library, or a second place in
+  `jircd-core` that also validates nicknames).
+
 ## Networking model
 
 **Decision**: Blocking-style I/O per connection on Java virtual threads
@@ -64,29 +146,58 @@ Quality principle: no unjustified complexity).
 **Decision**: Each `ClientSession` owns a bounded outbound queue and a
 single dedicated writer virtual thread that is the *only* thread ever
 allowed to write to that session's `SocketChannel`. Delivering a message to
-a channel (FR-004) means: the sending session's thread looks up the
-channel's `members`, and for each member session enqueues the formatted
-message onto that member's outbound queue — it never writes to another
-session's socket directly. Each session's writer thread drains its own
-queue and does the actual `SocketChannel.write`. A member's queue reaching
-capacity is treated as that connection being too slow to keep up and is
-handled the same way as any other connection-loss condition (FR-017
-cleanup), not by blocking the sender.
+a channel (FR-004) is a **two-stage** pipeline, split by who has the
+information needed for each stage:
 
-**Rationale**: This closes the gap the earlier plan review flagged —
-without it, `PRIVMSG`/`NOTICE`/`JOIN`/`PART`/`KICK`/`MODE` fan-out
-(FR-004, and every other command that echoes to multiple members) would
-mean one session's thread writing directly to N other sessions'
-`SocketChannel`s, which is unsafe if that member's own writer thread (or a
-future direct write) could run concurrently on the same channel. Funneling
-all writes for a given connection through exactly one thread makes
-per-connection write safety structural rather than something every call
-site has to remember. It also gives a natural, existing mechanism (queue
-overflow) for handling a slow/unresponsive member during a fan-out burst
-(relevant to SC-002/SC-006) without making a fast sender block on a slow
-recipient.
+1. **Sender's thread, once**: resolves the parts of the message that do
+   *not* vary by recipient — the hostmask (already cloak-resolved, since
+   cloaking is a uniform display transform applied the same way to every
+   viewer, not a per-viewer choice) and the message body/command. This
+   produces one shared, immutable "pending delivery" object, enqueued onto
+   every recipient member's outbound queue. No capability-driven
+   formatting decisions are made at this stage — it never writes to
+   another session's socket directly, only enqueues.
+2. **Each recipient's own writer thread, at drain time**: converts that
+   session's next queued pending delivery into the actual wire line,
+   applying *that recipient's* `negotiatedCapabilities` — live-checked
+   against current `CapabilityExtension` state, never cached (data-model.md
+   "Capability" validation rules) — immediately before the
+   `SocketChannel.write`. This is what makes it correct for Alice (who
+   negotiated `message-tags`+`server-time`) and Bob (who negotiated
+   nothing) to receive different wire-level renderings of the *same*
+   channel message, drawn from the *same* queued object: the per-recipient
+   decoration (tag prefix, `time` tag) happens independently in each
+   recipient's own thread, not once on the sender's.
+
+`echo-message` is a different kind of decision made at a different point:
+whether the sender's *own* session belongs in the recipient set at all is
+decided once, by the sender's thread, when it builds the member list for
+stage 1 — it is not a per-write formatting concern like the tag
+capabilities are.
+
+A member's queue reaching capacity is treated as that connection being too
+slow to keep up and is handled the same way as any other connection-loss
+condition (FR-017 cleanup), not by blocking the sender.
+
+**Rationale**: This closes two gaps at once. First, the one the earlier
+plan review flagged — without a shared writer-owns-its-socket model,
+`PRIVMSG`/`NOTICE`/`JOIN`/`PART`/`KICK`/`MODE` fan-out (FR-004, and every
+other command that echoes to multiple members) would mean one session's
+thread writing directly to N other sessions' `SocketChannel`s, which is
+unsafe if that member's own writer thread could run concurrently on the
+same channel. Second — and this is why formatting is split into two
+stages rather than done once by the sender — a single shared "already
+formatted" queue element cannot simultaneously be correct for recipients
+with different negotiated capabilities; doing the capability-dependent
+part of formatting in each recipient's own writer thread, at the latest
+possible moment, is both the only way to get per-recipient correctness
+and a natural extension of the "one thread owns this socket" invariant
+already established for write-safety.
 
 **Alternatives considered**:
+- *Format once on the sender's thread, before enqueueing (the original
+  design)*: cannot express "Alice sees a `time` tag, Bob doesn't" from one
+  shared formatted string — reverted for exactly that reason.
 - *Direct cross-thread writes, synchronized on the target channel*: works,
   but requires every code path that might deliver a message to remember to
   synchronize correctly, and turns a slow recipient's contended lock into a
@@ -244,6 +355,58 @@ no transitive framework baggage.
 - *HOCON (Typesafe Config)*: richer feature set (includes, substitutions),
   but pulls in a heavier library for features this project doesn't need at
   its current scope.
+
+## Configuration reload mechanism
+
+**Decision**: A manually-triggered reload — not automatic file-watching.
+A single core reload operation (re-run `ConfigurationLoader`, validate,
+reconcile the result against `ExtensionRegistry` — succeed or reject
+atomically, same validation path as startup, FR-012) is exposed through
+two independent triggers:
+
+1. **`SIGHUP`** — the classic Unix daemon convention (nginx, sshd, most
+   IRCds themselves), handled in `jircd-server`'s application entry point.
+   Requires only shell/process access — no IRC connection.
+2. **`REHASH`** — an in-band, administrator-privileged IRC command (added
+   to the Story 6 admin command set, contracts/irc-protocol-commands.md),
+   matching the command name and behavior most IRC daemons (ircu,
+   InspIRCd, UnrealIRCd, charybdis) use for exactly this.
+
+Both call the same underlying reload operation; neither depends on the
+other being available.
+
+**Rationale**: An administrator-driven manual trigger — rather than
+detecting file changes automatically — avoids reloading against a file
+an editor has only partially written, and matches what IRC operators
+already expect from `REHASH`. Exposing it via *two* independent triggers,
+rather than picking just one, is what keeps Story 4 and Story 6
+independently deliverable: Story 4 is specifically the
+configuration-file-only administration path (no IRC access required), so
+its reload trigger can't live inside the optional `admin` `ServerExtension`
+that Story 6 delivers — `SIGHUP` is handled in the core application
+process regardless of which extensions are enabled. Story 6 gets `REHASH`
+as the in-band equivalent, consistent with its "no file system access"
+premise and with real-world IRC operator convention.
+
+**Alternatives considered**:
+- *Automatic file-watching (`java.nio.file.WatchService`)*: the original
+  choice, reverted here. It reacts to file-system events, which risks
+  triggering mid-write (a half-saved YAML file from certain editors/save
+  patterns) and doesn't match how IRC administrators actually expect to
+  apply a config change (explicitly, on their own timing) — `REHASH`'s
+  request/response also gives immediate confirmation or a specific
+  validation error, which a background watcher can't easily surface back
+  to the admin's terminal.
+- *`SIGHUP` only, no `REHASH` command*: would leave a Story 6 administrator
+  needing shell access to apply anything beyond an `EXTENSION` toggle
+  (which bypasses the file entirely), undermining Story 6's "no file
+  system access" premise for the rest of the config (rate limits,
+  listeners, credentials).
+- *`REHASH` command only, no `SIGHUP`*: would make Story 4 (file-only
+  administration) depend on the optional `admin` extension existing and
+  being enabled just to apply its own file edits — contradicts Story 4's
+  independence and FR-011's baseline "no restart" guarantee, which holds
+  regardless of which extensions are built.
 
 ## Logging
 
