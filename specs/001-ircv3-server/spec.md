@@ -309,6 +309,9 @@ their presented (not real) hostname.
 - What happens when a client attempts to register with a nickname or
   username that violates protocol formatting rules (invalid characters,
   excessive length)?
+- What does a client actually receive once registration succeeds, beyond
+  a bare "you're welcome here" — and what happens if the administrator
+  never configured a server name at all?
 - How does the server handle a client that sends messages faster than an
   acceptable rate (flooding), whether accidental or malicious?
 - What happens when a client disconnects abruptly (no clean quit) while
@@ -735,6 +738,26 @@ their presented (not real) hostname.
   from FR-015's other malformed-message cases — not silently truncated,
   partially processed, or lumped in with a generic "malformed command"
   response the sender would have to guess the actual cause of.
+- **FR-050**: The server MUST have an administrator-configurable name,
+  used as the source of every server-originated protocol message
+  (numeric replies, and any other message whose sender is the server
+  itself rather than a client) — the structural counterpart to FR-030's
+  client hostmask prefix, but identifying the server, not a user. If the
+  administrator has not explicitly configured one, the server MUST fall
+  back to a reasonable default rather than sending messages with an
+  empty or malformed source (see Assumptions).
+- **FR-051**: Upon successful registration completion (FR-001), the
+  server MUST send the newly registered client a registration-completion
+  burst consisting of, in order: a welcome confirmation; the server's own
+  identification (its name, FR-050, and software version); and the set
+  of user-mode and channel-mode letters currently recognized (core plus
+  any currently-enabled extension's, FR-043/FR-044's mode mechanism).
+  Since this release implements no message-of-the-day content, the
+  server MUST conclude the burst with the standard "no message-of-the-day"
+  indication rather than leaving the client to wait indefinitely for a
+  burst-completion signal that will never arrive — a client MUST be able
+  to treat this indication as "registration burst finished," not just
+  RPL_WELCOME alone.
 
 ### Key Entities
 
@@ -782,7 +805,9 @@ their presented (not real) hostname.
   would be — the mechanism, not the two built-in flags, is what's core.
 - **Server Configuration**: The administrator-controlled settings
   determining which extensions are active and how core and optional
-  behavior is tuned.
+  behavior is tuned — including the server's own name (FR-050), used as
+  the source of every server-originated message, defaulting to the
+  deployment host's network hostname if unconfigured.
 
 ## Success Criteria *(mandatory)*
 
@@ -861,6 +886,14 @@ their presented (not real) hostname.
   resources and whatever an administrator configures at the deployment
   layer (e.g., a reverse proxy, container resource limits), not by this
   specification.
+- If the administrator does not configure a server name (FR-050), the
+  server falls back to the deployment host's own network hostname rather
+  than an empty or placeholder value — a reasonable, zero-configuration
+  default consistent with how most real IRC servers behave, not a value
+  requiring administrator action before the server can start. The
+  server's software version (used alongside the name, FR-051) is derived
+  from the build/release itself, not administrator-configured — exact
+  sourcing (e.g., a build-time property) is a planning concern.
 - Channel modes beyond moderated-mode and members-only (FR-013/FR-043),
   and user modes entirely (FR-044), are recognized at the wire-protocol
   level — a future client library can still parse them from any server —

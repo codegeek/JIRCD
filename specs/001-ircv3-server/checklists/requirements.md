@@ -237,3 +237,19 @@
   require a specific, distinct error without naming the numeric in
   spec.md itself, matching the established pattern (FR-002/FR-048 don't
   name `432`/`476` either — that detail lives in contracts).
+- Closed a real gap: the "Connection Registration" contract had said
+  "`001 RPL_WELCOME` and standard post-registration burst" since its
+  first draft without ever defining what that burst actually contains —
+  only `001` was ever marked `Used`. Investigating it surfaced a more
+  foundational, previously-unaddressed gap: this project never defined
+  *any* server-name concept, even though every numeric reply needs one
+  as its message source, not just the registration burst. Added FR-050
+  (administrator-configurable `serverName`, hostname fallback if unset —
+  the server-side counterpart to FR-030's client hostmask) and FR-051
+  (the burst itself: `001`/`002`/`003`/`004`/`422 ERR_NOMOTD`, `004`'s
+  mode-letter lists sourced live from the `ChannelMode` catalog so they
+  never drift from what `MODE` actually recognizes). Deliberately kept
+  MOTD itself out of scope — `422` alone gives clients a defined
+  burst-end signal without opening a real MOTD content/config surface
+  this release doesn't need. New `Story1RegistrationBurstTest` (Story 1,
+  renumbered — 125 tasks, sequential). 51 FRs total.

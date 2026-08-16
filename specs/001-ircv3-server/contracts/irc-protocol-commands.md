@@ -37,7 +37,10 @@ Every command below that includes a sender prefix on its outgoing message
 (`JOIN`, `PART`, `PRIVMSG`, `NOTICE`, `QUIT`, `KICK`, `MODE`) presents that
 sender in the standard `nickname!ident@hostname` form (FR-030), where
 `hostname` is subject to the cloak `ServerExtension` described in
-"Administration" below.
+"Administration" below. Every numeric reply, by contrast, is prefixed
+with the server's own name (`ServerConfiguration.serverName`, FR-050,
+data-model.md) — the server-originated counterpart to a client's
+hostmask prefix — not any client's identity.
 
 ## Implemented in This Release
 
@@ -49,7 +52,7 @@ sender in the standard `nickname!ident@hostname` form (FR-030), where
 | `CAP REQ :<caps>` | C→S | After `CAP LS` | Server enables requested capabilities it supports, declines the rest | `CAP * ACK`/`CAP * NAK` |
 | `CAP END` | C→S | After negotiation | Ends negotiation; registration may complete | (none; unblocks registration) |
 | `NICK <nickname>` | C→S | Session not yet holding a nickname, or changing an existing one | Atomically claims the nickname (FR-002) | `433 ERR_NICKNAMEINUSE` on conflict; silent success otherwise (reflected via subsequent replies) |
-| `USER <user> <mode> <unused> :<realname>` | C→S | Nickname claimed | Completes registration (FR-001) | `001 RPL_WELCOME` and standard post-registration burst |
+| `USER <user> <mode> <unused> :<realname>` | C→S | Nickname claimed | Completes registration (FR-001) | Registration Completion Burst (below) |
 
 #### Connection Registration Grammar
 
@@ -92,9 +95,24 @@ about the order of already-parsed commands, not how to parse one line):
 a session reaches `REGISTERED` once it holds a claimed nickname (`NICK`
 succeeded) *and* has sent `USER`, *and* — if it sent `CAP LS` at all — has
 also sent `CAP END`. `NICK` and `USER` MAY arrive in either order; `CAP`
-negotiation, if used, MAY be interleaved with either. `001 RPL_WELCOME`
-fires the moment all applicable conditions are satisfied, regardless of
-which arrived last.
+negotiation, if used, MAY be interleaved with either. The Registration
+Completion Burst below fires the moment all applicable conditions are
+satisfied, regardless of which arrived last.
+
+#### Registration Completion Burst
+
+What "`001 RPL_WELCOME` and standard post-registration burst" actually
+means, concretely (FR-051) — previously referenced without ever being
+defined, the same class of gap the nickname/channel grammars closed for
+`432`/`476`:
+
+| Numeric | Content |
+|---|---|
+| `001 RPL_WELCOME` | Welcome confirmation, addressed to the newly registered nickname |
+| `002 RPL_YOURHOST` | `serverName` and `serverVersion` (`ServerConfiguration`, FR-050, data-model.md) |
+| `003 RPL_CREATED` | This running process's start time — not a fixed software release date |
+| `004 RPL_MYINFO` | `serverName`, `serverVersion`, the currently-recognized user-mode letters (empty this release, FR-044), and the currently-recognized channel-mode letters — sourced live from the same `ChannelMode` catalog `MODE` itself consults (research.md "Channel/user mode extensibility"), so this never drifts out of sync with what `MODE` actually recognizes |
+| `422 ERR_NOMOTD` | Closes the burst — this release implements no message-of-the-day content (`MOTD` itself remains "Recognized only," Full Command Catalog below); `422` gives clients a defined completion signal instead of an indefinite wait for one |
 
 **Contract notes**:
 - `CAP` negotiation MUST be usable before `NICK`/`USER` completes

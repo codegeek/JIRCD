@@ -32,7 +32,11 @@ client/administrator can do about it).
 
 | Numeric | Name | Triggered by | FR |
 |---|---|---|---|
-| `001` | `RPL_WELCOME` | Successful registration | FR-001 |
+| `001` | `RPL_WELCOME` | Successful registration — Registration Completion Burst (irc-protocol-commands.md "Connection Registration") | FR-001, FR-051 |
+| `002` | `RPL_YOURHOST` | Registration Completion Burst | FR-050, FR-051 |
+| `003` | `RPL_CREATED` | Registration Completion Burst | FR-051 |
+| `004` | `RPL_MYINFO` | Registration Completion Burst | FR-043, FR-044, FR-050, FR-051 |
+| `422` | `ERR_NOMOTD` | Registration Completion Burst (this release implements no MOTD content) | FR-051 |
 | `322` | `RPL_LIST` | `LIST` (one per active channel) | FR-042 |
 | `323` | `RPL_LISTEND` | End of a `LIST` reply | FR-042 |
 | `331` | `RPL_NOTOPIC` | `TOPIC` query on a channel with no topic set | FR-040 |
@@ -73,9 +77,9 @@ trigger them is "Recognized only" per irc-protocol-commands.md).
 | Numeric | Name | Numeric | Name | Numeric | Name |
 |---|---|---|---|---|---|
 | `001` | `RPL_WELCOME` *(Used)* | `211` | `RPL_STATSLINKINFO` | `321` | `RPL_LISTSTART` |
-| `002` | `RPL_YOURHOST` | `212` | `RPL_STATSCOMMANDS` | `322` | `RPL_LIST` *(Used)* |
-| `003` | `RPL_CREATED` | `219` | `RPL_ENDOFSTATS` | `323` | `RPL_LISTEND` *(Used)* |
-| `004` | `RPL_MYINFO` | `221` | `RPL_UMODEIS` | `324` | `RPL_CHANNELMODEIS` |
+| `002` | `RPL_YOURHOST` *(Used)* | `212` | `RPL_STATSCOMMANDS` | `322` | `RPL_LIST` *(Used)* |
+| `003` | `RPL_CREATED` *(Used)* | `219` | `RPL_ENDOFSTATS` | `323` | `RPL_LISTEND` *(Used)* |
+| `004` | `RPL_MYINFO` *(Used)* | `221` | `RPL_UMODEIS` | `324` | `RPL_CHANNELMODEIS` |
 | `005` | `RPL_BOUNCE` | `234` | `RPL_SERVLIST` | `325` | `RPL_UNIQOPIS` |
 | `200` | `RPL_TRACELINK` | `235` | `RPL_SERVLISTEND` | `331` | `RPL_NOTOPIC` *(Used)* |
 | `201` | `RPL_TRACECONNECTING` | `242` | `RPL_STATSUPTIME` | `332` | `RPL_TOPIC` *(Used)* |
@@ -111,7 +115,7 @@ trigger them is "Recognized only" per irc-protocol-commands.md).
 | `407` | `ERR_TOOMANYTARGETS` | `408` | `ERR_NOSUCHSERVICE` | `409` | `ERR_NOORIGIN` |
 | `411` | `ERR_NORECIPIENT` | `412` | `ERR_NOTEXTTOSEND` | `413` | `ERR_NOTOPLEVEL` |
 | `414` | `ERR_WILDTOPLEVEL` | `415` | `ERR_BADMASK` | `417` | `ERR_INPUTTOOLONG` *(Used)* |
-| `421` | `ERR_UNKNOWNCOMMAND` *(Used)* | `422` | `ERR_NOMOTD` | `423` | `ERR_NOADMININFO` |
+| `421` | `ERR_UNKNOWNCOMMAND` *(Used)* | `422` | `ERR_NOMOTD` *(Used)* | `423` | `ERR_NOADMININFO` |
 | `424` | `ERR_FILEERROR` |
 | `431` | `ERR_NONICKNAMEGIVEN` *(Used)* | `432` | `ERR_ERRONEUSNICKNAME` *(Used)* | `433` | `ERR_NICKNAMEINUSE` *(Used)* |
 | `436` | `ERR_NICKCOLLISION` | `437` | `ERR_UNAVAILRESOURCE` | `441` | `ERR_USERNOTINCHANNEL` *(Used)* |

@@ -112,6 +112,69 @@ validating a nickname before sending `NICK` needs the identical rule.
   needs the rule (e.g., a future client library, or a second place in
   `jircd-core` that also validates nicknames).
 
+## Server identity (FR-050/FR-051)
+
+**Decision**: `ServerConfiguration.serverName` (data-model.md) is the
+source/prefix on every server-originated message, administrator-
+configurable with a zero-configuration fallback to the deployment host's
+own network hostname if unset. `serverVersion` is a sibling field, but
+*not* administrator-configurable — sourced from the build/release itself
+(e.g., a Gradle-generated build-time property, exact mechanism a
+planning-phase decision) — since it identifies the running software, not
+something an administrator has any reason to override. Upon successful
+registration, `UserCommandHandler` sends a fixed burst using both:
+`001 RPL_WELCOME`, `002 RPL_YOURHOST` (`serverName` + `serverVersion`),
+`003 RPL_CREATED` (this process's start time — not a fixed software
+release date), `004 RPL_MYINFO` (`serverName`, `serverVersion`, and the
+currently-recognized user-mode and channel-mode letters, sourced live
+from the same `ChannelMode` catalog research.md "Channel/user mode
+extensibility" already established — an empty user-mode list this
+release, per FR-044), then `422 ERR_NOMOTD` to close the burst.
+
+**Rationale**: This closes two real gaps at once, not one. First, the
+narrower one: the "Connection Registration" contract had referenced "the
+standard post-registration burst" since its first draft without ever
+defining what that burst actually contains — `001` alone was the only
+numeric ever marked `Used`, the same class of "referenced but never
+specified" gap the nickname-grammar fix closed earlier for `432`. Second,
+the more foundational one it surfaced while investigating: nothing in
+this project ever defined *any* server-name concept, even though every
+numeric reply this server sends (not just the registration burst) needs
+one as its message source — this was a latent gap in the wire protocol's
+basic shape, not something specific to registration. Fixing the burst
+without also introducing `serverName` would have meant inventing a
+placeholder value at exactly the moment it's first needed and never
+formalizing it, the same mistake the original "standard...burst" phrase
+already made once. Reusing the `ChannelMode` catalog for `004`'s mode
+list (rather than hand-maintaining a separate letter list) means it
+never drifts out of sync with what `MODE` actually recognizes, including
+once a future extension contributes a flag (FR-043).
+
+**Alternatives considered**:
+- *Hardcode a fixed server name (e.g., "jircd") instead of making it
+  configurable*: rejected — every other identity-shaping value in this
+  project (administrator credentials, listener ports, rate limits) is
+  configurable via `ServerConfiguration`; a hardcoded name would be the
+  one exception, and administrators running multiple named instances
+  (e.g., separate test/production deployments) need to tell them apart
+  in every client's server-info display.
+- *Require the administrator to configure a server name, refuse to start
+  otherwise*: rejected — every other optional `ServerConfiguration`
+  field already has a sensible default (rate limits, keep-alive timing);
+  requiring configuration for a value with an obvious fallback
+  (the host's own hostname) would be inconsistent friction, not safety.
+- *Implement a real MOTD (file-backed content) instead of always sending
+  `422 ERR_NOMOTD`*: rejected for this release — `MOTD` is already
+  "Recognized only" with no content-management story anywhere in this
+  project; `422` alone is enough to give clients a defined burst-end
+  signal without opening a new content/configuration surface this
+  release doesn't need.
+- *Send `375`/`372`/`376` (an empty MOTD) instead of `422`*: rejected —
+  `422 ERR_NOMOTD` is the RFC-correct, honest signal for "no MOTD exists"
+  (research.md convention: reuse the exact-fit existing numeric, the same
+  choice already made for `476`/`417`); sending an empty MOTD body would
+  misrepresent that one was configured.
+
 ## Networking model
 
 **Decision**: Blocking-style I/O per connection on Java virtual threads

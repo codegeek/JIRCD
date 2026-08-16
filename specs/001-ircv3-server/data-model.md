@@ -393,6 +393,8 @@ extension state changes.
 | `listeners` | list of {port, tlsEnabled} | Plaintext and/or TLS listeners (FR-018 — both may coexist). |
 | `rateLimit` | {bucketSize, refillRate} | FR-016; see research.md "Rate limiting". |
 | `administratorCredentials` | list of {username, hashedPassword} | Verified by FR-034's in-band privilege command; hashed per research.md "Administrator credential storage" — never stored or logged in plain text. |
+| `serverName` | string, 0..1 | FR-050. The source/prefix on every server-originated message (numeric replies, `RPL_WELCOME`, etc.) — the server-side counterpart to a client's `nickname!ident@hostname` (FR-030). Absent (not set by the administrator) is valid; `jircd-server` MUST then fall back to the deployment host's network hostname (research.md "Server identity"), never an empty prefix. |
+| `serverVersion` | string | FR-051. Not administrator-configurable — sourced from the build/release itself (research.md "Server identity"), included in the registration-completion burst (`RPL_YOURHOST`/`RPL_MYINFO`) alongside `serverName`. |
 
 **Validation rules**: An invalid configuration (unknown extension id,
 conflicting listener ports, malformed rate-limit values) MUST be rejected
@@ -406,6 +408,10 @@ same way — not silently accepted into the wrong field. The in-band
 `EXTENSION` administrative command (FR-032) addresses `Extension.id`
 directly and MAY resolve to either field without the caller having to
 know which one; only the configuration *file* has two sections.
+`serverVersion` MUST NOT appear in the configuration file schema at all
+— unlike every other field here, it is not administrator input, so there
+is no "invalid value" case for it to participate in load-time
+validation.
 
 ## Entity Relationships
 
