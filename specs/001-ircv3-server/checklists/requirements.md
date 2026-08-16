@@ -169,3 +169,71 @@
   end up with zero operators if every operator revokes their own status
   (or leaves) without granting a successor — no automatic reassignment,
   by design, mirroring how first-join only applies at channel creation.
+- Validated FR-043's extensibility promise against a concrete future
+  case (invite-only, gating `JOIN`) and found it didn't actually hold:
+  every enforcement rule built so far was hardcoded to `PRIVMSG`/`NOTICE`
+  in `MessageCommandHandler`, with no equivalent check point in
+  `JoinCommandHandler` — a future `JOIN`-gating flag would have required
+  editing core code, exactly what FR-043 promises to avoid. Fixed by
+  adding `ChannelMode.gates` (which command(s) a flag restricts,
+  independent of `kind`) and generalizing enforcement to "iterate active
+  flags gating this action," the same extension-contributes-a-hook
+  pattern `CapabilityExtension` already uses. Confirmed two consequences
+  worth keeping explicit: (1) most future `JOIN`-gating flags wouldn't
+  need `Channel`'s shape to grow, since an extension can keep its own
+  bookkeeping; (2) a paired command like `INVITE` needs no new mechanism
+  either, since extensions can already register their own command
+  handlers (`admin`/`cloak` already do). Also confirmed what's still
+  unsolved: `private`/`secret` restrict `LIST`/`WHOIS` visibility, not a
+  single gateable action, and remain deliberately uncataloged beyond
+  their Full Channel Mode Catalog entry. No FR count change — this
+  refines FR-043's existing scope rather than adding new normative
+  behavior.
+- Closed that gap: added FR-047 (`private`/`secret`, `MODE +p`/`+s`) —
+  a non-member's `TOPIC`/`NAMES`/`LIST` on such a channel MUST be
+  indistinguishable from the channel not existing (`403
+  ERR_NOSUCHCHANNEL` for `TOPIC`/`NAMES`, silent omission from `LIST`),
+  with an administrator bypass mirroring FR-032's existing hostname-
+  cloaking transparency guarantee. Amended FR-040/FR-041/FR-042 to
+  cross-reference the exception, since they previously promised
+  unconditional non-member access with no carve-out. `ChannelMode.gates`
+  gained a third value, `DISCOVER`, validating the mechanism generalizes
+  beyond simple permit/deny (its failure mode is deliberately
+  "respond as not-found," unlike `SEND`/`JOIN`'s explicit errors).
+  `private`/`secret` are mutually exclusive per RFC 2811 (setting one
+  clears the other) and, for this release, treated identically —
+  documented as a deliberate simplification of `private`'s more
+  historically inconsistent "listed but obscured" variant. 47 FRs total.
+- Ran `/speckit-clarify`, which surfaced and resolved four real gaps:
+  (1) FR-004 amended — channel-message sending never required membership
+  by default, only `members-only` restricts it; the `PRIVMSG` contract
+  row had been claiming unconditional membership all along, silently
+  making that flag's default state meaningless. (2) FR-048 added —
+  channel names never had a defined grammar the way nicknames did,
+  despite an Edge Case already asking about it; now RFC 2812's `#`-led,
+  50-char-max grammar, rejected with the existing (previously
+  uncataloged-as-Used) `476 ERR_BADCHANMASK`. (3) FR-049 added — protocol
+  line length was completely unbounded; now 512 bytes plus the IRCv3
+  message-tags spec's required 4096-byte server-side tag allowance
+  (FR-025), rejected under FR-015's existing malformed-message handling.
+  (4) A max-connections Assumptions bullet — deliberately no server-level
+  cap, an already-reasonable default made explicit rather than left
+  silently unstated. Then fixed the contracts inconsistencies (1) and (2)
+  actually named: `PRIVMSG`'s precondition column, `442`'s trigger
+  description, a new "Channel Name Grammar" subsection (mirroring
+  "Connection Registration Grammar"), and a line-length note in the
+  contract's intro — plus the matching `tasks.md` tasks (T017, T021,
+  T033, T066), all as text-only edits (no renumbering, no new IDs beyond
+  the wire-protocol grammar work already folded into T017/T021). 49 FRs
+  total.
+- Replaced FR-049's generic `421`/`461` line-length rejection with `417
+  ERR_INPUTTOOLONG` — a real, widely-adopted numeric filling an
+  otherwise-unused gap in RFC 1459/2812's own numbering (415→421),
+  purpose-built for exactly this case. The one deliberate exception to
+  this project's "RFC 1459/2812 numerics only" catalog scope, alongside
+  IRCv3's `CAP` numerics, since there's no existing RFC-standard
+  alternative to reuse (unlike `476 ERR_BADCHANMASK`, which already
+  existed for channel-name-grammar violations). Updated FR-049 to
+  require a specific, distinct error without naming the numeric in
+  spec.md itself, matching the established pattern (FR-002/FR-048 don't
+  name `432`/`476` either — that detail lives in contracts).

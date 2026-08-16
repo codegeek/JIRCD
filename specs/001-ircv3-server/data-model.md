@@ -161,16 +161,48 @@ enforced at channel-creation time, not left to callers).
   non-operator's attempt MUST be rejected with the same `482
   ERR_CHANOPRIVSNEEDED` error FR-014's other operator-gated actions use,
   not a new error of its own.
-- A sender's `PRIVMSG`/`NOTICE` to this channel MUST be rejected unless it
-  passes every currently-active flag in `activeModes` that restricts
-  sending: `MEMBERS_ONLY` requires the sender to be in `members`;
-  `MODERATED` requires the sender to be in `operators` **or** `voiced`
-  (FR-045) — matching classic IRC's `+m` semantics in full, not just the
-  operator half of it. These are checked independently of each other
-  (`MEMBERS_ONLY` vs. `MODERATED`), not as alternative states of one
-  variable (FR-013); within the `MODERATED` check specifically,
-  `operators`-or-`voiced` *is* the one condition, not two independent
-  ones — an operator does not additionally need to be voiced.
+- Any command whose semantics a `ChannelMode` can gate (currently `SEND`
+  — `PRIVMSG`/`NOTICE` — `JOIN`, and `DISCOVER` — `TOPIC`-viewing,
+  `NAMES`, `LIST` — `ChannelMode.gates` above) MUST reject the attempt
+  unless it passes every currently-active flag in
+  `activeModes` whose `gates` includes that command's action, checked
+  independently per flag, not as alternative states of one variable
+  (FR-013, FR-043's "not limited to... sending" clause). The pass/fail
+  decision for each flag is provided by whoever defines it — `CORE`'s own
+  logic for its built-in flags, or a future extension's own logic for one
+  it contributes — not hardcoded per-flag-id inside the command handler;
+  this is what makes it possible to add a new gating flag (FR-043's
+  example: a future invite-only extension gating `JOIN`) without editing
+  the handler for whichever command it gates.
+  - For `SEND` today: `MEMBERS_ONLY` requires the sender to be in
+    `members`; `MODERATED` requires the sender to be in `operators` **or**
+    `voiced` (FR-045) — matching classic IRC's `+m` semantics in full, not
+    just the operator half of it; `operators`-or-`voiced` *is* the one
+    condition for `MODERATED`, not two independent ones — an operator
+    does not additionally need to be voiced.
+  - For `JOIN` today: no currently-defined `ChannelMode` gates `{JOIN}`
+    (see the Full Channel Mode Catalog's `Gates` column,
+    contracts/irc-protocol-commands.md), so this check point exists but
+    is always a no-op in this release — every `JOIN` succeeds subject
+    only to FR-003's channel-creation/join behavior. A future
+    `JOIN`-gating flag (extension-contributed or core) does not require
+    changing `JoinCommandHandler`'s shape to add, only registering a
+    `ChannelMode` with `gates: {JOIN}` and the logic behind it — which,
+    per FR-043, is exactly the promise this mechanism has to keep. Such
+    an extension typically would not need `Channel` itself to grow a new
+    field either: its pass/fail logic can consult the extension's own
+    bookkeeping (e.g., an invited-nicknames record, keyed by channel and
+    session) rather than a field this data model would need to define —
+    `Channel.activeModes` only needs to know the flag is active, not how
+    its own consult-logic is implemented.
+  - For `DISCOVER` today: `private` and `secret` (FR-047) both require
+    the requester to either be in `members` or hold
+    `administratorPrivilege`; unlike `SEND`/`JOIN`'s gate failures, a
+    failed `DISCOVER` check MUST produce the exact same response
+    `TOPIC`/`NAMES`/`LIST` would give for a channel that doesn't exist at
+    all (`ChannelMode.gates` above) — the point of `private`/`secret` is
+    that a non-member can't distinguish "doesn't exist" from "exists but
+    hidden," which a permission-denied-style error would defeat.
 - `voiced` MUST only be granted or revoked by a session in `operators`
   (FR-045); a non-operator's attempt MUST be rejected with the same `482
   ERR_CHANOPRIVSNEEDED` error every other operator-gated action uses.
@@ -220,23 +252,42 @@ the same role `Capability` plays for `CAP` (data-model.md "Capability").
 | `id` | string | Stable, human-readable identifier (e.g. `moderated`, `members-only`), independent of `flag` — the same role `Extension.id`/`Capability.name` play elsewhere in this data model. Unique among every currently-recognized `ChannelMode`. Exists separately from `flag` because the wire-letter namespace is far scarcer (52 possible characters, shared across every current and future flag) than the id namespace, and because error messages and administrator-facing output need something more legible than a single letter (constitution Principle III). |
 | `flag` | character | The wire-protocol mode letter (`m` for `moderated`, `n` for `members-only` — RFC 2811 §4.2.6/§4.2.5). Unique among every currently-recognized flag — core's plus every currently-`ENABLED` extension's — independently of `id` uniqueness; a conflicting registration (either kind) is rejected the same way `Extension.extensionPoint` ownership conflicts are (research.md "Extension-point ownership"). |
 | `kind` | enum: `BOOLEAN`, `VALUE`, `LIST`, `MEMBER` | Classifies the flag's shape, per RFC 2811's own mode taxonomy (contracts/irc-protocol-commands.md "Full Channel Mode Catalog"). `BOOLEAN`: a per-channel on/off flag, represented in `Channel.activeModes`. `VALUE` (e.g. a channel key) and `LIST` (e.g. a ban-mask list) carry data no field on `Channel` holds yet. `MEMBER` (operator, voice) is a per-nickname privilege, not a per-channel flag — its state lives in its own dedicated `Channel` field (`operators` for `operator`, FR-046; `voiced` for `voice`, FR-045), not in `activeModes`. Both `MEMBER`-kind flags this release defines are implemented — unlike `VALUE`/`LIST`, `MEMBER`-kind is fully representable today because it just means "a dedicated per-member set," and `Channel` already has two of those. |
-| `definedBy` | `CORE` or an `Extension` id | `CORE`-defined flags (`moderated`, `members-only`, `voice`, `operator`) are always recognized (FR-036). An extension-defined flag is only recognized while that extension is `ENABLED` — see `Channel.activeModes` validation rules above. |
+| `gates` | set of `GateableAction` (`SEND`, `JOIN`, `DISCOVER`), 0..* | Which command(s) this flag restricts, independent of `kind` — a `BOOLEAN` flag isn't assumed to gate `PRIVMSG`/`NOTICE` just because that's what this release's first two happen to do (FR-043's "Critically, the guarantee is not limited to..." clause). `moderated`/`members-only` gate `{SEND}`. `private`/`secret` gate `{DISCOVER}` (FR-047) — `TOPIC`-viewing, `NAMES`, and `LIST` for a non-member. `voice`/`operator` gate `{}` (empty) — they're privileges other flags' gate checks *consult*, not gates in their own right; nothing directly requires having voice or being an operator to perform an action, except as an input to `moderated`'s `SEND` check or FR-014's operator-gated actions (which aren't `ChannelMode`-driven at all). `DISCOVER`'s gate-failure convention differs from `SEND`/`JOIN`'s: a failed `DISCOVER` check MUST produce the same response as "this channel does not exist," never a distinguishable permission error (FR-047) — the whole point is that a non-member can't tell the two apart. See `Channel.activeModes` validation rules for how a command handler uses this to decide which flags apply to it. |
+| `definedBy` | `CORE` or an `Extension` id | `CORE`-defined flags (`moderated`, `members-only`, `voice`, `operator`, `private`, `secret`) are always recognized (FR-036). An extension-defined flag is only recognized while that extension is `ENABLED` — see `Channel.activeModes` validation rules above. |
 
 **Validation rules**:
 - `flag` uniqueness and `id` uniqueness are independent requirements, both
   enforced at all times: two flags MUST NOT share a `flag` character, and
   two flags MUST NOT share an `id`, regardless of whether one, both, or
   neither is core-defined (research.md "Channel/user mode extensibility").
-- This release populates exactly four `ChannelMode`s, all `CORE`-defined:
-  two `BOOLEAN` (`id: moderated, flag: m` and `id: members-only, flag: n`,
-  FR-013/FR-043) and two `MEMBER` (`id: voice, flag: v`, FR-045, granted/
-  revoked via `MODE +v`/`-v <nickname>`, state in `Channel.voiced`;
-  `id: operator, flag: o`, FR-046, granted/revoked via `MODE +o`/`-o
-  <nickname>`, state in `Channel.operators`); no extension in this
-  release contributes one. The mechanism exists now so a future
-  `BOOLEAN` one (e.g., a registered-channel/user flag once the account
-  module exists) doesn't require a `Channel`/`ChannelMode` data-model
-  change to add — only a new extension.
+- This release populates exactly six `ChannelMode`s, all `CORE`-defined:
+  four `BOOLEAN` (`id: moderated, flag: m`, `gates: {SEND}` and
+  `id: members-only, flag: n`, `gates: {SEND}`, FR-013/FR-043;
+  `id: private, flag: p` and `id: secret, flag: s`, both `gates:
+  {DISCOVER}`, FR-047) and two `MEMBER`, `gates: {}` (`id: voice,
+  flag: v`, FR-045, granted/revoked via `MODE +v`/`-v <nickname>`, state
+  in `Channel.voiced`; `id: operator, flag: o`, FR-046, granted/revoked
+  via `MODE +o`/`-o <nickname>`, state in `Channel.operators`); no
+  extension in this release contributes one. The mechanism exists now so
+  a future `BOOLEAN`, `gates: {SEND}` or `gates: {JOIN}` one (e.g., a
+  registered-channel flag once the account module exists, or a
+  `JOIN`-gating invite-only flag) doesn't require a `Channel`/
+  `ChannelMode` data-model change to add — only a new extension defining
+  the flag and its gate logic.
+- `private` and `secret` are mutually exclusive, per RFC 2811: setting
+  one via `MODE` MUST clear the other if it was active, rather than
+  allowing both simultaneously — the one deviation in this release from
+  `activeModes`' otherwise-independent-flags rule (above). This release
+  treats their `DISCOVER`-gate effect identically (FR-047) rather than
+  implementing the softer, less consistently-defined "listed but
+  obscured" variant some historical networks gave `private` alone — a
+  deliberate simplification, not an oversight.
+- A `DISCOVER` check against `private`/`secret` MUST pass automatically
+  for a session holding `administratorPrivilege` (FR-047), regardless of
+  channel membership — the same transparency guarantee FR-032 already
+  gives administrators over a cloaked member's real hostname
+  (research.md "Cloak extension boundary"), extended here to channel
+  visibility rather than identity.
 - A `VALUE`- or `LIST`-kind `ChannelMode` MUST NOT be contributed in this
   release: `Channel.activeModes`' shape (a plain set) has nowhere to hold
   a value or a list, and no mechanism here defines one. This is a real,

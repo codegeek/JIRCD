@@ -24,6 +24,13 @@
 - Q: Does treating federation as "just another module" (like Story 4's capabilities/moderation-tool modules) correctly capture what a future server-to-server implementation would need? → A: No — that framing was reconsidered as an oversimplification. Federation introduces a server-to-server trust boundary and distributed state (network-wide identity uniqueness, cross-server message routing, netsplit handling) that a client-facing module does not; it is not required to fit the FR-011 module abstraction, and its actual extension mechanism is left as a planning-phase decision made when federation is scoped. What this specification commits to now instead is narrower and testable: FR-021 (standalone operation, federation out of initial scope) plus FR-022, which names the specific core behaviors — nickname/channel uniqueness scope, channel message delivery, connection-loss handling — that MUST be implemented in a way that doesn't foreclose extending them later.
 - Q: Once federation exists, must every linked server run the same active modules, and must authentication stay consistent network-wide? → A: Yes to both. When federation is introduced, linked servers MUST present a consistent set of active modules to clients network-wide — a client's experience must not depend on which linked server it connects to (FR-028). Where the account module is in use in a federated network, account/identity verification and registration records MUST be managed by a single authoritative source shared across all linked servers, not independently per-instance (FR-029). Neither constraint requires anything of the initial, standalone release; they bound how a future federation effort must behave.
 
+### Session 2026-08-16
+
+- Q: Must a client already be a member of a channel to send it a PRIVMSG/NOTICE, or can any registered client message a channel it hasn't joined unless members-only mode is explicitly set? → A: Membership is NOT required by default — any registered client can PRIVMSG/NOTICE a channel it hasn't joined; members-only (FR-013/FR-043) is what restricts this.
+- Q: What should the wire-protocol validation rules be for a channel name? → A: RFC 2812 channel grammar — a leading `#` (standard channel type only, no `&`/`+`/`!` variants) followed by 1 to 49 additional characters, excluding space, comma, and control characters (50 characters total, maximum) — the same rigor already applied to nickname format (contracts/irc-protocol-commands.md "Connection Registration Grammar"), rejected with a dedicated error distinct from "nickname in use"-style errors.
+- Q: What should happen when the server is at capacity and a new client tries to connect? → A: No explicit server-level limit — the server does not enforce its own connection cap or send a dedicated rejection message; capacity is bounded only by OS/network resources and whatever an administrator configures at the deployment layer. SC-003's 1,000-connection floor is a sustained-operation target, not a hard ceiling with special in-protocol handling.
+- Q: Should the server enforce a maximum protocol line length, and how should an over-length message be handled? → A: 512-byte base line limit (command+params, CRLF-inclusive, classic IRC), plus the IRCv3 message-tags specification's required server-side allowance of up to 4096 additional bytes for the tags section (since FR-025 already implements message-tags). A line exceeding either budget MUST be rejected under FR-015's existing malformed-message handling, not silently truncated.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Connect and Chat in Real Time (Priority: P1)
@@ -210,6 +217,11 @@ confirm other channel members see the removal reflected.
    **When** that member performs a moderation action (e.g., removing a
    disruptive user), **Then** it succeeds, the same as if the original
    operator had performed it.
+6. **Given** an operator marks their channel secret, **When** a
+   non-member requests its topic, membership list, or checks the active
+   channel list, **Then** the response is indistinguishable from the
+   channel not existing; **When** a current member does the same,
+   **Then** they see it normally.
 
 ---
 
@@ -329,6 +341,13 @@ their presented (not real) hostname.
   status (or leaves) without first granting it to anyone else (FR-046) —
   does the server automatically promote a remaining member, or can an
   existing channel end up with members but no operator at all?
+- What happens if an operator marks a channel both private and secret at
+  once — does one silently override the other, or is it rejected as
+  contradictory (FR-047)?
+- Can an administrator investigating abuse still see a private/secret
+  channel's topic and membership, the same way they can already see a
+  cloaked member's real hostname (FR-032), or is that visibility
+  guarantee limited to identity information (FR-047)?
 - What happens when a client negotiates a capability, and mid-session the
   administrator disables the extension providing that capability?
 - How does the server respond when a channel or nickname name exceeds
@@ -381,7 +400,12 @@ their presented (not real) hostname.
   creating a separate, duplicate one.
 - **FR-004**: The server MUST deliver messages sent to a channel to every
   other client currently joined to that channel, attributed to the correct
-  sender.
+  sender. Sending a channel message MUST NOT itself require the sender to
+  be a member of that channel — membership is a precondition only when
+  the channel's members-only restriction (FR-013/FR-043) is active; by
+  default (members-only unset), any registered client MAY send to any
+  channel it hasn't joined, and delivery still reaches only the
+  channel's current membership as stated above.
 - **FR-005**: The server MUST support direct, private messaging between
   two registered clients without requiring a shared channel.
 - **FR-006**: The server MUST support capability negotiation, allowing a
@@ -602,18 +626,21 @@ their presented (not real) hostname.
   client-initiated liveness probe immediately, regardless of whether the
   server has probed that connection itself.
 - **FR-040**: The server MUST allow any client to view a channel's current
-  topic (or a clear "no topic set" indication if none has been set), and
-  MUST allow a channel operator to set or change it, notifying current
-  members of the change. The server MUST reject a topic-change attempt
-  from a member who is not a channel operator with a clear permissions
-  error, reusing the same channel-operator concept FR-013 already
-  establishes rather than introducing a separate one.
+  topic (or a clear "no topic set" indication if none has been set) —
+  subject to FR-047's private/secret exception — and MUST allow a
+  channel operator to set or change it, notifying current members of the
+  change. The server MUST reject a topic-change attempt from a member
+  who is not a channel operator with a clear permissions error, reusing
+  the same channel-operator concept FR-013 already establishes rather
+  than introducing a separate one.
 - **FR-041**: The server MUST allow a registered client to request the
   current membership list of a named channel on demand — not only as part
   of joining it — regardless of whether the requesting client is
-  currently a member of that channel.
+  currently a member of that channel, subject to FR-047's private/secret
+  exception.
 - **FR-042**: The server MUST allow a registered client to request a list
-  of the server's currently active channels.
+  of the server's currently active channels, subject to FR-047's
+  private/secret exception.
 - **FR-043**: The server's channel mode mechanism MUST directly and
   unconditionally implement exactly the two moderation flags FR-013
   defines (moderated-mode, members-only) as core behavior — never gated
@@ -635,6 +662,13 @@ their presented (not real) hostname.
   channel mode that instead carries a value (e.g., a numeric limit) or a
   list (e.g., a set of masks) is a structurally different case this
   requirement does not promise a mechanism for yet — see Assumptions.
+  Critically, the guarantee is not limited to flags that restrict sending
+  a channel message: an on/off flag that instead restricts *joining* the
+  channel (e.g., a future invite-only extension) MUST be equally
+  addable without a core-codebase change — the mechanism's extension
+  point MUST be defined in terms of "which action does this flag gate,"
+  not hardcoded to the one action (sending) this release's two built-in
+  flags happen to gate.
 - **FR-044**: The server MUST NOT implement any user-level mode in this
   release, and has no user-level equivalent of an "operator" concept to
   gate one — a user-level mode command MUST receive the same standard
@@ -664,6 +698,43 @@ their presented (not real) hostname.
   to other members. A non-existent target, or one who isn't currently a
   member of the channel, MUST be rejected with a clear error rather than
   silently granting a privilege to no one.
+- **FR-047**: The server MUST allow a channel operator to mark a channel
+  private or secret (restricted to operators, the same as every other
+  moderation action, FR-013/FR-014), and MUST hide such a channel's
+  existence from a non-member: topic-viewing (FR-040), membership listing
+  (FR-041), and the active-channel list (FR-042) MUST each treat that
+  channel exactly as they would treat one that does not exist for a
+  non-member requester, not merely refuse with a distinguishable
+  "access denied" response — a non-member MUST NOT be able to tell "this
+  channel doesn't exist" apart from "this channel exists but is hidden."
+  A channel's own members MUST see it normally, with no restriction. An
+  administrator (FR-033) MUST also see it normally regardless of
+  membership, the same transparency guarantee FR-032 already gives
+  administrators over cloaked hostnames. Private and secret MAY be
+  treated identically in this release (both hide equally, the way
+  `secret` already unambiguously must); this specification does not
+  require distinguishing a softer "listed but obscured" variant some
+  historical IRC networks gave private channels.
+- **FR-048**: A channel name MUST conform to a defined grammar: a leading
+  `#` followed by 1 to 49 additional characters, excluding space, comma,
+  and control characters (50 characters total, maximum) — the same rigor
+  already applied to nickname format (FR-002's uniqueness rule is a
+  separate, independent check from this one, mirroring how nickname
+  format and nickname uniqueness are independent checks). A `JOIN`
+  attempt naming a channel that violates this grammar MUST be rejected
+  with a clear, specific error distinct from the "nickname in use"-style
+  error FR-002 defines, not silently accepted as a new channel's
+  identity.
+- **FR-049**: The server MUST enforce a maximum protocol line length of
+  512 bytes (including the trailing CR-LF) for a message's command and
+  parameters, plus up to 4096 additional bytes for the message-tags
+  section specifically, per the IRCv3 message-tags specification's
+  required server-side allowance (FR-025 — this server implements
+  message-tags, so this allowance applies). A line exceeding either
+  budget MUST be rejected with a specific, actionable error distinct
+  from FR-015's other malformed-message cases — not silently truncated,
+  partially processed, or lumped in with a generic "malformed command"
+  response the sender would have to guess the actual cause of.
 
 ### Key Entities
 
@@ -782,6 +853,14 @@ their presented (not real) hostname.
   administrator-configurable Server Configuration setting in this
   release — unlike rate limiting's thresholds, which FR-016 already
   requires to be tunable.
+- The server does not enforce its own maximum-connections cap or send a
+  dedicated capacity-exceeded rejection at the protocol level; SC-003's
+  1,000-connection floor is a sustained-operation target the server MUST
+  meet, not a ceiling with special in-protocol handling once exceeded.
+  Capacity beyond what's actually sustained is bounded by OS/network
+  resources and whatever an administrator configures at the deployment
+  layer (e.g., a reverse proxy, container resource limits), not by this
+  specification.
 - Channel modes beyond moderated-mode and members-only (FR-013/FR-043),
   and user modes entirely (FR-044), are recognized at the wire-protocol
   level — a future client library can still parse them from any server —

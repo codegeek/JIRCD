@@ -415,6 +415,69 @@ in shape to `voice`'s. First-join-gets-operator (FR-013) remains the
 operator status subsequently spreads to other members, the same
 relationship voice's grant mechanism has to moderated-mode's send-check.
 
+**Validating the extensibility promise against a future `JOIN`-gating
+flag**: FR-043 promises a future `ServerExtension` can contribute a new
+channel-mode flag "without requiring a change to the server's core
+codebase." Checked against a concrete, near-certain future case — an
+invite-only extension, gating `JOIN` rather than `PRIVMSG`/`NOTICE` — the
+promise as originally built did **not** hold: every enforcement rule
+written so far (the `PRIVMSG`/`NOTICE` validation rule above) was phrased
+specifically in terms of "does the sender pass `MEMBERS_ONLY`/`MODERATED`,"
+with `MessageCommandHandler` as the only place any `ChannelMode` was ever
+checked. A flag gating `JOIN` would have had nowhere to plug in without
+editing `JoinCommandHandler` to add hardcoded awareness of the new flag —
+exactly the "requires a core codebase change" outcome FR-043 exists to
+rule out. This was a real gap in an already-committed requirement, not a
+hypothetical concern: it surfaced by asking the one question that matters
+for any "extensible by design" claim — does it hold for the *next*
+concrete case, not just the cases already built?
+
+**Fix**: `ChannelMode` gains a `gates: Set<GateableAction>` field
+(`SEND`, `JOIN` today; data-model.md), decoupling "which command does
+this flag restrict" from `kind` ("what shape is this flag's data").
+Every gateable command's handler iterates currently-active flags whose
+`gates` includes its own action and defers the pass/fail decision to
+whoever defines that flag — `CORE`'s own logic for the built-ins,
+an extension's own logic for a contributed one — rather than the handler
+hardcoding per-flag-id knowledge. This is not a new architectural idea:
+it's the same "extension contributes a named thing + a hook the relevant
+code calls generically" pattern `CapabilityExtension` already uses (a
+capability extension exposes a formatting hook `SessionWriter` calls per
+recipient; it doesn't get hardcoded into `SessionWriter` itself). Two
+findings fell out of applying it:
+- Most future `JOIN`-gating `BOOLEAN` flags — invite-only included —
+  would not require `Channel`'s shape to grow at all. The gate hook
+  receives the acting session and channel; an extension is free to keep
+  its own bookkeeping (e.g., an invited-nicknames record) entirely inside
+  itself, the same way `cloak` keeps its own hostname-obfuscation logic
+  without `ClientSession` needing an extension-specific field for it.
+- A `ServerExtension` implementing something like invite-only would also
+  typically want to register its own paired command (e.g., claiming the
+  already-recognized-but-unimplemented `INVITE`) — already solved,
+  unaffected by this change: `admin` and `cloak` already register their
+  own command handlers into `jircd-core`'s dispatch table when enabled
+  (research.md "Extension system"), so no new mechanism is needed there.
+
+What this fix does **not** claim to solve on its own: `p`/`s`
+(private/secret) restrict *visibility* — whether a channel appears in
+`TOPIC`/`NAMES`/`LIST` output at all for a non-member — not a simple
+permit/deny of attempting an action, which `SEND`/`JOIN` both are. This
+turned out to fit `GateableAction` anyway, with one addition: a third
+value, `DISCOVER` (FR-047, data-model.md `ChannelMode`), whose gate
+*failure* convention differs from `SEND`/`JOIN`'s — it MUST produce the
+same response as "channel doesn't exist," not a distinguishable
+permission error, since the entire point of `private`/`secret` is that a
+non-member can't tell those two cases apart. `TOPIC`-viewing, `NAMES`,
+and `LIST` were already grouped under this project's own "discovery
+operations" terminology (contracts/irc-protocol-commands.md) before this
+change, which is exactly why one shared `DISCOVER` action — checked once
+by each of the three handlers, not three separately-named actions — was
+the right shape rather than `TOPIC_VIEW`/`NAMES`/`LIST_ENTRY` individually.
+`private`/`secret` are `CORE`-defined, not extension-contributed, and
+grant an `administratorPrivilege` bypass (FR-047) — mirroring FR-032's
+existing hostname-cloaking transparency guarantee for administrators,
+extended here to channel visibility.
+
 **Alternatives considered**:
 - *Keep the enum, widen it each time a new mode is needed*: rejected —
   exactly the "requires core codebase changes" outcome the Extension
@@ -434,6 +497,34 @@ relationship voice's grant mechanism has to moderated-mode's send-check.
   `Channel`*: rejected as premature generality — `ChannelMode` solves the
   one concrete, named case (mode flags) this decision exists for, without
   inventing a schema-less mechanism nothing else in this project needs.
+- *Leave `gates` out and let each command handler special-case which
+  flag ids it cares about (as originally built)*: rejected — this is
+  exactly the design validated and found insufficient above; it silently
+  breaks FR-043's extensibility promise for any flag that isn't
+  `SEND`-gating, and nothing about it would have surfaced that until
+  someone actually tried to build a `JOIN`-gating extension and hit a
+  wall.
+- *A single `gates: GateableAction` (one value, not a set)*: rejected in
+  favor of a set — costs nothing extra for this release's six flags
+  (each populates zero or one value today), but a set doesn't foreclose
+  a hypothetical future flag gating more than one action, and a set is
+  no harder to check ("does `gates` contain this action") than a single
+  value would be.
+- *Three separate gateable actions (`TOPIC_VIEW`, `NAMES`, `LIST_ENTRY`)
+  instead of one shared `DISCOVER`*: rejected — `TOPIC`-viewing, `NAMES`,
+  and `LIST` already share identical membership-independence and
+  identical `private`/`secret` semantics; three actions would just mean
+  `private`/`secret` populate `gates: {TOPIC_VIEW, NAMES, LIST_ENTRY}`
+  every time, in lockstep, with no case where a future flag would want
+  one but not the others. One `DISCOVER` value says the same thing with
+  fewer moving parts.
+- *Implement `private` and `secret` with distinct behavior (RFC 2811's
+  "listed but obscured" nuance for `private`)*: rejected for this
+  release — real-world ircds disagree enough on `private`'s exact LIST
+  behavior that guessing one would risk enshrining a convention nothing
+  else agrees on; treating them identically (full hiding, like `secret`
+  unambiguously requires) is simpler, defensible, and easy to relax later
+  if a concrete reason to distinguish them ever shows up.
 
 ## Deterministic testing under concurrency
 

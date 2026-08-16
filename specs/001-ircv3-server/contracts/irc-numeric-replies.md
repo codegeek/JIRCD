@@ -4,9 +4,15 @@ Like [irc-protocol-commands.md](./irc-protocol-commands.md), this contract
 has two layers:
 
 1. **Wire-protocol recognition** (`jircd-protocol`) — the complete RFC
-   1459/2812 numeric reply catalog. `jircd-protocol`'s `NumericReply` model
-   MUST represent all of these, for the same reason its command model
-   covers the full command set: a future client library needs to parse
+   1459/2812 numeric reply catalog, plus `417 ERR_INPUTTOOLONG` — the one
+   deliberate exception to "RFC 1459/2812 only," included because it's a
+   widely-adopted de facto standard filling an otherwise-unused numeric
+   gap in the RFC's own numbering (415→421), purpose-built for exactly
+   the line-length limit this project's `message-tags` support requires
+   (FR-049) — the same category of justified addition IRCv3's `CAP`
+   numerics already are. `jircd-protocol`'s `NumericReply` model MUST
+   represent all of these, for the same reason its command model covers
+   the full command set: a future client library needs to parse
    `312 RPL_WHOISSERVER` from *any* server, not only one that happens to
    implement the server-name part of `WHOIS`.
 2. **Server behavior** (`jircd-core` and extensions) — only the numerics
@@ -38,12 +44,15 @@ client/administrator can do about it).
 | `381` | `RPL_YOUREOPER` | Successful `OPER` | FR-034 |
 | `382` | `RPL_REHASHING` | Successful `REHASH` | FR-011, FR-012 (research.md "Configuration reload mechanism") |
 | `401` | `ERR_NOSUCHNICK` | `WHOIS` for a nickname that isn't connected | FR-037 |
+| `403` | `ERR_NOSUCHCHANNEL` | `TOPIC`/`NAMES` for a channel that doesn't exist, or that is private/secret and the requester is neither a member nor an administrator (identical response either way, FR-047) | FR-047 |
+| `417` | `ERR_INPUTTOOLONG` | A line exceeding the 512-byte base limit or the 4096-byte `message-tags` allowance (FR-049) — not part of RFC 1459/2812 (there is no numeric defined in that gap, 416-420), but a widely-adopted de facto standard purpose-built for exactly this case, the same way this project already treats IRCv3's `CAP` numerics as belonging alongside the RFC set | FR-049 |
 | `421` | `ERR_UNKNOWNCOMMAND` | Malformed/unrecognized command, or a wire-protocol-recognized command with no handler in this release | FR-015 |
 | `431` | `ERR_NONICKNAMEGIVEN` | `NICK` with no argument | FR-001 (input validation) |
 | `432` | `ERR_ERRONEUSNICKNAME` | `NICK` violating the nickname grammar (invalid leading/body characters or over 9 characters) | irc-protocol-commands.md "Connection Registration Grammar" |
 | `433` | `ERR_NICKNAMEINUSE` | `NICK` naming an already-claimed nickname | FR-002 |
 | `441` | `ERR_USERNOTINCHANNEL` | `MODE +v`/`-v` or `+o`/`-o <nickname>` naming a nickname that isn't a current member of the target channel | FR-045, FR-046 |
-| `442` | `ERR_NOTONCHANNEL` | `PART`/`PRIVMSG`/`KICK`/`MODE` on a channel the sender hasn't joined (where membership is required) | FR-003, FR-014 |
+| `442` | `ERR_NOTONCHANNEL` | `PART`/`KICK`/`MODE` on a channel the sender hasn't joined; `PRIVMSG`/`NOTICE` to a channel with `members-only` active that the sender hasn't joined (FR-004, FR-013/FR-043 — membership is not required for `PRIVMSG`/`NOTICE` otherwise) | FR-003, FR-004, FR-014 |
+| `476` | `ERR_BADCHANMASK` | `JOIN` naming a channel that violates the Channel Name Grammar (irc-protocol-commands.md "Channel Operations") | FR-048 |
 | `461` | `ERR_NEEDMOREPARAMS` | Command missing required parameters | FR-015 |
 | `464` | `ERR_PASSWDMISMATCH` | Failed `OPER` (also logged as a security event, FR-019) | FR-034 |
 | `472` | `ERR_UNKNOWNMODE` | `MODE` given a flag the core moderation command set doesn't define | FR-015, FR-036 (core input validation — `MODE` is never extension-gated) |
@@ -97,12 +106,13 @@ trigger them is "Recognized only" per irc-protocol-commands.md).
 
 | Numeric | Name | Numeric | Name | Numeric | Name |
 |---|---|---|---|---|---|
-| `401` | `ERR_NOSUCHNICK` *(Used)* | `402` | `ERR_NOSUCHSERVER` | `403` | `ERR_NOSUCHCHANNEL` |
+| `401` | `ERR_NOSUCHNICK` *(Used)* | `402` | `ERR_NOSUCHSERVER` | `403` | `ERR_NOSUCHCHANNEL` *(Used)* |
 | `404` | `ERR_CANNOTSENDTOCHAN` | `405` | `ERR_TOOMANYCHANNELS` | `406` | `ERR_WASNOSUCHNICK` |
 | `407` | `ERR_TOOMANYTARGETS` | `408` | `ERR_NOSUCHSERVICE` | `409` | `ERR_NOORIGIN` |
 | `411` | `ERR_NORECIPIENT` | `412` | `ERR_NOTEXTTOSEND` | `413` | `ERR_NOTOPLEVEL` |
-| `414` | `ERR_WILDTOPLEVEL` | `415` | `ERR_BADMASK` | `421` | `ERR_UNKNOWNCOMMAND` *(Used)* |
-| `422` | `ERR_NOMOTD` | `423` | `ERR_NOADMININFO` | `424` | `ERR_FILEERROR` |
+| `414` | `ERR_WILDTOPLEVEL` | `415` | `ERR_BADMASK` | `417` | `ERR_INPUTTOOLONG` *(Used)* |
+| `421` | `ERR_UNKNOWNCOMMAND` *(Used)* | `422` | `ERR_NOMOTD` | `423` | `ERR_NOADMININFO` |
+| `424` | `ERR_FILEERROR` |
 | `431` | `ERR_NONICKNAMEGIVEN` *(Used)* | `432` | `ERR_ERRONEUSNICKNAME` *(Used)* | `433` | `ERR_NICKNAMEINUSE` *(Used)* |
 | `436` | `ERR_NICKCOLLISION` | `437` | `ERR_UNAVAILRESOURCE` | `441` | `ERR_USERNOTINCHANNEL` *(Used)* |
 | `442` | `ERR_NOTONCHANNEL` *(Used)* | `443` | `ERR_USERONCHANNEL` | `444` | `ERR_NOLOGIN` |
@@ -111,7 +121,7 @@ trigger them is "Recognized only" per irc-protocol-commands.md).
 | `464` | `ERR_PASSWDMISMATCH` *(Used)* | `465` | `ERR_YOUREBANNEDCREEP` | `466` | `ERR_YOUWILLBEBANNED` |
 | `467` | `ERR_KEYSET` | `471` | `ERR_CHANNELISFULL` | `472` | `ERR_UNKNOWNMODE` *(Used)* |
 | `473` | `ERR_INVITEONLYCHAN` | `474` | `ERR_BANNEDFROMCHAN` | `475` | `ERR_BADCHANNELKEY` |
-| `476` | `ERR_BADCHANMASK` | `477` | `ERR_NOCHANMODES` | `478` | `ERR_BANLISTFULL` |
+| `476` | `ERR_BADCHANMASK` *(Used)* | `477` | `ERR_NOCHANMODES` | `478` | `ERR_BANLISTFULL` |
 | `481` | `ERR_NOPRIVILEGES` *(Used)* | `482` | `ERR_CHANOPRIVSNEEDED` *(Used)* | `483` | `ERR_CANTKILLSERVER` |
 | `484` | `ERR_RESTRICTED` | `485` | `ERR_UNIQOPPRIVSNEEDED` | `491` | `ERR_NOOPERHOST` |
 | `501` | `ERR_UMODEUNKNOWNFLAG` | `502` | `ERR_USERSDONTMATCH` | | |
