@@ -32,9 +32,21 @@
 ## Notes
 
 - Items marked incomplete require spec updates before `/speckit-clarify` or `/speckit-plan`
-- All 3 [NEEDS CLARIFICATION] markers resolved via `/speckit-clarify` on
-  2026-08-15: standalone topology with federation deferred to a future
-  module (FR-021), pluggable account verification with a required
-  built-in default module (FR-022/FR-022a), and a minimal initial
-  capability set of `message-tags`, `server-time`, `echo-message`
-  (FR-023). See spec.md § Clarifications for full detail.
+- All [NEEDS CLARIFICATION] markers resolved via `/speckit-clarify` across
+  sessions on 2026-08-15. See spec.md § Clarifications for full detail.
+- User Story 3 (authentication) and everything that exists solely to
+  support it (FR-009, FR-010, FR-023, FR-024, FR-026, FR-027, SC-007, the
+  Account entity) are explicitly deferred — not required for the initial
+  release. The mandatory initial-release scope is Stories 1, 2, and 4
+  (plus Story 5, which does not depend on
+  the account module).
+- Federation is no longer specified as fitting the FR-011 module
+  abstraction (FR-021 revised, FR-022 added). It is deferred and its
+  eventual extension mechanism is left to future planning; the spec only
+  constrains how nickname/channel uniqueness, channel message delivery,
+  and connection-loss handling are implemented now so that door stays
+  open.
+- Two additional standing constraints on a future federation effort were
+  added: module consistency across all linked servers (FR-028) and a
+  single authoritative account source shared network-wide (FR-029).
+  Neither applies to the initial, standalone release.
