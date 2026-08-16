@@ -41,7 +41,18 @@ schema in `contracts/server-configuration.md`.
 5. In terminal A: send `JOIN #lobby`, then `PRIVMSG #lobby :hello`.
    - **Expected**: terminal B receives the `PRIVMSG` within ~1s (SC-002),
      with the sender prefix in `alice!<ident>@<hostname>` form (FR-030).
-6. Close terminal A's connection (Ctrl-C).
+6. As alice (the operator, first to join per FR-013), send `TOPIC #lobby
+   :Welcome to #lobby`.
+   - **Expected**: both terminals see the `TOPIC` change (FR-040).
+7. As bob (not an operator), send `TOPIC #lobby :hijacked`.
+   - **Expected**: `482 ERR_CHANOPRIVSNEEDED`; the topic is unchanged.
+8. Open a third terminal, register as `carol`, and — without joining
+   `#lobby` — send `TOPIC #lobby`, `NAMES #lobby`, and `LIST`.
+   - **Expected**: `332 RPL_TOPIC` showing the current topic, `353`/`366`
+     showing alice and bob as members, and a `322 RPL_LIST` entry for
+     `#lobby` followed by `323 RPL_LISTEND` — all without carol having
+     joined the channel (FR-040/FR-041/FR-042).
+9. Close terminal A's connection (Ctrl-C).
    - **Expected**: terminal B sees a `PART`/`QUIT` notification for alice
      (FR-017).
 

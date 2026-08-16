@@ -27,6 +27,10 @@ client/administrator can do about it).
 | Numeric | Name | Triggered by | FR |
 |---|---|---|---|
 | `001` | `RPL_WELCOME` | Successful registration | FR-001 |
+| `322` | `RPL_LIST` | `LIST` (one per active channel) | FR-042 |
+| `323` | `RPL_LISTEND` | End of a `LIST` reply | FR-042 |
+| `331` | `RPL_NOTOPIC` | `TOPIC` query on a channel with no topic set | FR-040 |
+| `332` | `RPL_TOPIC` | `TOPIC` query on a channel with a topic set | FR-040 |
 | `311` | `RPL_WHOISUSER` | Successful `WHOIS` | FR-037, FR-038 |
 | `318` | `RPL_ENDOFWHOIS` | End of a `WHOIS` reply | FR-037 |
 | `353` | `RPL_NAMREPLY` | `JOIN` | FR-003 |
@@ -59,12 +63,12 @@ trigger them is "Recognized only" per irc-protocol-commands.md).
 | Numeric | Name | Numeric | Name | Numeric | Name |
 |---|---|---|---|---|---|
 | `001` | `RPL_WELCOME` *(Used)* | `211` | `RPL_STATSLINKINFO` | `321` | `RPL_LISTSTART` |
-| `002` | `RPL_YOURHOST` | `212` | `RPL_STATSCOMMANDS` | `322` | `RPL_LIST` |
-| `003` | `RPL_CREATED` | `219` | `RPL_ENDOFSTATS` | `323` | `RPL_LISTEND` |
+| `002` | `RPL_YOURHOST` | `212` | `RPL_STATSCOMMANDS` | `322` | `RPL_LIST` *(Used)* |
+| `003` | `RPL_CREATED` | `219` | `RPL_ENDOFSTATS` | `323` | `RPL_LISTEND` *(Used)* |
 | `004` | `RPL_MYINFO` | `221` | `RPL_UMODEIS` | `324` | `RPL_CHANNELMODEIS` |
 | `005` | `RPL_BOUNCE` | `234` | `RPL_SERVLIST` | `325` | `RPL_UNIQOPIS` |
-| `200` | `RPL_TRACELINK` | `235` | `RPL_SERVLISTEND` | `331` | `RPL_NOTOPIC` |
-| `201` | `RPL_TRACECONNECTING` | `242` | `RPL_STATSUPTIME` | `332` | `RPL_TOPIC` |
+| `200` | `RPL_TRACELINK` | `235` | `RPL_SERVLISTEND` | `331` | `RPL_NOTOPIC` *(Used)* |
+| `201` | `RPL_TRACECONNECTING` | `242` | `RPL_STATSUPTIME` | `332` | `RPL_TOPIC` *(Used)* |
 | `202` | `RPL_TRACEHANDSHAKE` | `243` | `RPL_STATSOLINE` | `341` | `RPL_INVITING` |
 | `203` | `RPL_TRACEUNKNOWN` | `251` | `RPL_LUSERCLIENT` | `342` | `RPL_SUMMONING` |
 | `204` | `RPL_TRACEOPERATOR` | `252` | `RPL_LUSEROP` | `346` | `RPL_INVITELIST` |

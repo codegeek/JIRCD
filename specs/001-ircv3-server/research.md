@@ -537,6 +537,50 @@ project's actual blocking/virtual-thread model). Wrapping
 `SSLEngine`: technically possible but reinvents what `SSLSocket` already
 provides, for no gain.
 
+## Connection keep-alive (FR-039)
+
+**Decision**: A per-connection `LivenessMonitor`, driven by an injectable
+clock/scheduler rather than real time: when a connection has been idle
+past a configured probe interval, it sends a server-initiated `PING`; if
+no `PONG` arrives within a configured timeout, it sends `ERROR` and closes
+the connection through the exact same disconnect path `QuitCommandHandler`
+uses (FR-017's cleanup/notification), not a separate one. A
+client-initiated `PING` is answered with an immediate `PONG` on any
+connection, independently of the monitor's own probing (contracts/
+irc-protocol-commands.md "Connection Keep-Alive").
+
+**Rationale**: `jircd-protocol`'s Full Command Catalog already listed
+`PING`/`PONG`/`ERROR` as "Implemented" (a completeness commitment this
+project makes for every command it claims — see "Wire-protocol command &
+numeric completeness" above), but nothing backed that claim: no FR, no
+task, no code. That gap matters beyond documentation accuracy — FR-017
+already commits to cleaning up a client's channel memberships "whether
+gracefully or unexpectedly," but the *unexpected* case as originally
+scoped only covers a TCP-level signal (a read returning EOF or an error).
+A connection whose network path has gone silent without the OS ever
+noticing (a common real-world case: a dead client behind a NAT/firewall
+that silently drops idle mappings) produces neither a `QUIT` nor a
+TCP-level error — without a keep-alive probe, that session would sit in
+`REGISTERED` forever, still counted as a channel member, still a
+candidate recipient in fan-out, indefinitely. The injectable-clock
+requirement follows "Deterministic testing under concurrency" below: a
+timeout mechanism tested with real `Thread.sleep` calls is exactly the
+kind of flaky, slow test that principle rules out.
+
+**Alternatives considered**:
+- *Rely on TCP keep-alive (`SO_KEEPALIVE`) instead of an application-level
+  `PING`/`PONG`*: OS-level keep-alive intervals are typically hours by
+  default and not portably tunable to IRC-appropriate timescales (minutes)
+  from Java without platform-specific code — and it wouldn't satisfy the
+  Full Command Catalog's claim that `PING`/`PONG` are implemented,
+  wire-visible commands.
+- *No keep-alive at all, treat it as future scope*: rejected because it
+  leaves the "Implemented" claim false and FR-017's "unexpectedly"
+  disconnect case incomplete for a failure mode (silently dead
+  connections) that is common enough in real deployments to matter for
+  SC-003's 1,000-connection sustained-operation target — a server slowly
+  accumulating ghost sessions would eventually violate it.
+
 ## Rate limiting (FR-016)
 
 **Decision**: Per-connection token bucket, refilled at a fixed rate,

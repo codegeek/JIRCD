@@ -96,6 +96,24 @@ which arrived last.
   `CAP LS` response for this release (FR-025); the SASL capability
   referenced in the spec is deferred with Story 3 and MUST NOT appear.
 
+### Connection Keep-Alive
+
+| Command | Direction | Preconditions | Effect | Replies |
+|---|---|---|---|---|
+| `PING [token]` | C→S | Any time | Server replies immediately | `PONG [token]` |
+| `PING [token]` | S→C | This connection has been idle beyond the configured keep-alive probe interval (FR-039) | Probes whether the client is still there | Client is expected to reply `PONG [token]`; no reply within the configured timeout closes the connection (`ERROR` sent first, then the same FR-017 cleanup/notification path as any other disconnect) |
+| `PONG [token]` | C→S | Sent in reply to a server-initiated `PING` | Resets this connection's keep-alive timer (FR-039) | (none; an unsolicited `PONG` with no outstanding server `PING` is accepted and ignored) |
+| `ERROR :<reason>` | S→C | Server is about to forcibly close this connection (a keep-alive timeout, FR-039, or another protocol-level cause) | Final line sent before closing the socket | (none; the connection closes immediately after) |
+
+**Contract notes**:
+- `PING`/`PONG` are core connection-management behavior, like capability
+  negotiation (FR-035) and channel moderation (FR-036) — always present,
+  never one of the toggleable `capabilities`/`server-extensions`.
+- This is symmetric, not just server-initiated: a client MAY send `PING`
+  at any time (even before registration completes) and MUST receive an
+  immediate `PONG`, independently of whatever keep-alive probing the
+  server itself is doing on that connection.
+
 ### Channel Operations
 
 | Command | Direction | Preconditions | Effect | Replies |
@@ -105,6 +123,19 @@ which arrived last.
 | `PRIVMSG <target> :<text>` | C→S | Session is a member of channel target, or target is any registered nickname for a direct message | Delivers to all other channel members (FR-004) or the direct-message recipient (FR-005) | `PRIVMSG` delivered to recipients; `echo-message`-negotiated senders also receive their own message back |
 | `NOTICE <target> :<text>` | C→S | Same as `PRIVMSG` | Same delivery semantics as `PRIVMSG`, but MUST NOT trigger automated replies | Delivered like `PRIVMSG` |
 | `QUIT [:reason]` | C→S | Any time | Disconnects; removes all channel memberships (FR-017) | `QUIT` echoed to all affected channels |
+| `TOPIC <channel>` | C→S | `REGISTERED` session; no membership required (FR-040/FR-041's discovery framing) | Returns `channel`'s current topic | `332 RPL_TOPIC` if a topic is set, `331 RPL_NOTOPIC` if not; standard "no such channel" error if `channel` doesn't exist |
+| `TOPIC <channel> :<topic>` | C→S | `REGISTERED` session; sender is a channel operator (FR-013) | Sets/changes `channel`'s topic (FR-040) | `TOPIC` echoed to all members on success; `482 ERR_CHANOPRIVSNEEDED` if sender isn't an operator |
+| `NAMES <channel>` | C→S | `REGISTERED` session; no membership required (FR-041) | Returns `channel`'s current membership list, the same on-demand query `JOIN` already triggers automatically | `353 RPL_NAMREPLY` + `366 RPL_ENDOFNAMES`; `461 ERR_NEEDMOREPARAMS` if `channel` is omitted |
+| `LIST` | C→S | `REGISTERED` session | Returns every currently active channel (FR-042) | One `322 RPL_LIST` per channel, then `323 RPL_LISTEND` |
+
+**Contract notes**:
+- `TOPIC`-viewing, `NAMES`, and `LIST` deliberately do not require channel
+  membership — they are discovery operations (FR-041/FR-042), the same
+  role `WHOIS` (below) plays for user information, not moderation-gated
+  like `KICK`/`MODE` (Story 5).
+- `TOPIC`-setting is the one operator-gated action in this section; it
+  reuses `Channel.operators` (FR-013), already established at `JOIN` — no
+  separate authorization mechanism is introduced for it.
 
 ### User Queries (Story 7)
 
@@ -196,9 +227,9 @@ any given server to implement it.
 | `JOIN` | 3.2.1 | **Implemented** — see "Channel Operations" above |
 | `PART` | 3.2.2 | **Implemented** — see "Channel Operations" above |
 | `MODE` (channel) | 3.2.3 | **Implemented** — see "Moderation" above (`+m`/members-only variants only; other channel modes are recognized-only) |
-| `TOPIC` | 3.2.4 | Recognized only — no channel topic concept in this release |
-| `NAMES` | 3.2.5 | Recognized only — `JOIN` already returns `353`/`366` (see "Channel Operations"); a bare `NAMES` query is not implemented |
-| `LIST` | 3.2.6 | Recognized only — no channel-listing feature in this release |
+| `TOPIC` | 3.2.4 | **Implemented** — see "Channel Operations" above |
+| `NAMES` | 3.2.5 | **Implemented** — see "Channel Operations" above (requires a channel argument; a bare, argument-less global `NAMES` is not implemented) |
+| `LIST` | 3.2.6 | **Implemented** — see "Channel Operations" above |
 | `INVITE` | 3.2.7 | Recognized only — no invite-only channel concept in this release |
 | `KICK` | 3.2.8 | **Implemented** — see "Moderation" above |
 | `PRIVMSG` | 3.3.1 | **Implemented** — see "Channel Operations" above |
@@ -219,9 +250,9 @@ any given server to implement it.
 | `WHOIS` | 3.6.2 | **Implemented** — see "User Queries" above |
 | `WHOWAS` | 3.6.3 | Recognized only |
 | `KILL` | 3.7.1 | Recognized only — no forced-disconnect admin command in this release (an administrator can approximate this via a future `EXTENSION`-adjacent command, but none exists yet) |
-| `PING` | 3.7.2 | **Implemented** — core connection keep-alive, answered with `PONG` |
-| `PONG` | 3.7.3 | **Implemented** — accepted as a client's reply to the server's `PING` |
-| `ERROR` | 3.7.4 | **Implemented** — sent by the server immediately before forcibly closing a connection (e.g., protocol violation) |
+| `PING` | 3.7.2 | **Implemented** — see "Connection Keep-Alive" above |
+| `PONG` | 3.7.3 | **Implemented** — see "Connection Keep-Alive" above |
+| `ERROR` | 3.7.4 | **Implemented** — see "Connection Keep-Alive" above |
 | `AWAY` | 4.1 | Recognized only — no away-status feature in this release |
 | `REHASH` | 4.2 | **Implemented** — see "Administration" above (this project's version is IRC-command-only, not also a `DIE`/`RESTART`-style local-admin command) |
 | `DIE` | 4.3 | Recognized only — no remote-shutdown admin command in this release |

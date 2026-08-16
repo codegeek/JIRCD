@@ -53,6 +53,14 @@ client sees messages sent by the other within a second.
    by another connected client, **When** the registration is submitted,
    **Then** the server rejects it with a clear "nickname in use" response
    and the client can retry with a different nickname.
+4. **Given** a channel operator sets a topic on their channel, **When**
+   another member views the channel, **Then** they see the current topic;
+   **When** a non-operator member attempts to change it, **Then** the
+   server rejects the attempt with a clear permissions error.
+5. **Given** several channels currently have members, **When** a client
+   requests the list of active channels, or the member list of one of
+   them, **Then** the server returns accurate, current results without
+   requiring the requesting client to have joined that channel first.
 
 ---
 
@@ -285,6 +293,11 @@ their presented (not real) hostname.
   acceptable rate (flooding), whether accidental or malicious?
 - What happens when a client disconnects abruptly (no clean quit) while
   still a member of one or more channels?
+- What happens when a client's connection goes silent without *any*
+  TCP-level signal at all — no clean quit, no abrupt-close error, just a
+  network path that stopped delivering data (e.g., the client's machine
+  lost power, or a NAT/firewall silently dropped an idle connection) — how
+  does the server ever notice and clean it up?
 - How does the server respond to a malformed or incomplete protocol
   message that cannot be parsed?
 - How does the server behave when an optional extension fails to start or
@@ -554,6 +567,27 @@ their presented (not real) hostname.
      enabled, the real value otherwise) — the server MUST NOT expose a
      target's real, unobfuscated hostname/IP to a non-administrator
      client looking up a *different* client, under any circumstance.
+- **FR-039**: The server MUST detect a connection that has gone silent
+  without a clean disconnect — one whose underlying network path stopped
+  working without a TCP-level close ever arriving — by probing it after a
+  period of inactivity and, if it does not respond within a bounded
+  timeout, treating it exactly like any other disconnect for FR-017's
+  cleanup and notification purposes. The server MUST also respond to a
+  client-initiated liveness probe immediately, regardless of whether the
+  server has probed that connection itself.
+- **FR-040**: The server MUST allow any client to view a channel's current
+  topic (or a clear "no topic set" indication if none has been set), and
+  MUST allow a channel operator to set or change it, notifying current
+  members of the change. The server MUST reject a topic-change attempt
+  from a member who is not a channel operator with a clear permissions
+  error, reusing the same channel-operator concept FR-013 already
+  establishes rather than introducing a separate one.
+- **FR-041**: The server MUST allow a registered client to request the
+  current membership list of a named channel on demand — not only as part
+  of joining it — regardless of whether the requesting client is
+  currently a member of that channel.
+- **FR-042**: The server MUST allow a registered client to request a list
+  of the server's currently active channels.
 
 ### Key Entities
 
@@ -581,7 +615,9 @@ their presented (not real) hostname.
   session.
 - **Channel**: A named, joinable group through which multiple clients
   exchange messages; tracks its membership list, operator/privilege
-  assignments, and moderation settings. In a later release, once the
+  assignments, moderation settings, and an optional topic (FR-040) — set
+  only by an operator, visible to any client (FR-040/FR-041), unlike
+  moderation settings which govern who may send. In a later release, once the
   account module exists, a channel MAY be registered to an Account, in
   which case its operator/privilege assignments are sourced from that
   account's access records (FR-026) instead of join order; the initial
@@ -662,6 +698,11 @@ their presented (not real) hostname.
 - Rate limiting/flood protection (FR-016, SC-006) uses reasonable
   industry-standard defaults, configurable by the administrator, rather
   than a single fixed universal threshold.
+- Connection keep-alive (FR-039) uses reasonable industry-standard
+  probe-interval and response-timeout defaults, not exposed as an
+  administrator-configurable Server Configuration setting in this
+  release — unlike rate limiting's thresholds, which FR-016 already
+  requires to be tunable.
 - No mobile app, web client, or GUI is in scope — this specification
   covers the server and its protocol behavior only; any client software
   is out of scope.

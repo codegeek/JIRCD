@@ -76,3 +76,20 @@
   up a *different* client only ever gets the presented (cloak-affected)
   value, reusing FR-030/031/032/033's existing display-vs-real model
   rather than introducing a new one.
+- Closed a completeness gap: `PING`/`PONG` connection keep-alive was
+  already claimed as "Implemented" in the wire-protocol contract's Full
+  Command Catalog, but no functional requirement, contract detail, or
+  task backed that claim. Added FR-039 (silent-connection detection via
+  a bounded liveness probe, feeding the existing FR-017 disconnect-
+  cleanup path; also requires replying to a client-initiated probe), a
+  new Edge Case distinguishing a fully silent connection from the
+  already-covered abrupt-TCP-close case, and an Assumptions bullet
+  fixing keep-alive timing as a reasonable default rather than an
+  administrator-configurable Server Configuration setting.
+- Moved `TOPIC`/`NAMES`/`LIST` from "Recognized only" into User Story 1's
+  scope (FR-040/FR-041/FR-042): any client may view a channel's topic or
+  query its membership/the server's active-channel list without being a
+  member (a discovery operation, like `WHOIS`), but only a channel
+  operator may set the topic — reusing FR-013's existing operator concept
+  rather than introducing a new authorization mechanism. Added `Channel.topic`
+  to the data model and two new Acceptance Scenarios to Story 1.

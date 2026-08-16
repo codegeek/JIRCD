@@ -30,6 +30,7 @@ guarded by this aggregate.
 | `ident` | string | Derived from the `USER` command's username field at registration (FR-030); not independently verified (see spec.md Assumptions re: RFC 1413). |
 | `realHostname` | string | The connection's actual hostname/IP; always populated regardless of cloaking; source of truth for FR-032 (`WHOHOST`) and FR-038's self-lookup/administrator `WHOIS` cases. Never sent to a non-administrator client looking up a *different* client — see `UserIdentity.presentedForm` for the *display* value that case uses instead. |
 | `administratorPrivilege` | boolean | Granted via FR-034's in-band credential command; authorizes FR-032 administrative commands. Independent of `channelMemberships`/operator status. |
+| `lastLivenessAt` | instant | Updated whenever this connection is known to be alive — traffic received from it, or a `PONG` answering the server's own `PING`. Read by this session's `LivenessMonitor` (research.md "Connection keep-alive") to decide when to probe and when to time out (FR-039). |
 
 **Validation rules**:
 - `nickname` MUST be unique across all `ClientSession`s at the moment it is
@@ -49,6 +50,13 @@ guarded by this aggregate.
   FR-017 cleanup as any other connection loss — a sender MUST NOT block
   waiting for a slow recipient's queue to drain (research.md "Message
   fan-out concurrency model").
+- A `LivenessMonitor`-detected timeout (no traffic and no `PONG` within
+  the configured window since `lastLivenessAt`) MUST transition that
+  session to `CLOSING` and run the same FR-017 cleanup as any other
+  connection loss (FR-039, research.md "Connection keep-alive") — a
+  silently dead connection is not a special case distinct from a `QUIT`
+  or a TCP-level close as far as cleanup is concerned, only in how it's
+  detected.
 
 **Lifecycle**: `CONNECTING` → `REGISTERED` → `CLOSING` (terminal; triggers
 FR-017 cleanup: membership removal + notification to affected channels).
@@ -121,6 +129,7 @@ enforced at channel-creation time, not left to callers).
 | `members` | set of `ClientSession` references | Current membership; drives message fan-out (FR-004). |
 | `operators` | set of `ClientSession` references (subset of `members`) | Who may perform moderation actions (FR-013, FR-014). |
 | `sendRestriction` | enum: `NONE`, `MEMBERS_ONLY`, `MODERATED` | `NONE`: anyone can send. `MEMBERS_ONLY`: only current `members` may send (non-members' `PRIVMSG` rejected, FR-013). `MODERATED`: only `operators` may send (matches classic IRC's `+m`). Set/cleared only by an operator via `MODE` (FR-013, FR-014). This is core moderation state (FR-036) — never gated by `Extension` state. |
+| `topic` | string, 0..1 | Absent (no topic set) by default. Visible to any client via `TOPIC` regardless of membership (FR-041's discovery framing applies here too); settable only by an `operator` (FR-040). Distinct from `sendRestriction` — viewing/setting the topic is not a "who may send a `PRIVMSG`" concern. |
 
 **Validation rules**:
 - `name` uniqueness is enforced the same way as nickname uniqueness (single
@@ -133,6 +142,12 @@ enforced at channel-creation time, not left to callers).
   that name creates a fresh channel with default (empty) `operators`, per
   FR-003 (this release keeps no channel history/state after last-member-
   leaves, since Story 3's chathistory-adjacent capabilities are deferred).
+  `topic` is reset along with everything else — a recreated channel starts
+  with no topic set, same as a brand-new one.
+- `topic` MUST only be set by a session in `operators` (FR-040); a
+  non-operator's attempt MUST be rejected with the same `482
+  ERR_CHANOPRIVSNEEDED` error FR-014's other operator-gated actions use,
+  not a new error of its own.
 
 **Lifecycle**: created on first JOIN → members join/part → removed when
 membership reaches zero (no persistence across recreation, per above).
