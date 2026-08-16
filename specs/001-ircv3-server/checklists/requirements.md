@@ -61,3 +61,12 @@
   the optional/toggleable module surface (FR-035, FR-036 added; Story 4,
   FR-028, Key Entities "Module", and Assumptions updated to remove
   "moderation tools" from the optional-module examples).
+- Terminology pass (DDD alignment with planning): the generic entity
+  "Module" is renamed "Extension" throughout the spec's normative text
+  (Story 4/6, FR-011/012/020/021/022/028/031/032/035/036, Key Entities,
+  SC-005/SC-009, Assumptions) to match the code's domain model
+  (plan.md "Domain Model & Bounded Contexts") — IRCv3's own term for this
+  concept, and now used consistently by administrators, the spec, and the
+  code. The historical Clarifications Q&A log (dated bullets) and every
+  "account module" reference (Story 3's distinct, still-undesigned future
+  subsystem) were deliberately left as-is.

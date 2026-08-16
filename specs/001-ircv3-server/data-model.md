@@ -6,21 +6,29 @@ All state below is in-memory only for this release (see plan.md "Storage").
 Entities that exist only to support the deferred Story 3 (`Account`) are
 noted but not modeled in detail here — they are out of scope for this plan.
 
-## ClientSession
+Each entity below is tagged with its DDD role (**Aggregate Root**, Entity,
+or Value Object) and the bounded context it belongs to (see plan.md "Domain
+Model & Bounded Contexts"), so the data model and the domain model stay one
+document, not two that can drift apart.
 
-A single connected client's live state, from TCP accept to disconnect.
+## ClientSession — *Aggregate Root, Session & Messaging*
+
+A single connected client's live state, from TCP accept to disconnect. Its
+`connectionId` is its identity; everything else about it is mutable state
+guarded by this aggregate.
 
 | Field | Type | Notes |
 |---|---|---|
 | `connectionId` | opaque identifier | Internal correlation key; never sent on the wire. |
 | `channel` (I/O) | `SocketChannel` | The underlying connection (plaintext or TLS-wrapped, FR-018). |
+| `outboundQueue` | bounded queue of formatted messages | The *only* path by which any other session delivers a message to this one (FR-004 fan-out); drained exclusively by this session's own writer thread, per research.md "Message fan-out concurrency model". Never written to directly from another session's thread. |
 | `registrationState` | enum: `CONNECTING`, `REGISTERED`, `CLOSING` | A session must reach `REGISTERED` (nickname + user info accepted, FR-001) before most commands are valid. |
 | `nickname` | string, 0..1 | Present once registration succeeds; unique across all sessions (FR-002). |
 | `negotiatedCapabilities` | set of `Capability` names | Populated via CAP negotiation (FR-006, FR-007); empty for clients that never negotiate (FR-008). |
 | `channelMemberships` | set of `Channel` references | Channels this session has joined; drives cleanup on disconnect (FR-017). |
 | `rateLimitBucket` | token bucket state | Per-connection (FR-016); see research.md "Rate limiting". |
 | `ident` | string | Derived from the `USER` command's username field at registration (FR-030); not independently verified (see spec.md Assumptions re: RFC 1413). |
-| `realHostname` | string | The connection's actual hostname/IP; always populated regardless of cloaking; source of truth for FR-032 admin lookups. Never sent to non-administrator clients directly — see `Channel`/message-delivery contracts for the *display* value. |
+| `realHostname` | string | The connection's actual hostname/IP; always populated regardless of cloaking; source of truth for FR-032 admin lookups. Never sent to non-administrator clients directly — see `UserIdentity.presentedForm` for the *display* value. |
 | `administratorPrivilege` | boolean | Granted via FR-034's in-band credential command; authorizes FR-032 administrative commands. Independent of `channelMemberships`/operator status. |
 
 **Validation rules**:
@@ -29,44 +37,55 @@ A single connected client's live state, from TCP accept to disconnect.
   the same nickname even under concurrent registration attempts.
 - A session in `CONNECTING` state MUST reject channel/messaging commands
   that require `REGISTERED` (FR-001).
-- `realHostname` MUST NOT be overwritten or cleared by a cloaking module —
-  see research.md "Cloak module boundary" for why the real value's source
-  of truth lives on `ClientSession` itself, not in the cloak module.
+- `realHostname` MUST NOT be overwritten or cleared by a cloak extension —
+  see research.md "Cloak extension boundary" for why the real value's
+  source of truth lives on `ClientSession` itself, not in the cloak
+  extension.
 - `administratorPrivilege` MUST only be settable via FR-034's credential
   verification, never inferred from channel-operator status or any other
   field.
+- `outboundQueue` reaching capacity (a member too slow to keep up with
+  fan-out) MUST transition that session to `CLOSING` and run the same
+  FR-017 cleanup as any other connection loss — a sender MUST NOT block
+  waiting for a slow recipient's queue to drain (research.md "Message
+  fan-out concurrency model").
 
 **Lifecycle**: `CONNECTING` → `REGISTERED` → `CLOSING` (terminal; triggers
 FR-017 cleanup: membership removal + notification to affected channels).
 There is no path back from `CLOSING`.
 
-## UserIdentity
+## UserIdentity — *Value Object, Session & Messaging*
 
-The nickname-level identity a session presents. For this release (Story 3
-deferred), a `UserIdentity` is scoped 1:1 to its current `ClientSession` —
-there is no persistent account behind it, and nothing survives a
-disconnect/reconnect except by the client re-registering the same nickname
-(which succeeds only if no other session currently holds it).
+The nickname-level identity a session presents. Has no identity of its own
+separate from its owning `ClientSession` — it's a computed presentation of
+that session's state, not a thing you look up independently, which is what
+makes it a Value Object rather than an Entity. For this release (Story 3
+deferred), nothing survives a disconnect/reconnect except by the client
+re-registering the same nickname (which succeeds only if no other session
+currently holds it).
 
 | Field | Type | Notes |
 |---|---|---|
 | `nickname` | string | See FR-002 uniqueness rule above. |
 | `username` / `realname` | string | Supplied at registration (FR-001); not independently unique. |
-| *(computed)* `presentedForm` | string | `nickname!ident@displayHostname` (FR-030) — `displayHostname` is `ClientSession.realHostname` unless a cloak module is currently enabled, in which case it is that module's obfuscated value (FR-031, research.md "Cloak module boundary"). Never persisted; computed at send time so a mid-session module toggle is reflected immediately. |
+| *(computed)* `presentedForm` | string | `nickname!ident@displayHostname` (FR-030) — `displayHostname` is `ClientSession.realHostname` unless a cloak extension is currently enabled, in which case it is that extension's obfuscated value (FR-031, research.md "Cloak extension boundary"). Never persisted; computed at send time so a mid-session extension toggle is reflected immediately. |
 
 *(Deferred, not modeled here: linking a `UserIdentity` to a persistent
 `Account` — see spec.md's Account entity, FR-023/FR-024/FR-026/FR-027.)*
 
-## Channel
+## Channel — *Aggregate Root, Session & Messaging*
 
-A named, joinable group through which members exchange messages.
+A named, joinable group through which members exchange messages. Its
+`name` is its identity; membership and moderation state are guarded by
+this aggregate (e.g., "first joiner becomes operator" is an invariant
+enforced at channel-creation time, not left to callers).
 
 | Field | Type | Notes |
 |---|---|---|
 | `name` | string | Unique across the server (FR-003); first JOIN of a name creates it. |
 | `members` | set of `ClientSession` references | Current membership; drives message fan-out (FR-004). |
 | `operators` | set of `ClientSession` references (subset of `members`) | Who may perform moderation actions (FR-013, FR-014). |
-| `restrictedSend` | boolean / mode flag | Whether only members (or only operators) may send, per FR-013's moderation actions. |
+| `sendRestriction` | enum: `NONE`, `MEMBERS_ONLY`, `MODERATED` | `NONE`: anyone can send. `MEMBERS_ONLY`: only current `members` may send (non-members' `PRIVMSG` rejected, FR-013). `MODERATED`: only `operators` may send (matches classic IRC's `+m`). Set/cleared only by an operator via `MODE` (FR-013, FR-014). This is core moderation state (FR-036) — never gated by `Extension` state. |
 
 **Validation rules**:
 - `name` uniqueness is enforced the same way as nickname uniqueness (single
@@ -83,71 +102,119 @@ A named, joinable group through which members exchange messages.
 **Lifecycle**: created on first JOIN → members join/part → removed when
 membership reaches zero (no persistence across recreation, per above).
 
-## Capability
+## Capability — *Value Object, Capability Negotiation*
 
-A named, independently negotiable IRCv3 protocol enhancement.
+A named, independently negotiable IRCv3 protocol enhancement. Identified
+by `name` alone within the capability catalog; carries no state of its own
+beyond that name and its current availability, both derived from its
+owning `CapabilityExtension` — it is not something with its own lifecycle
+independent of that extension.
 
 | Field | Type | Notes |
 |---|---|---|
 | `name` | string | One of `message-tags`, `server-time`, `echo-message` for this release (FR-025). |
-| `available` | boolean | Derived from whether the owning `Module` is currently enabled (FR-007, FR-025). |
+| `available` | boolean | Derived from whether the owning `CapabilityExtension` is currently `ENABLED` (FR-007, FR-025). |
 
 **Validation rules**: A capability's `available` state MUST be sourced from
-its owning module's enabled/disabled state at request time (FR-007's
-accept/decline response must reflect current, not stale, availability).
+its owning `CapabilityExtension`'s enabled/disabled state at request time
+(FR-007's accept/decline response must reflect current, not stale,
+availability). This live-check applies at **every** point the capability's
+effect is used, not only at `CAP REQ` time: a
+`ClientSession.negotiatedCapabilities` entry is not a permanent grant once
+negotiated — each outgoing message is formatted by re-checking whether the
+corresponding `CapabilityExtension` is currently `ENABLED` (`Extension`,
+below), so disabling it stops its effect for already-connected sessions
+immediately (SC-005), not only for future negotiations.
+`negotiatedCapabilities` records what the client *asked for and was
+granted at negotiation time* (so it isn't re-offered or silently
+re-added); whether it's still honored on the wire is a separate, live
+check.
 
-## Module
+## Extension — *Entity, Server Extensibility* (base type)
 
 An independently enableable/disableable unit of optional server
-functionality (a `Capability` provider, cloaking, or in-band
-administration), per FR-011. Channel moderation and the capability-
-negotiation mechanism are core, always-present behavior (FR-035, FR-036)
-and are deliberately **not** modeled as a Module at all — there is no
-`Module` instance for them and no `id` an administrator could use to
-disable them.
+functionality, per FR-011. Has identity (`id`) and mutable lifecycle state,
+which is why it's an Entity rather than a Value Object. Two role
+specializations exist — see research.md "Extension system" for why the
+split is a compiler-enforced domain distinction, not just documentation:
+
+- **`CapabilityExtension`**: also provides exactly one `Capability` and is
+  therefore visible to clients via `CAP LS`. Lives under
+  `jircd-capabilities/`. This release's set: `message-tags`, `server-time`,
+  `echo-message`.
+- **`ServerExtension`**: no client-negotiable `Capability`; administrator-
+  only, a client never learns it exists. Lives under
+  `jircd-server-extensions/`. This release's set: `cloak` (FR-031),
+  `admin` (FR-032).
+
+Channel moderation and the capability-negotiation mechanism are core,
+always-present behavior (FR-035, FR-036) and are deliberately **not**
+modeled as an `Extension` at all — there is no `Extension` instance for
+them and no `id` an administrator could use to disable them.
 
 | Field | Type | Notes |
 |---|---|---|
-| `id` | string | Stable identifier used in Server Configuration (FR-012). This release's module set: `message-tags`, `server-time`, `echo-message` (capabilities), `cloak` (FR-031), `admin` (FR-032) — one Gradle subproject each under `jircd-modules/`. |
-| `state` | enum: `ENABLED`, `DISABLED`, `FAILED` | `FAILED` = failed to start/errored at runtime without affecting other modules (FR-020). |
-| `providedCapabilities` | set of `Capability` names | Empty for non-capability modules (e.g., cloak, admin). |
+| `id` | string | Stable identifier used in Server Configuration (FR-012). This release's full set: `message-tags`, `server-time`, `echo-message` (`CapabilityExtension`), `cloak`, `admin` (`ServerExtension`) — one Gradle subproject each. |
+| `state` | enum: `ENABLED`, `DISABLED`, `FAILED` | `FAILED` = failed to start/errored at runtime without affecting other extensions (FR-020). |
+| `providedCapability` | `Capability` name, 0..1 | Present only for `CapabilityExtension`; absent for `ServerExtension` (e.g., cloak, admin). |
+| `extensionPoint` | string, 0..1 | Set only for extensions that supply a value core code consumes rather than just adding a capability (e.g., `cloak` claims `hostname-display`). `null` for extensions with no such claim. |
 
 **Validation rules**: A transition to `DISABLED` or back to `ENABLED` MUST
 NOT require restarting the server process (FR-011) and MUST take effect for
-already-connected clients, not only new connections (SC-005).
+already-connected clients, not only new connections (SC-005). At most one
+`ENABLED` extension MAY claim a given non-null `extensionPoint` at a time;
+attempting to enable an extension whose `extensionPoint` is already claimed
+by another currently-`ENABLED` extension MUST be rejected as a
+configuration error naming both conflicting extension ids (FR-012), not
+silently allowed to override the existing claim (research.md "Extension
+system" — "Extension-point ownership"). Disabling an extension releases
+any `extensionPoint` it held, in the same quiesced-then-release sequence
+as any other disable (research.md "Extension system" — "Quiesce before
+unload").
 
 **Lifecycle**: `ENABLED` ⇄ `DISABLED` (administrator-driven, either
-direction, no restart); `ENABLED` → `FAILED` (runtime error, isolated per
-FR-020) — a `FAILED` module does not auto-recover; it requires an
-administrator action (out of scope to specify the exact recovery UX here).
+direction, no restart, quiesced per research.md); `ENABLED` → `FAILED`
+(runtime error, isolated per FR-020) — a `FAILED` extension does not
+auto-recover; it requires an administrator action (out of scope to specify
+the exact recovery UX here).
 
-## ServerConfiguration
+## ServerConfiguration — *Aggregate Root, Server Extensibility (config) / Administration*
 
 The administrator-controlled settings loaded at startup and re-applied on
-module state changes.
+extension state changes.
 
 | Field | Type | Notes |
 |---|---|---|
-| `moduleStates` | map of module `id` → desired `state` | Source of truth Module.state is reconciled against (FR-011, FR-012). |
+| `capabilityStates` | map of `CapabilityExtension` `id` → desired `state` | Config-file section `capabilities` (contracts/server-configuration.md). Source of truth the matching `Extension.state` is reconciled against (FR-011, FR-012). |
+| `serverExtensionStates` | map of `ServerExtension` `id` → desired `state` | Config-file section `server-extensions`. Same reconciliation contract as `capabilityStates`, kept as a separate field because the two id spaces are validated against different `Extension` specializations (see Validation rules). |
 | `listeners` | list of {port, tlsEnabled} | Plaintext and/or TLS listeners (FR-018 — both may coexist). |
 | `rateLimit` | {bucketSize, refillRate} | FR-016; see research.md "Rate limiting". |
 | `administratorCredentials` | list of {username, hashedPassword} | Verified by FR-034's in-band privilege command; hashed per research.md "Administrator credential storage" — never stored or logged in plain text. |
 
-**Validation rules**: An invalid configuration (unknown module id,
+**Validation rules**: An invalid configuration (unknown extension id,
 conflicting listener ports, malformed rate-limit values) MUST be rejected
 with a specific, actionable error identifying the problem field (FR-012,
-SC-008) rather than falling back to a partially-applied state.
+SC-008) rather than falling back to a partially-applied state. An id MUST
+appear in the field matching its actual kind: a `CapabilityExtension` id
+listed in `serverExtensionStates`, or a `ServerExtension` id listed in
+`capabilityStates`, is itself an invalid-configuration case (a
+section/kind mismatch, contracts/server-configuration.md), rejected the
+same way — not silently accepted into the wrong field. The in-band
+`EXTENSION` administrative command (FR-032) addresses `Extension.id`
+directly and MAY resolve to either field without the caller having to
+know which one; only the configuration *file* has two sections.
 
 ## Entity Relationships
 
 ```text
-ClientSession *---1 UserIdentity (nickname, scoped to the session)
-ClientSession *---* Channel        (via channelMemberships / members)
-Channel        1---* ClientSession (via operators, subset of members)
-Module          1---* Capability   (providedCapabilities)
-ClientSession  *---* Capability    (negotiatedCapabilities)
-ServerConfiguration 1---* Module   (moduleStates)
+ClientSession *---1 UserIdentity      (nickname, scoped to the session)
+ClientSession *---* Channel           (via channelMemberships / members)
+Channel        1---* ClientSession    (via operators, subset of members)
+CapabilityExtension 1---1 Capability  (providedCapability)
+ClientSession  *---* Capability       (negotiatedCapabilities)
+ServerConfiguration 1---* CapabilityExtension (capabilityStates)
+ServerConfiguration 1---* ServerExtension     (serverExtensionStates)
 ServerConfiguration 1---* administratorCredentials (FR-034)
-ClientSession   1---1 realHostname (always on core; FR-030/031's display
-                                    value is computed, not a separate entity)
+ClientSession   1---1 realHostname    (always on core; FR-030/031's display
+                                        value is computed, not a separate entity)
 ```

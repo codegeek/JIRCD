@@ -18,7 +18,7 @@ the client/administrator can do about it).
 | `433` | `ERR_NICKNAMEINUSE` | `NICK` naming an already-claimed nickname | FR-002 |
 | `442` | `ERR_NOTONCHANNEL` | `PART`/`PRIVMSG`/`KICK`/`MODE` on a channel the sender hasn't joined (where membership is required) | FR-003, FR-014 |
 | `461` | `ERR_NEEDMOREPARAMS` | Command missing required parameters | FR-015 |
-| `472` | `ERR_UNKNOWNMODE` | `MODE` flag not supported by any enabled module | FR-011 (module-driven availability) |
+| `472` | `ERR_UNKNOWNMODE` | `MODE` given a flag the core moderation command set doesn't define | FR-015, FR-036 (core input validation — `MODE` is never extension-gated) |
 | `482` | `ERR_CHANOPRIVSNEEDED` | `KICK`/`MODE` attempted by a non-operator | FR-014 |
 | `381` | `RPL_YOUREOPER` | Successful `OPER` | FR-034 |
 | `464` | `ERR_PASSWDMISMATCH` | Failed `OPER` (also logged as a security event, FR-019) | FR-034 |
@@ -32,9 +32,10 @@ the client/administrator can do about it).
   "Error") — this is the testable form of FR-002/FR-012/FR-014/FR-015's
   "clear error" requirement and of the constitution's UX Consistency
   principle.
-- Reply wording MUST be identical regardless of which subsystem produced
-  the triggering condition — e.g., `482` from core channel moderation
-  (FR-036, always present) must look the same as a `481` from any optional
-  `jircd-modules/*` module — satisfying FR-011/FR-020's module-consistency
-  intent at the protocol level even though moderation itself is not one of
-  the toggleable modules.
+- Reply wording for a given numeric MUST be identical regardless of which
+  subsystem produced it. `482` is now always sourced from core channel
+  moderation (FR-036) rather than an extension, so this mainly applies to
+  `481`: it MUST read the same whether it was triggered by the core admin
+  command set or by a future `jircd-server-extensions/*` extension that
+  also gates an action on administrator privilege — satisfying
+  FR-011/FR-020's extension-consistency intent at the protocol level.

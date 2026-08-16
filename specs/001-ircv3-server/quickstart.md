@@ -19,7 +19,8 @@ end-to-end — it does not contain implementation code.
 
 ```bash
 ./gradlew build               # compiles all subprojects (jircd-protocol, jircd-core,
-                               # jircd-modules:*, jircd-server), runs unit tests + static analysis
+                               # jircd-capabilities:*, jircd-server-extensions:*, jircd-server),
+                               # runs unit tests + static analysis
 ./gradlew :jircd-server:run   # starts the server using the default config (see contracts/server-configuration.md)
 ```
 
@@ -57,11 +58,11 @@ schema in `contracts/server-configuration.md`.
      FR-007), while a second, plain (non-negotiating) connection in the
      same channel receives the message without tags (FR-008).
 
-## Story 4 — Tailor the Server with Optional Modules
+## Story 4 — Tailor the Server with Optional Extensions
 
-1. With the server running, edit the config file's `modules.message-tags`
-   from `enabled` to `disabled` and apply the change (see
-   contracts/server-configuration.md "Live reload").
+1. With the server running, edit the config file's
+   `capabilities.message-tags` from `enabled` to `disabled` and apply the
+   change (see contracts/server-configuration.md "Live reload").
 2. From a capability-negotiating connection (as in Story 2), request
    `CAP LS 302` again.
    - **Expected**: within SC-005's 1-minute budget, `message-tags` no
@@ -69,14 +70,18 @@ schema in `contracts/server-configuration.md`.
      carrying `message-tags` metadata — no server restart occurred (verify
      the process was never stopped/started). Note that `KICK` (core
      moderation, FR-036) remains available throughout — it is not part of
-     `modules` at all.
+     `capabilities` or `server-extensions` at all.
 3. Re-enable `message-tags` and confirm it's offered again without a
    restart.
-4. Edit the config with an invalid value (e.g., `modules.nonexistent:
-   enabled`, or `modules.moderation: disabled` — moderation isn't a
-   module, see FR-035/FR-036) and attempt to apply/start.
-   - **Expected**: a specific error naming the offending key, not a
-     generic failure (FR-012, SC-008).
+4. Edit the config with an invalid value and attempt to apply/start —
+   confirm each of the following produces a specific error naming the
+   offending key, not a generic failure (FR-012, SC-008):
+   - `capabilities.nonexistent: enabled` (unknown id)
+   - `capabilities.moderation: disabled` (moderation isn't an extension at
+     all, see FR-035/FR-036)
+   - `capabilities.cloak: enabled` (`cloak` is a `ServerExtension` — wrong
+     section; belongs under `server-extensions`, see
+     contracts/server-configuration.md "Section/kind mismatch")
 
 ## Story 5 — Moderate a Channel
 
@@ -93,18 +98,19 @@ schema in `contracts/server-configuration.md`.
 ## Story 6 — Administer the Server via IRC Commands
 
 1. As a connected, registered client (not yet privileged), attempt
-   `MODULE DISABLE message-tags`.
+   `EXTENSION DISABLE message-tags`.
    - **Expected**: `481 ERR_NOPRIVILEGES` — validates FR-033.
 2. Send `OPER root-admin <configured-password>`.
    - **Expected**: `381 RPL_YOUREOPER`. Retry with a wrong password first
      to confirm `464 ERR_PASSWDMISMATCH` (and check it was logged, FR-019).
-3. Now privileged, send `MODULE DISABLE message-tags`.
+3. Now privileged, send `EXTENSION DISABLE message-tags`.
    - **Expected**: same observable effect as Story 4 Step 2 — validates the
      "path equivalence" contract note in `contracts/server-configuration.md`,
-     with no config file edit involved. Attempting `MODULE DISABLE
-     moderation` or `MODULE DISABLE capability-negotiation` MUST fail with
-     an error naming them as unknown/non-toggleable, not silently succeed.
-4. Enable the `cloak` module (via either path), have a client join a
+     with no config file edit involved. Attempting `EXTENSION DISABLE
+     moderation` or `EXTENSION DISABLE capability-negotiation` MUST fail
+     with an error naming them as unknown/non-toggleable, not silently
+     succeed.
+4. Enable the `cloak` extension (via either path), have a client join a
    channel, then send `WHOHOST <that nickname>` as the privileged session.
    - **Expected**: the real hostname is returned, even though other
      channel members see the obfuscated form in that client's message

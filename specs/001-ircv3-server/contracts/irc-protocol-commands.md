@@ -11,8 +11,8 @@ Numeric reply references point to [irc-numeric-replies.md](./irc-numeric-replies
 Every command below that includes a sender prefix on its outgoing message
 (`JOIN`, `PART`, `PRIVMSG`, `NOTICE`, `QUIT`, `KICK`, `MODE`) presents that
 sender in the standard `nickname!ident@hostname` form (FR-030), where
-`hostname` is subject to the cloaking module described in "Administration"
-below.
+`hostname` is subject to the cloak `ServerExtension` described in
+"Administration" below.
 
 ## Connection Registration
 
@@ -54,7 +54,7 @@ below.
 | Command | Direction | Preconditions | Effect | Replies |
 |---|---|---|---|---|
 | `OPER <username> <password>` | C→S | `REGISTERED` session | Verifies credentials against `ServerConfiguration.administratorCredentials` (FR-034); on success, grants administrator privilege to this session | `381 RPL_YOUREOPER` on success; `464 ERR_PASSWDMISMATCH` on failure (also logged, FR-019) |
-| `MODULE <ENABLE\|DISABLE> <module-id>` | C→S | Sender holds administrator privilege | Toggles the named module's state, in effect immediately for all clients (FR-011, FR-032) | Confirmation notice on success; `481 ERR_NOPRIVILEGES` if sender lacks administrator privilege (FR-033); `421 ERR_UNKNOWNCOMMAND`-style error naming the module id if it doesn't exist |
+| `EXTENSION <ENABLE\|DISABLE> <extension-id>` | C→S | Sender holds administrator privilege | Toggles the named `CapabilityExtension` or `ServerExtension`'s state, in effect immediately for all clients (FR-011, FR-032) | Confirmation notice on success; `481 ERR_NOPRIVILEGES` if sender lacks administrator privilege (FR-033); `421 ERR_UNKNOWNCOMMAND`-style error naming the extension id if it doesn't exist |
 | `WHOHOST <nickname>` | C→S | Sender holds administrator privilege | Returns the target's real, unobfuscated hostname/IP regardless of any active cloaking (FR-031, FR-032) | Notice containing the real hostname on success; `481 ERR_NOPRIVILEGES` if unauthorized; standard "no such nickname" error if the target isn't connected |
 
 **Contract notes**:
@@ -62,10 +62,20 @@ below.
   status (FR-033) — holding it does not grant channel-operator privileges
   in channels the administrator hasn't joined, and vice versa.
 - These three commands are the FR-032 minimum; additional administrative
-  commands MAY be added by future modules without changing this contract.
-- Command names (`MODULE`, `WHOHOST`) are illustrative for this plan; the
-  tasks phase may finalize different verbs as long as the preconditions/
-  effects/replies contract above holds.
+  commands MAY be added by future extensions without changing this
+  contract.
+- Command names (`EXTENSION`, `WHOHOST`) are illustrative for this plan;
+  the tasks phase may finalize different verbs as long as the
+  preconditions/effects/replies contract above holds.
+- **Self-lockout**: `EXTENSION DISABLE admin`, issued by a privileged
+  session through the `admin` extension itself, MUST succeed (an
+  administrator is allowed to disable in-band administration) and takes
+  effect immediately — the issuing session's own subsequent admin commands
+  are then rejected with `481 ERR_NOPRIVILEGES` like any other
+  non-privileged session, same as `contracts/server-configuration.md`'s
+  "path equivalence" note. This is not an error state: the
+  configuration-file path (Story 4) remains available to re-enable
+  `admin` from outside the protocol.
 
 ## Explicitly Out of Scope for This Plan
 

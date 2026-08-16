@@ -6,7 +6,7 @@ All items below were flagged in Technical Context as needing a documented
 decision before Phase 1 design. Each follows Decision / Rationale /
 Alternatives Considered.
 
-## Protocol/server module boundary
+## Protocol/server boundary
 
 **Decision**: A standalone `jircd-protocol` Gradle subproject owns wire
 format concerns only — message line framing, command/reply parsing and
@@ -59,24 +59,115 @@ Quality principle: no unjustified complexity).
   budgets and would need manual thread-pool tuning. Virtual threads remove
   this constraint outright.
 
-## Module system (runtime hot-toggle)
+## Message fan-out concurrency model
 
-**Decision**: A small, custom SPI: each module implements a `ServerModule`
-interface (`start(ServerContext)`, `stop()`, metadata) discovered via
-`java.util.ServiceLoader`, but loaded through a dedicated, discardable
-`URLClassLoader` per module instance so a disabled module's classes (and any
-`static` state) can be fully released and a re-enabled module gets a fresh
-load — not just a "hidden" reference to code still resident in the JVM.
-`jircd-core` owns a `ModuleRegistry` that tracks each module's lifecycle
-state and enforces FR-020 (one module's failure doesn't affect others).
+**Decision**: Each `ClientSession` owns a bounded outbound queue and a
+single dedicated writer virtual thread that is the *only* thread ever
+allowed to write to that session's `SocketChannel`. Delivering a message to
+a channel (FR-004) means: the sending session's thread looks up the
+channel's `members`, and for each member session enqueues the formatted
+message onto that member's outbound queue — it never writes to another
+session's socket directly. Each session's writer thread drains its own
+queue and does the actual `SocketChannel.write`. A member's queue reaching
+capacity is treated as that connection being too slow to keep up and is
+handled the same way as any other connection-loss condition (FR-017
+cleanup), not by blocking the sender.
+
+**Rationale**: This closes the gap the earlier plan review flagged —
+without it, `PRIVMSG`/`NOTICE`/`JOIN`/`PART`/`KICK`/`MODE` fan-out
+(FR-004, and every other command that echoes to multiple members) would
+mean one session's thread writing directly to N other sessions'
+`SocketChannel`s, which is unsafe if that member's own writer thread (or a
+future direct write) could run concurrently on the same channel. Funneling
+all writes for a given connection through exactly one thread makes
+per-connection write safety structural rather than something every call
+site has to remember. It also gives a natural, existing mechanism (queue
+overflow) for handling a slow/unresponsive member during a fan-out burst
+(relevant to SC-002/SC-006) without making a fast sender block on a slow
+recipient.
+
+**Alternatives considered**:
+- *Direct cross-thread writes, synchronized on the target channel*: works,
+  but requires every code path that might deliver a message to remember to
+  synchronize correctly, and turns a slow recipient's contended lock into a
+  latency problem for whichever sender thread happens to hit it — exactly
+  the kind of thing SC-002's 1s delivery budget is sensitive to.
+- *A single global outbound event loop (Netty-style)*: reintroduces the
+  callback/pipeline complexity "Networking model" above rejected, for a
+  problem the per-session-queue-plus-writer approach solves at
+  ~1,000-connection scale without it.
+
+## Extension system (runtime hot-toggle)
+
+**Decision** *(renamed from "Module system" — see plan.md "Domain Model &
+Bounded Contexts")*: A small, custom SPI: each extension implements the
+`Extension` interface (`start(ServerContext)`, `stop()`, metadata)
+discovered via `java.util.ServiceLoader`. Two role interfaces extend it:
+`CapabilityExtension` (also exposes exactly one `Capability`; implemented
+by `jircd-capabilities/*`) and `ServerExtension` (no `Capability`;
+implemented by `jircd-server-extensions/*`) — see plan.md for why these are
+different domain concepts, not just two packages of the same thing. Each
+extension is loaded through a dedicated, discardable `URLClassLoader` per
+instance so a disabled extension's classes (and any `static` state) can be
+fully released and a re-enabled extension gets a fresh load — not just a
+"hidden" reference to code still resident in the JVM. `jircd-core` owns an
+`ExtensionRegistry` that tracks each extension's lifecycle state and
+enforces FR-020 (one extension's failure doesn't affect others).
+
+Three details make this actually work, not just sound plausible:
+
+- **Delegation model**: each extension's `URLClassLoader` delegates to the
+  application classloader *first* for any class in `net.jircd.protocol.*`
+  or `net.jircd.core.*` (the shared SPI/contract types, including
+  `Extension`/`CapabilityExtension`/`ServerExtension` themselves), so both
+  the extension and `jircd-core` always see the identical `Class` object
+  for those types — avoiding the classic "same class loaded twice" hazard
+  where `instanceof`/casts across the extension boundary fail
+  unpredictably. Only the extension's own classes (and its private
+  dependencies, if any) are loaded by its own loader, which is exactly
+  what's discarded on disable.
+- **Quiesce before unload**: disabling an extension is two steps, not one
+  — (1) `ExtensionRegistry` immediately marks it `DISABLED` so no *new*
+  work is routed to it (new CAP negotiations stop offering a
+  `CapabilityExtension`, new admin commands are rejected, etc. — this
+  alone satisfies most of FR-011/SC-005's "takes effect immediately" bar),
+  then (2) the registry waits for any in-flight invocation already running
+  on the extension's code to finish (each `Extension` call is made through
+  a small wrapper that tracks an in-flight count) before dropping the last
+  reference to its classloader. Only after that does the classloader
+  actually become collectible. An extension that hangs and never returns
+  is itself an FR-020 failure condition — logged (FR-019) and surfaced as
+  `FAILED`, not silently waited on forever (a bounded timeout applies).
+- **Extension-point ownership**: for cases where an extension supplies a
+  value core code consumes (e.g., cloak's hostname-display transform, see
+  "Cloak extension boundary"), `ExtensionRegistry` allows at most one
+  *enabled* extension to claim a given extension point at a time.
+  Attempting to enable a second extension claiming an already-claimed
+  extension point is treated as a configuration error (FR-012 style:
+  rejected with a specific error naming the conflicting extension ids),
+  not a silent override. Only one extension (`cloak`) claims an extension
+  point in this release, so this is currently unreachable in practice, but
+  the rule is stated now so it doesn't have to be invented ad hoc when a
+  second one is added later.
 
 **Rationale**: FR-011 requires enable/disable to take effect **without
 restarting the server process** — this is a runtime lifecycle requirement,
 not just a build-time packaging concern. `ServiceLoader` alone discovers
 implementations but has no notion of unloading; pairing it with a
-per-module classloader gives genuine start/stop/reload semantics with
+per-extension classloader gives genuine start/stop/reload semantics with
 clean isolation, which is also what FR-020's fault-isolation requirement
-needs (a module's failure must be containable).
+needs (an extension's failure must be containable). The delegation and
+quiesce details above exist because "use a classloader per extension" is
+not by itself sufficient to deliver on FR-011/FR-020 — get the delegation
+order wrong and cross-extension type checks break; skip the quiesce step
+and an extension can keep running after being reported "disabled," or its
+classloader is never actually reclaimed. Splitting `CapabilityExtension`
+and `ServerExtension` as role interfaces (rather than one flat `Extension`
+type with an optional capability field) makes the domain distinction
+enforceable by the compiler: code that only makes sense for negotiated
+capabilities (offering something in `CAP LS`) can require a
+`CapabilityExtension` specifically, and can't accidentally be handed a
+`ServerExtension` that was never meant to be client-visible.
 
 **Alternatives considered**:
 - *Java Platform Module System (JPMS)*: JPMS's module graph is resolved and
@@ -90,13 +181,20 @@ needs (a module's failure must be containable).
   (dynamic module lifecycle, isolated classloading), but it is a large
   framework with its own deployment model, bundle manifest format, and
   learning curve — disproportionate to a project with 5 initial optional
-  modules under `jircd-modules/` (3 capabilities, cloak, admin — moderation
-  and the capability-negotiation mechanism itself are core and not part of
-  this system at all, see FR-035/FR-036). Revisit if the module count and
-  third-party-plugin ambitions grow.
+  extensions across `jircd-capabilities/` and `jircd-server-extensions/`
+  (3 capability extensions, cloak and admin as server extensions —
+  moderation and the capability-negotiation mechanism itself are core and
+  not part of this system at all, see FR-035/FR-036). Revisit if the
+  extension count and third-party-plugin ambitions grow.
+- *A single flat `Extension` type with no `CapabilityExtension`/
+  `ServerExtension` split*: fewer types, but loses the compiler-enforced
+  distinction described in Rationale, and matches the code's model to
+  reality less closely — the earlier, undifferentiated "Module" design
+  this replaces.
 - *No isolation, just a registry of enabled booleans*: simplest option, but
-  fails FR-020 (a module that leaks state or throws during static init can
-  still affect the whole process) and doesn't give a clean "reload" story.
+  fails FR-020 (an extension that leaks state or throws during static init
+  can still affect the whole process) and doesn't give a clean "reload"
+  story.
 
 ## Deterministic testing under concurrency
 
@@ -130,7 +228,7 @@ verification.
 ## Configuration format
 
 **Decision**: YAML via SnakeYAML for the Server Configuration file (FR-012):
-module enable/disable flags, listener ports (plaintext + optional TLS),
+extension enable/disable flags, listener ports (plaintext + optional TLS),
 rate-limit thresholds.
 
 **Rationale**: Human-edited, hierarchical, comment-friendly — matches an
@@ -141,8 +239,8 @@ no transitive framework baggage.
 
 **Alternatives considered**:
 - *Java `.properties`*: zero dependencies, but flat key-value structure is
-  awkward for per-module nested settings and doesn't support comments well
-  for admin documentation.
+  awkward for per-extension nested settings and doesn't support comments
+  well for admin documentation.
 - *HOCON (Typesafe Config)*: richer feature set (includes, substitutions),
   but pulls in a heavier library for features this project doesn't need at
   its current scope.
@@ -201,48 +299,66 @@ disclosure, e.g., via backup leak or misconfigured permissions) is the same
 threat FR-024 is already written to defend against; there's no principled
 reason to weaken it for this one credential type.
 
-## Cloak module boundary (FR-031)
+## Cloak extension boundary (FR-031)
 
-**Decision**: `jircd-modules/cloak` is a `ServerModule` like any capability
-module (research.md "Module system"), but it does not itself own a
-client's real hostname — `jircd-core` always records the real value
-on the `ClientSession` (data-model.md) and asks the currently-enabled cloak
-module, if any, for the *display* value used when presenting identity to
-other clients (FR-030). Administrative hostname lookups (FR-032) always
-read `jircd-core`'s stored real value directly, bypassing the cloak
-module entirely.
+**Decision**: `jircd-server-extensions/cloak` is a `ServerExtension` (see
+"Extension system" — it has no negotiable `Capability`, so it's a
+`ServerExtension`, not a `CapabilityExtension`), but it does not itself own
+a client's real hostname — `jircd-core` always records the real value on
+the `ClientSession` (data-model.md) and asks the currently-enabled cloak
+extension, if any, for the *display* value used when presenting identity
+to other clients (FR-030). It does this by claiming the `hostname-display`
+extension point (data-model.md's `Extension.extensionPoint`), so the
+"Extension system" decision's ownership rule — at most one enabled
+extension per extension point — already prevents a second, competing
+cloaking extension from being enabled at the same time without inventing a
+cloak-specific conflict rule. Administrative hostname lookups (FR-032)
+always read `jircd-core`'s stored real value directly, bypassing the
+cloak extension entirely.
 
 **Rationale**: This directly satisfies the edge case of "what happens when
 cloaking is disabled while clients are connected" (spec.md Edge Cases): if
-the real value only ever lived in `jircd-core`, disabling `jircd-cloak` at
+the real value only ever lived in `jircd-core`, disabling `cloak` at
 runtime (FR-011) simply means the display-value lookup returns the real
 value again immediately — no migration, no per-session state to fix up,
-and no way for a cloak-module bug to lose or corrupt the real value the
+and no way for a cloak-extension bug to lose or corrupt the real value the
 rest of the system depends on.
 
-**Alternatives considered**: Having the cloak module own/replace the
+**Alternatives considered**: Having the cloak extension own/replace the
 stored hostname (with the real value kept in a side table only the cloak
-module manages) — rejected because it makes administrator lookups (FR-032)
-and disabling-while-connected behavior depend on the cloak module's own
-bookkeeping being correct, which is a larger trust surface for what should
-be a purely presentational concern.
+extension manages) — rejected because it makes administrator lookups
+(FR-032) and disabling-while-connected behavior depend on the cloak
+extension's own bookkeeping being correct, which is a larger trust surface
+for what should be a purely presentational concern.
 
 ## TLS approach
 
-**Decision**: `SSLContext` + `SSLEngine` (non-blocking-friendly TLS API)
-wrapping the same `SocketChannel` connections used for plaintext, rather
-than `SSLServerSocket`/`SSLSocket`.
+**Decision** *(revised)*: `SSLServerSocket`/`SSLSocket` — the blocking TLS
+API — for the optional TLS listener (FR-018), not `SSLEngine`.
 
-**Rationale**: `SSLEngine` operates directly on the same channel-based I/O
-model as the rest of the connection-handling code (see "Networking model"
-above), so the optional-TLS listener (FR-018) shares its connection
-lifecycle and virtual-thread-per-connection handling with the plaintext
-listener instead of needing a parallel code path built on the older
-socket-based TLS API.
+**Rationale**: This decision was originally made to match a non-blocking,
+channel-based I/O model, but "Networking model" above actually chose
+*blocking* I/O per connection on virtual threads, not a non-blocking
+reactor. `SSLEngine` is designed for exactly the non-blocking case — you
+drive its wrap/unwrap/handshake state machine by hand — and using it in a
+blocking-per-thread design means hand-rolling that state machine for no
+benefit, since nothing else in the connection-handling code is
+non-blocking. `SSLSocket` wraps a blocking socket and, like the rest of
+the design, reads/writes as ordinary blocking calls on a virtual thread —
+it is the pairing that actually matches "Networking model," not the
+mismatch the original version of this decision introduced. Both the
+plaintext (`ServerSocketChannel`/`SocketChannel`) and TLS
+(`SSLServerSocket`/`SSLSocket`) listeners end up structurally similar:
+accept a connection, hand it to a virtual thread, read/write blocking
+calls from there — TLS or not is an implementation detail of that one
+connection's I/O calls, not a fork in the overall concurrency model.
 
-**Alternatives considered**: `SSLServerSocket`: simpler API, but is built on
-the older blocking-socket model and would require a second, divergent
-connection-acceptance code path alongside the channel-based one.
+**Alternatives considered**: `SSLEngine` (the original choice, reverted —
+see Rationale: right API for a non-blocking reactor, wrong one for this
+project's actual blocking/virtual-thread model). Wrapping
+`SocketChannel` in a hand-written blocking adapter just to keep using
+`SSLEngine`: technically possible but reinvents what `SSLSocket` already
+provides, for no gain.
 
 ## Rate limiting (FR-016)
 

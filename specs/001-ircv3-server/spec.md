@@ -103,10 +103,9 @@ has recurring members and protected nicknames/channels, but a server can
 deliver value (Stories 1–2) before this is required — so it follows
 core chat and capability negotiation in priority. **This story is not
 mandatory for the first iteration**: the server MUST be fully usable
-(Stories 1–2, and Story 4's modularity) without it, and it is deferred to
-a later release. It is documented now so the module boundary it requires
-(the account module) can be designed for without committing to build it
-yet.
+(Stories 1–2, and Story 4's extensibility) without it, and it is deferred
+to a later release. It is documented now so the boundary it requires (the
+account module) can be designed for without committing to build it yet.
 
 **Independent Test**: Attempt to authenticate a client with valid account
 credentials and confirm the session is marked as authenticated to other
@@ -129,39 +128,39 @@ authenticated.
 
 ---
 
-### User Story 4 - Tailor the Server with Optional Modules (Priority: P4)
+### User Story 4 - Tailor the Server with Optional Extensions (Priority: P4)
 
-A server administrator enables, disables, and configures optional feature
-modules (for example, individual IRCv3 capabilities such as `message-tags`
-or `server-time`) to match their community's needs, without needing to
-modify the server's core codebase. Core protocol behavior — including
-channel moderation and the capability-negotiation mechanism itself — is
-always present and is not part of what this story's toggling applies to
-(see FR-035, FR-036).
+A server administrator enables, disables, and configures optional
+extensions (for example, individual IRCv3 capabilities such as
+`message-tags` or `server-time`) to match their community's needs, without
+needing to modify the server's core codebase. Core protocol behavior —
+including channel moderation and the capability-negotiation mechanism
+itself — is always present and is not part of what this story's toggling
+applies to (see FR-035, FR-036).
 
-**Why this priority**: Modularity is a stated goal of the product and
+**Why this priority**: Extensibility is a stated goal of the product and
 matters most to administrators, but the server delivers its primary value
-to end users (chatting) even with a fixed default set of modules enabled
-— so administrator-facing configurability is valuable but not blocking
-for the core chat experience.
+to end users (chatting) even with a fixed default set of extensions
+enabled — so administrator-facing configurability is valuable but not
+blocking for the core chat experience.
 
-**Independent Test**: As an administrator, disable an optional module via
-configuration while the server keeps running (no restart), and confirm
-connected clients can no longer use that module's functionality while all
-other functionality continues to work uninterrupted; re-enable it the
+**Independent Test**: As an administrator, disable an optional extension
+via configuration while the server keeps running (no restart), and confirm
+connected clients can no longer use that extension's functionality while
+all other functionality continues to work uninterrupted; re-enable it the
 same way and confirm functionality returns without a restart.
 
 **Acceptance Scenarios**:
 
-1. **Given** the administrator has a list of optional modules, **When**
+1. **Given** the administrator has a list of optional extensions, **When**
    they disable one via configuration while the server is running, **Then**
-   the server no longer offers or accepts requests for that module's
+   the server no longer offers or accepts requests for that extension's
    functionality, without the server process being restarted.
-2. **Given** a module is disabled, **When** the administrator re-enables
-   it via configuration while the server is running, **Then** its
-   functionality becomes available again without requiring changes beyond
-   configuration and without restarting the server process.
-3. **Given** an administrator provides an invalid module configuration,
+2. **Given** an extension is disabled, **When** the administrator
+   re-enables it via configuration while the server is running, **Then**
+   its functionality becomes available again without requiring changes
+   beyond configuration and without restarting the server process.
+3. **Given** an administrator provides an invalid extension configuration,
    **When** the server loads its configuration, **Then** the server
    reports a clear configuration error identifying the problem instead of
    starting in a broken or partially-configured state.
@@ -202,10 +201,10 @@ confirm other channel members see the removal reflected.
 
 An administrator, connected as an ordinary IRC client, grants themselves
 administrator privilege via an in-band command and then issues
-administrative commands — such as enabling or disabling an optional module,
-or looking up a client's real hostname — directly through the IRC protocol,
-without needing file system or configuration-file access to the server
-host.
+administrative commands — such as enabling or disabling an optional
+extension, or looking up a client's real hostname — directly through the
+IRC protocol, without needing file system or configuration-file access to
+the server host.
 
 **Why this priority**: In-band administration is a peer capability to
 Story 4's configuration-file path, not a lesser one — administering a
@@ -214,9 +213,9 @@ usable, so this shares Story 4's priority tier.
 
 **Independent Test**: Connect as a normal client, issue the
 privilege-granting command with valid administrator credentials, confirm
-privilege is granted, then issue a module-toggle administrative command and
-confirm the module's state change takes effect for other connected
-clients — all without touching the configuration file.
+privilege is granted, then issue an extension-toggle administrative
+command and confirm the extension's state change takes effect for other
+connected clients — all without touching the configuration file.
 
 **Acceptance Scenarios**:
 
@@ -227,12 +226,12 @@ clients — all without touching the configuration file.
    attempts an administrative command, **Then** the server rejects it with
    a clear permissions error and takes no action.
 3. **Given** a session holding administrator privilege, **When** it issues
-   a command to disable an enabled module, **Then** the module becomes
-   unavailable to all clients without a server restart — the same
+   a command to disable an enabled extension, **Then** the extension
+   becomes unavailable to all clients without a server restart — the same
    observable effect as a configuration-file-driven change (FR-011).
 4. **Given** a session holding administrator privilege, **When** it
    requests a specific client's real hostname, **Then** the server returns
-   the real, unobfuscated value even if a cloaking module currently
+   the real, unobfuscated value even if a cloaking extension currently
    obscures that client's hostname from other clients (FR-031).
 
 ---
@@ -248,11 +247,11 @@ clients — all without touching the configuration file.
   still a member of one or more channels?
 - How does the server respond to a malformed or incomplete protocol
   message that cannot be parsed?
-- How does the server behave when an optional module fails to start or
+- How does the server behave when an optional extension fails to start or
   encounters an internal error while running — does the rest of the
   server continue operating?
 - What happens when a client negotiates a capability, and mid-session the
-  administrator disables the module providing that capability?
+  administrator disables the extension providing that capability?
 - How does the server respond when a channel or nickname name exceeds
   defined length or character constraints?
 - What happens when the maximum number of concurrent connections is
@@ -262,7 +261,7 @@ clients — all without touching the configuration file.
   security-relevant event (FR-019), and is the client disconnected or just
   refused privilege?
 - What happens to already-cloaked clients' presented hostnames when the
-  cloaking module is disabled while they remain connected — is cloaking
+  cloaking extension is disabled while they remain connected — is cloaking
   removed immediately, or does it persist for that session until
   reconnect?
 - *(Applies once Story 3 / the account module is implemented — not
@@ -324,7 +323,7 @@ clients — all without touching the configuration file.
   a clear error and MUST NOT mark a session as authenticated when
   verification fails.
 - **FR-011**: The server MUST allow an administrator to enable or disable
-  individual optional feature modules via configuration, without requiring
+  individual optional extensions via configuration, without requiring
   changes to the server's core codebase, and without requiring the running
   server process to be restarted for the change to take effect.
 - **FR-012**: The server MUST report a clear, specific error when an
@@ -359,7 +358,7 @@ clients — all without touching the configuration file.
   failed authentication attempts and rejected moderation actions) in a
   form an administrator can review.
 - **FR-020**: The server MUST continue serving unaffected clients when a
-  single optional module fails to start or encounters a runtime error.
+  single optional extension fails to start or encounters a runtime error.
 - **FR-021**: The server MUST operate as a complete, self-sufficient
   standalone deployment — a single instance MUST NOT require any other
   server instance to be present to serve clients. Server-to-server
@@ -367,10 +366,10 @@ clients — all without touching the configuration file.
   end users as a single chat network) is out of scope for the initial
   release. The core design MUST NOT foreclose adding federation in a
   later release, but this specification does NOT require federation to
-  fit the same independent-module abstraction used for individual
+  fit the same independent-extension abstraction used for individual
   capabilities and command sets (FR-011): federation introduces a
   server-to-server trust boundary and distributed state that a
-  client-facing module does not, so it may need its own extension
+  client-facing extension does not, so it may need its own extension
   mechanism, to be defined when federation is actually planned rather
   than assumed now.
 - **FR-022**: To keep a future federation effort viable without a full
@@ -432,11 +431,11 @@ clients — all without touching the configuration file.
 - **FR-028** *(Deferred — constrains a future federation effort; not
   applicable to the initial, standalone release)*: Once federation
   (FR-021) is introduced, every server linked into the same network MUST
-  present a consistent set of active modules to clients — an optional
-  capability or other module enabled on one linked server MUST be enabled
-  (or consistently unavailable) network-wide, so a
-  client's experience does not depend on which linked server it happens
-  to be connected to.
+  present a consistent set of active extensions to clients — an optional
+  capability or other extension enabled on one linked server MUST be
+  enabled (or consistently unavailable) network-wide, so a client's
+  experience does not depend on which linked server it happens to be
+  connected to.
 - **FR-029** *(Deferred — constrains a future federation effort; not
   applicable to the initial, standalone release)*: Once federation
   (FR-021) is introduced and the account module (FR-023/FR-024) is in
@@ -448,8 +447,8 @@ clients — all without touching the configuration file.
   messages that include a sender (e.g., channel and direct messages, join/
   part/quit notifications), in the standard `nickname!ident@hostname` form,
   where `ident` and `hostname` are derived from the client's connection.
-- **FR-031**: The server MUST support an optional module that replaces the
-  hostname/IP portion of a client's presented identity (FR-030) with an
+- **FR-031**: The server MUST support an optional extension that replaces
+  the hostname/IP portion of a client's presented identity (FR-030) with an
   obfuscated value shown to other clients, while the server continues to
   record that client's real, unobfuscated hostname/IP internally.
   Administrators MUST be able to view a client's real hostname/IP at any
@@ -458,7 +457,7 @@ clients — all without touching the configuration file.
 - **FR-032**: The server MUST provide an in-band administrative command
   interface, available over the IRC protocol itself, through which an
   authorized administrator can perform administrative actions — at
-  minimum, enabling/disabling optional modules (FR-011) and viewing a
+  minimum, enabling/disabling optional extensions (FR-011) and viewing a
   client's real, unobfuscated hostname/IP (FR-031) — without requiring
   direct access to the server's configuration file or host filesystem.
 - **FR-033**: The server MUST restrict administrative commands (FR-032) to
@@ -477,17 +476,17 @@ clients — all without touching the configuration file.
   for the account module (not plain text; industry-standard hashing).
 - **FR-035**: The capability-negotiation mechanism itself (FR-006, FR-007,
   FR-008 — a client's ability to request the capability list and negotiate
-  a subset) MUST always be available and MUST NOT be an optional module
+  a subset) MUST always be available and MUST NOT be an optional extension
   subject to FR-011 toggling. Only the individual capabilities it offers
   (FR-025's `message-tags`, `server-time`, `echo-message`) are optional,
-  independently toggleable modules; disabling all of them MUST still leave
-  a client able to perform capability negotiation and simply receive an
-  empty or reduced capability list.
+  independently toggleable extensions; disabling all of them MUST still
+  leave a client able to perform capability negotiation and simply receive
+  an empty or reduced capability list.
 - **FR-036**: Channel moderation (FR-013, FR-014 — channel-operator
   designation and standard moderation actions) is core protocol behavior,
   equivalent to user modes and channel modes in standard IRC, and MUST
-  always be available. It MUST NOT be an optional module subject to FR-011
-  toggling; an administrator MUST NOT be able to disable moderation
+  always be available. It MUST NOT be an optional extension subject to
+  FR-011 toggling; an administrator MUST NOT be able to disable moderation
   capability network-wide.
 
 ### Key Entities
@@ -499,7 +498,7 @@ clients — all without touching the configuration file.
   presents (nickname, and optionally a verified account), independent of
   any single connection. Presented on the wire in the standard
   `nickname!ident@hostname` form (FR-030). The `hostname` portion MAY be
-  obfuscated for other clients by an optional cloaking module (FR-031),
+  obfuscated for other clients by an optional cloaking extension (FR-031),
   but the real value is always retained internally and remains visible to
   administrators (FR-032).
 - **Administrator Privilege**: A server-wide grant on a Client Session,
@@ -521,15 +520,15 @@ clients — all without touching the configuration file.
   release has no such registration.
 - **Capability**: A named, independently negotiable protocol enhancement
   that a client may request; has an availability state (offered/not
-  offered) determined by which modules are currently enabled.
-- **Module**: An independently enableable/disableable unit of optional
+  offered) determined by which extensions are currently enabled.
+- **Extension**: An independently enableable/disableable unit of optional
   server functionality (e.g., an individual capability, a command set)
   configured by the administrator. Core protocol behavior — channel
   moderation (FR-036) and the capability-negotiation mechanism itself
-  (FR-035) — is never modeled as a Module; it is always present.
+  (FR-035) — is never modeled as an Extension; it is always present.
 - **Server Configuration**: The administrator-controlled settings
-  determining which modules are active and how core and optional behavior
-  is tuned.
+  determining which extensions are active and how core and optional
+  behavior is tuned.
 
 ## Success Criteria *(mandatory)*
 
@@ -546,7 +545,7 @@ clients — all without touching the configuration file.
   SC-002.
 - **SC-004**: A capability-aware client can complete capability discovery
   and negotiation in a single round trip before registration completes.
-- **SC-005**: An administrator can change which optional modules are
+- **SC-005**: An administrator can change which optional extensions are
   active using configuration alone — no code changes, rebuild, or server
   restart — and observe the effect reflected for connected and new
   clients within 1 minute of applying the change.
@@ -561,7 +560,7 @@ clients — all without touching the configuration file.
   error from the reported error message alone, without consulting source
   code, in under 5 minutes.
 - **SC-009**: An authorized administrator can gain administrator privilege
-  and enable/disable a module entirely through in-band IRC client
+  and enable/disable an extension entirely through in-band IRC client
   commands — no file system or configuration-file access to the server
   host required — with the same effect and timing as SC-005.
 
@@ -570,17 +569,16 @@ clients — all without touching the configuration file.
 - The implementation platform is Java, per explicit stakeholder direction;
   specific frameworks, libraries, and build tooling are determined during
   technical planning and are out of scope for this specification.
-- "Modular" is interpreted as: optional functionality (individual
-  capabilities, command sets) can be independently enabled, disabled, and
-  configured by an administrator without modifying core server code and
-  without restarting the running server process (FR-011). Channel
-  moderation and the capability-negotiation mechanism are explicitly core,
-  always-present behavior, not part of this optional-module surface
-  (FR-035, FR-036). This applies to toggling existing modules on/off;
-  whether entirely new, third-party modules can be installed at runtime
-  without a restart is not required by this specification and is a
-  planning-phase design
-  choice.
+- "Modular" is interpreted as: optional functionality — individual
+  extensions (capabilities, command sets) — can be independently enabled,
+  disabled, and configured by an administrator without modifying core
+  server code and without restarting the running server process (FR-011).
+  Channel moderation and the capability-negotiation mechanism are
+  explicitly core, always-present behavior, not part of this optional-
+  extension surface (FR-035, FR-036). This applies to toggling existing
+  extensions on/off; whether entirely new, third-party extensions can be
+  installed at runtime without a restart is not required by this
+  specification and is a planning-phase design choice.
 - Authentication (Story 3, FR-009/FR-010) and the account module
   (FR-023/FR-024) are deferred and not required for the first iteration;
   when they are implemented, authentication remains optional per-connection
@@ -596,8 +594,8 @@ clients — all without touching the configuration file.
   covers the server and its protocol behavior only; any client software
   is out of scope.
 - Server-to-server federation is deferred past initial release (see
-  FR-021). It is not assumed to fit Story 4's client-facing module system
-  (individual capabilities, command sets) — federation's
+  FR-021). It is not assumed to fit Story 4's client-facing extension
+  system (individual capabilities, command sets) — federation's
   server-to-server trust boundary and distributed state make it a
   different kind of extension, whose own mechanism is a planning-phase
   decision to be made when federation is actually scoped. What this
@@ -605,9 +603,9 @@ clients — all without touching the configuration file.
   behaviors named in FR-022 (nickname/channel uniqueness scope, channel
   message delivery, connection-loss handling) must be implemented so a
   later federation effort doesn't require redesigning them, plus two
-  standing constraints on that future effort itself — module consistency
-  across linked servers (FR-028) and a single authoritative account
-  source network-wide (FR-029).
+  standing constraints on that future effort itself — extension
+  consistency across linked servers (FR-028) and a single authoritative
+  account source network-wide (FR-029).
 - The `ident` portion of FR-030's `nickname!ident@hostname` identity is
   derived from the username the client supplies at registration (FR-001),
   not from an RFC 1413 IDENT-protocol lookup against the client's host —
