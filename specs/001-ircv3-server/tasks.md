@@ -171,7 +171,7 @@ sent by the other within a second (quickstart.md Story 1).
 - [ ] T059 [US1] Implement the `USER` command handler completing registration (`001 RPL_WELCOME` burst); apply `Hostmask`'s username content rule (T017) to derive `ClientSession.ident`, truncating to 9 characters rather than rejecting (contracts/irc-protocol-commands.md "Connection Registration Grammar") in `jircd-core/src/main/java/net/jircd/core/session/command/UserCommandHandler.java` (depends on T058)
 - [ ] T060 [US1] Implement the `JOIN` command handler (create-or-join via `ChannelRegistry`; `353`/`366` replies) in `jircd-core/src/main/java/net/jircd/core/session/command/JoinCommandHandler.java`
 - [ ] T061 [US1] Implement the `PART` command handler in `jircd-core/src/main/java/net/jircd/core/session/command/PartCommandHandler.java`
-- [ ] T062 [US1] Implement `PRIVMSG`/`NOTICE` command handlers: build the recipient set (channel members, or the direct-message target), construct one shared, cloak-resolved `PendingDelivery` (hostmask-prefixed sender, FR-030) per data-model.md, and enqueue it onto every recipient's `SessionWriter` queue — this handler MUST NOT itself apply any capability-dependent (`message-tags`/`server-time`) formatting, that happens per-recipient in `SessionWriter` (T023) (FR-004, FR-005) in `jircd-core/src/main/java/net/jircd/core/session/command/MessageCommandHandler.java`
+- [ ] T062 [US1] Implement `PRIVMSG`/`NOTICE` command handlers: build the recipient set (channel members, or the direct-message target), construct one shared `PendingDelivery` (hostmask-prefixed sender, FR-030) per data-model.md — resolving `senderPresentedForm` by live-checking current `cloak` `ServerExtension` state at that moment, never cached, and never from any recipient's own state (data-model.md `PendingDelivery` validation rules) — and enqueue it onto every recipient's `SessionWriter` queue — this handler MUST NOT itself apply any capability-dependent (`message-tags`/`server-time`) formatting, that happens per-recipient in `SessionWriter` (T023) (FR-004, FR-005) in `jircd-core/src/main/java/net/jircd/core/session/command/MessageCommandHandler.java`
 - [ ] T063 [US1] Implement the `QUIT` command handler and abrupt-disconnect cleanup (membership removal, `PART`/`QUIT` notification to affected channels, FR-017) in `jircd-core/src/main/java/net/jircd/core/session/command/QuitCommandHandler.java`
 - [ ] T064 [US1] Register the `NICK`/`USER`/`JOIN`/`PART`/`PRIVMSG`/`NOTICE`/`QUIT` handlers in `ConnectionHandler`'s command dispatch table in `jircd-core/src/main/java/net/jircd/core/session/ConnectionHandler.java` (depends on T058-T063)
 
@@ -305,16 +305,46 @@ independently.
 
 ---
 
-## Phase 8: Polish & Cross-Cutting Concerns
+## Phase 8: User Story 7 - Look Up Information About a User (Priority: P2)
+
+**Goal**: A registered client can look up nickname/ident/hostname/real-name
+information about themselves or another connected user, with the returned
+hostname/IP following FR-038's three-tier visibility rule.
+
+**Independent Test**: Look up your own information and confirm it's
+returned correctly; as a different, non-administrator client, look up
+that same user's information and confirm you receive their presented
+(not real) hostname (quickstart.md Story 7).
+
+### Tests for User Story 7
+
+> **Write these tests FIRST, ensure they FAIL before implementation.**
+
+- [ ] T098 [P] [US7] Integration test: a client performs a self-lookup (no target) and receives its own real hostname/IP, even while the `cloak` extension is currently obscuring it from other clients (FR-038 case 1) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story7SelfLookupTest.java`
+- [ ] T099 [P] [US7] Integration test: a privileged session looks up a *different* connected client and receives that client's real hostname/IP, consistent with `WHOHOST` (FR-038 case 2) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story7AdminLookupTest.java`
+- [ ] T100 [P] [US7] Integration test: a non-privileged session looks up a *different* connected client and receives only that client's presented hostname (the same value its message hostmask shows) — never the real value, whether or not `cloak` is enabled (FR-038 case 3, SC-010) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story7RegularLookupTest.java`
+- [ ] T101 [P] [US7] Integration test: a lookup for a nickname that isn't connected returns `401 ERR_NOSUCHNICK`, no user data (FR-037) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story7NoSuchNickTest.java`
+
+### Implementation for User Story 7
+
+- [ ] T102 [US7] Implement the `WHOIS` command handler: resolve the target session (the sender's own if no argument given), apply FR-038's real-vs-presented resolution by reusing `UserIdentity.presentedForm`'s existing computation and `ClientSession.realHostname` (never a new, independent resolution — research.md "Cloak extension boundary"), reply `311 RPL_WHOISUSER` + `318 RPL_ENDOFWHOIS`, or `401 ERR_NOSUCHNICK` if the target isn't connected. Core protocol behavior (FR-037), never an optional extension in `jircd-core/src/main/java/net/jircd/core/session/command/WhoisCommandHandler.java`
+- [ ] T103 [US7] Register the `WHOIS` handler in `ConnectionHandler`'s command dispatch table (depends on T064, T102) in `jircd-core/src/main/java/net/jircd/core/session/ConnectionHandler.java`
+
+**Checkpoint**: All six mandatory user stories (1, 2, 4, 5, 6, 7) work
+independently.
+
+---
+
+## Phase 9: Polish & Cross-Cutting Concerns
 
 **Purpose**: Whole-system validation and documentation that spans
 multiple stories.
 
-- [ ] T098 [P] Load-tagged (`@Tag("load")`) test: the server sustains 1,000 simultaneous connections without channel message delivery delay exceeding SC-002's target (SC-003) in `jircd-integration-tests/src/test/java/net/jircd/integration/ConcurrentConnectionScaleLoadTest.java`
-- [ ] T099 [P] Load-tagged (`@Tag("load")`) test: during a sustained flood from one connection, delivery latency for other well-behaved clients does not increase beyond SC-002's target (SC-006) in `jircd-integration-tests/src/test/java/net/jircd/integration/RateLimitLoadTest.java`
-- [ ] T100 [P] Update `README.md`'s "Getting started" section with real build/run instructions now that the project builds (`./gradlew build`, `./gradlew :jircd-server:run`), replacing the pre-implementation placeholder
-- [ ] T101 Run the full `specs/001-ircv3-server/quickstart.md` validation pass manually against a running `./gradlew :jircd-server:run` instance, covering Stories 1, 2, 4, 5, and 6 end-to-end (constitution UX Consistency principle's required manual usage-scenario check)
-- [ ] T102 [P] Code cleanup pass: remove any dead code/TODOs introduced during implementation and confirm `./gradlew build` runs Spotless and SpotBugs clean across all subprojects (constitution Code Quality principle)
+- [ ] T104 [P] Load-tagged (`@Tag("load")`) test: the server sustains 1,000 simultaneous connections without channel message delivery delay exceeding SC-002's target (SC-003) in `jircd-integration-tests/src/test/java/net/jircd/integration/ConcurrentConnectionScaleLoadTest.java`
+- [ ] T105 [P] Load-tagged (`@Tag("load")`) test: during a sustained flood from one connection, delivery latency for other well-behaved clients does not increase beyond SC-002's target (SC-006) in `jircd-integration-tests/src/test/java/net/jircd/integration/RateLimitLoadTest.java`
+- [ ] T106 [P] Update `README.md`'s "Getting started" section with real build/run instructions now that the project builds (`./gradlew build`, `./gradlew :jircd-server:run`), replacing the pre-implementation placeholder
+- [ ] T107 Run the full `specs/001-ircv3-server/quickstart.md` validation pass manually against a running `./gradlew :jircd-server:run` instance, covering Stories 1, 2, 4, 5, 6, and 7 end-to-end (constitution UX Consistency principle's required manual usage-scenario check)
+- [ ] T108 [P] Code cleanup pass: remove any dead code/TODOs introduced during implementation and confirm `./gradlew build` runs Spotless and SpotBugs clean across all subprojects (constitution Code Quality principle)
 
 ---
 
@@ -324,9 +354,9 @@ multiple stories.
 
 - **Setup (Phase 1)**: No dependencies — start immediately.
 - **Foundational (Phase 2)**: Depends on Setup completion — BLOCKS all user stories.
-- **User Stories (Phase 3-7)**: All depend on Foundational completion.
-  - Can proceed in parallel (if staffed) or sequentially in priority order (P1 → P2 → P4 → P4 → P5, per spec.md — Stories 4 and 6 share priority P4).
-- **Polish (Phase 8)**: Depends on all five user stories being complete.
+- **User Stories (Phase 3-8)**: All depend on Foundational completion.
+  - Can proceed in parallel (if staffed) or sequentially in priority order (P1 → P2 → P2 → P4 → P4 → P5, per spec.md — Stories 2 and 7 share priority P2, Stories 4 and 6 share priority P4). Story 7 is phased last here purely for minimal task-list disruption when it was added, not because of a priority or code dependency — see "User Story Dependencies" below.
+- **Polish (Phase 9)**: Depends on all six user stories being complete.
 
 ### User Story Dependencies
 
@@ -344,6 +374,14 @@ multiple stories.
   Story 4 — is most demonstrable once Story 2 exists. Its `REHASH`
   command (T093) depends only on Foundational's `ConfigurationReloader`
   (T049), not on Story 4.
+- **User Story 7 (P2)**: No dependencies on other stories to compile or
+  run — the self-lookup case (T098) needs nothing beyond Foundational.
+  Its administrator-lookup test (T099) is most meaningful once Story 6's
+  `OPER` exists, and its cloak-interaction assertions (T098/T100) are most
+  meaningful once Story 6's `cloak` extension exists, but the `WHOIS`
+  handler itself (T102) only depends on `ClientSession.realHostname` and
+  `UserIdentity.presentedForm`, both Foundational — it does not call into
+  `WHOHOST` or any Story 6 code.
 
 ### Within Each User Story
 
@@ -411,7 +449,8 @@ Task: "Implement echo-message CapabilityExtension in jircd-capabilities/echo-mes
 4. Add Story 4 → validate independently (config-file extension toggling via `SIGHUP`).
 5. Add Story 5 → validate independently (moderation).
 6. Add Story 6 → validate independently (in-band administration, including `REHASH`).
-7. Polish: scale/load validation, full quickstart pass, docs.
+7. Add Story 7 → validate independently (user lookup / `WHOIS`).
+8. Polish: scale/load validation, full quickstart pass, docs.
 
 Each story adds value without breaking previously delivered stories.
 
@@ -420,7 +459,9 @@ Each story adds value without breaking previously delivered stories.
 With multiple developers/agents, once Foundational is done:
 
 - Developer/Agent A: User Story 1
-- Developer/Agent B: User Story 2
+- Developer/Agent B: User Story 2, then User Story 7 (both are P2 and
+  small; Story 7's `WHOIS` handler is a natural follow-on once the
+  developer is already deep in capability/identity code)
 - Developer/Agent C: User Story 5
 - Developer/Agent D: User Stories 4 and 6 (both build on the reload
   mechanism from Foundational, so pairing them reduces cross-agent

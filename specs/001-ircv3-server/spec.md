@@ -236,6 +236,46 @@ connected clients — all without touching the configuration file.
 
 ---
 
+### User Story 7 - Look Up Information About a User (Priority: P2)
+
+A person using an IRC client looks up information about themselves or
+about another connected user — nickname, ident, presented hostname, and
+real name — the same kind of lookup virtually every IRC client performs
+routinely.
+
+**Why this priority**: This is standard, expected IRC functionality (like
+Story 2's capability negotiation, it rounds out what makes the server feel
+like a complete IRC server) but the server already delivers its core value
+(chatting) without it, so it isn't blocking for the MVP.
+
+**Independent Test**: As a connected client, look up your own information
+and confirm it's returned correctly; as a different, non-administrator
+client, look up that same user's information and confirm you receive
+their presented (not real) hostname.
+
+**Acceptance Scenarios**:
+
+1. **Given** a connected, registered client, **When** it looks up
+   information about itself (no target, or its own nickname), **Then**
+   the server returns that client's own real, unobfuscated hostname/IP —
+   regardless of whether a cloaking extension is currently enabled — along
+   with its nickname, ident, and real name.
+2. **Given** a session holding administrator privilege, **When** it looks
+   up information about a different connected client, **Then** the server
+   returns that client's real, unobfuscated hostname/IP, consistent with
+   FR-032's administrator visibility guarantee.
+3. **Given** a session that does **not** hold administrator privilege,
+   **When** it looks up information about a *different* connected client,
+   **Then** the server returns only that client's presented hostname (the
+   same value it would see in that client's message hostmask — obfuscated
+   if a cloaking extension is enabled, the real value otherwise) — never
+   that client's real, unobfuscated hostname/IP.
+4. **Given** a client looks up a nickname that is not currently connected,
+   **When** the lookup is processed, **Then** the server returns a clear
+   "no such nickname" error rather than any user data.
+
+---
+
 ### Edge Cases
 
 - What happens when a client attempts to register with a nickname or
@@ -264,6 +304,10 @@ connected clients — all without touching the configuration file.
   cloaking extension is disabled while they remain connected — is cloaking
   removed immediately, or does it persist for that session until
   reconnect?
+- What does a client see when it looks itself up while a cloaking
+  extension is obscuring its own hostname from everyone else — its real
+  value (since it's the client's own data) or the same obscured value
+  other clients see?
 - *(Applies once Story 3 / the account module is implemented — not
   applicable to the initial release)* How does the server handle an
   authenticated client's underlying account being deleted or suspended
@@ -488,6 +532,28 @@ connected clients — all without touching the configuration file.
   always be available. It MUST NOT be an optional extension subject to
   FR-011 toggling; an administrator MUST NOT be able to disable moderation
   capability network-wide.
+- **FR-037**: The server MUST support a user-lookup command allowing a
+  registered client to query information — at minimum nickname, ident,
+  presented hostname, and real name — about a target nickname, or about
+  themselves if no target is given. Like channel moderation (FR-036) and
+  capability negotiation (FR-035), this is core protocol behavior and
+  MUST NOT be an optional extension subject to FR-011 toggling.
+- **FR-038**: The hostname/IP value FR-037's lookup returns for the target
+  MUST be resolved as follows, evaluated in order:
+  1. If the querying client **is** the target (a self-lookup), the server
+     MUST return the target's real, unobfuscated hostname/IP, regardless
+     of whether a cloaking extension currently obscures it from other
+     clients — a client's own data is never hidden from itself.
+  2. Otherwise, if the querying client holds administrator privilege
+     (FR-033), the server MUST return the target's real, unobfuscated
+     hostname/IP, consistent with FR-032's `WHOHOST`-equivalent
+     guarantee.
+  3. Otherwise, the server MUST return the same presented (display) value
+     the target's message hostmask already shows to that querying client
+     (FR-030, cloak-obscured per FR-031 if a cloaking extension is
+     enabled, the real value otherwise) — the server MUST NOT expose a
+     target's real, unobfuscated hostname/IP to a non-administrator
+     client looking up a *different* client, under any circumstance.
 
 ### Key Entities
 
@@ -500,7 +566,9 @@ connected clients — all without touching the configuration file.
   `nickname!ident@hostname` form (FR-030). The `hostname` portion MAY be
   obfuscated for other clients by an optional cloaking extension (FR-031),
   but the real value is always retained internally and remains visible to
-  administrators (FR-032).
+  administrators (FR-032) and to the user-lookup command (FR-037/FR-038)
+  when a client looks itself up or an administrator looks anyone up —
+  never to a non-administrator client looking up someone else.
 - **Administrator Privilege**: A server-wide grant on a Client Session,
   obtained via FR-034's in-band credential command, that authorizes
   FR-032's administrative commands. Distinct from channel-operator status
@@ -563,6 +631,10 @@ connected clients — all without touching the configuration file.
   and enable/disable an extension entirely through in-band IRC client
   commands — no file system or configuration-file access to the server
   host required — with the same effect and timing as SC-005.
+- **SC-010**: Across repeated testing, 100% of non-administrator lookups
+  of a *different* client's information return that client's presented
+  hostname, never its real hostname/IP; 100% of self-lookups and
+  administrator lookups return the real hostname/IP.
 
 ## Assumptions
 

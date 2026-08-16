@@ -106,6 +106,26 @@ which arrived last.
 | `NOTICE <target> :<text>` | C→S | Same as `PRIVMSG` | Same delivery semantics as `PRIVMSG`, but MUST NOT trigger automated replies | Delivered like `PRIVMSG` |
 | `QUIT [:reason]` | C→S | Any time | Disconnects; removes all channel memberships (FR-017) | `QUIT` echoed to all affected channels |
 
+### User Queries (Story 7)
+
+| Command | Direction | Preconditions | Effect | Replies |
+|---|---|---|---|---|
+| `WHOIS [target]` | C→S | `REGISTERED` session | Looks up `target` (the sender's own session if omitted) and returns its nickname, ident, hostname, and real name (FR-037). The returned hostname follows FR-038's three-tier resolution: real value for a self-lookup or an administrator, otherwise the same presented value the target's message hostmask already shows to this sender (FR-030/031) | `311 RPL_WHOISUSER` then `318 RPL_ENDOFWHOIS` on success; `401 ERR_NOSUCHNICK` if `target` isn't connected |
+
+**Contract notes**:
+- `WHOIS` is core protocol behavior (FR-037), like moderation (FR-036) and
+  capability negotiation (FR-035) — it is never one of the toggleable
+  `jircd-capabilities/*`/`jircd-server-extensions/*` extensions, and an
+  administrator cannot disable it.
+- The hostname field's real-vs-presented resolution (FR-038) MUST reuse
+  the exact same computation `UserIdentity.presentedForm` (data-model.md)
+  already uses for message hostmasks, and the exact same
+  `ClientSession.realHostname` source of truth `WHOHOST` (Administration,
+  below) already reads for the administrator case — `WHOIS` MUST NOT
+  reimplement this resolution independently. Two independent
+  implementations of "who gets to see the real value" is exactly the kind
+  of divergence that turns into a privacy bug later.
+
 ### Moderation (Story 5)
 
 | Command | Direction | Preconditions | Effect | Replies |
@@ -196,7 +216,7 @@ any given server to implement it.
 | `SERVLIST` | 3.5.1 | Recognized only — this server has no services-framework concept |
 | `SQUERY` | 3.5.2 | Recognized only |
 | `WHO` | 3.6.1 | Recognized only — no user-query feature in this release |
-| `WHOIS` | 3.6.2 | Recognized only |
+| `WHOIS` | 3.6.2 | **Implemented** — see "User Queries" above |
 | `WHOWAS` | 3.6.3 | Recognized only |
 | `KILL` | 3.7.1 | Recognized only — no forced-disconnect admin command in this release (an administrator can approximate this via a future `EXTENSION`-adjacent command, but none exists yet) |
 | `PING` | 3.7.2 | **Implemented** — core connection keep-alive, answered with `PONG` |
@@ -226,10 +246,11 @@ any given server to implement it.
   complete, standard-compliant parser, independent of which commands any
   particular server (this one or another) has chosen to implement.
 - Numeric replies associated with "Recognized only" commands (e.g.,
-  `311`-`319` for `WHOIS`) are still defined in the full numeric catalog
-  (irc-numeric-replies.md) for the same reason — a client library needs
-  to be able to parse them from *any* server's responses, not only ones
-  this server currently sends.
+  `312`/`313`/`317`/`319` — the server/operator/idle/channel-list parts of
+  a fuller `WHOIS` reply this release doesn't implement) are still defined
+  in the full numeric catalog (irc-numeric-replies.md) for the same
+  reason — a client library needs to be able to parse them from *any*
+  server's responses, not only ones this server currently sends.
 - This table does not change what any FR requires the server to *do* —
   it documents what the wire-protocol layer can *parse and represent*.
   Moving a "Recognized only" command to "Implemented" in a future release

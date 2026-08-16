@@ -150,13 +150,22 @@ a channel (FR-004) is a **two-stage** pipeline, split by who has the
 information needed for each stage:
 
 1. **Sender's thread, once**: resolves the parts of the message that do
-   *not* vary by recipient — the hostmask (already cloak-resolved, since
-   cloaking is a uniform display transform applied the same way to every
-   viewer, not a per-viewer choice) and the message body/command. This
-   produces one shared, immutable "pending delivery" object, enqueued onto
-   every recipient member's outbound queue. No capability-driven
-   formatting decisions are made at this stage — it never writes to
-   another session's socket directly, only enqueues.
+   *not* vary by recipient — the hostmask and the message body/command.
+   The hostmask is resolved by live-checking the current `cloak`
+   `ServerExtension` state at that exact moment — enabled or not, never a
+   cached/stale value (`UserIdentity.presentedForm`, data-model.md) — the
+   same "live-check, never cached" discipline stage 2 applies to
+   capabilities below, just evaluated once here rather than once per
+   recipient, because cloaking is a uniform display transform applied the
+   same way to every viewer, not a per-viewer choice. Server extension
+   state is the *only* thing allowed to change the hostmask at this stage
+   — no recipient's own state (capabilities, session data) ever factors
+   into it, which is exactly what makes it safe to bake one resolved
+   hostmask into a single immutable object shared by every recipient of a
+   fan-out. This produces one shared, immutable "pending delivery" object,
+   enqueued onto every recipient member's outbound queue. No
+   capability-driven formatting decisions are made at this stage — it
+   never writes to another session's socket directly, only enqueues.
 2. **Each recipient's own writer thread, at drain time**: converts that
    session's next queued pending delivery into the actual wire line,
    applying *that recipient's* `negotiatedCapabilities` — live-checked
@@ -475,9 +484,14 @@ extension point (data-model.md's `Extension.extensionPoint`), so the
 "Extension system" decision's ownership rule — at most one enabled
 extension per extension point — already prevents a second, competing
 cloaking extension from being enabled at the same time without inventing a
-cloak-specific conflict rule. Administrative hostname lookups (FR-032)
-always read `jircd-core`'s stored real value directly, bypassing the
-cloak extension entirely.
+cloak-specific conflict rule. Administrative hostname lookups (FR-032,
+via `WHOHOST`) and `WHOIS`'s self-lookup/administrator cases (FR-037/
+FR-038) always read `jircd-core`'s stored real value directly, bypassing
+the cloak extension entirely; `WHOIS`'s non-administrator-looking-up-
+someone-else case instead calls the exact same display-value lookup
+message hostmasks use (`UserIdentity.presentedForm`, data-model.md) —
+one resolution function, three call sites (`presentedForm`, `WHOHOST`,
+`WHOIS`), not three independent implementations that could drift apart.
 
 **Rationale**: This directly satisfies the edge case of "what happens when
 cloaking is disabled while clients are connected" (spec.md Edge Cases): if

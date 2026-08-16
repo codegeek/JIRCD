@@ -70,3 +70,9 @@
   code. The historical Clarifications Q&A log (dated bullets) and every
   "account module" reference (Story 3's distinct, still-undesigned future
   subsystem) were deliberately left as-is.
+- Added mandatory User Story 7 (WHOIS-equivalent user lookup, priority
+  P2) with FR-037/FR-038 and SC-010: self-lookup and administrator
+  lookup always return the real hostname/IP; a non-administrator looking
+  up a *different* client only ever gets the presented (cloak-affected)
+  value, reusing FR-030/031/032/033's existing display-vs-real model
+  rather than introducing a new one.

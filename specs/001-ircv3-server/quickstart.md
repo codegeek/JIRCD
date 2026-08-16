@@ -1,6 +1,6 @@
 # Quickstart: Validating the Modular IRCv3 Chat Server
 
-Validation guide for the in-scope stories (1, 2, 4, 5, 6). Command/reply
+Validation guide for the in-scope stories (1, 2, 4, 5, 6, 7). Command/reply
 details are defined in [contracts/](./contracts/); entity/state details in
 [data-model.md](./data-model.md). This guide proves the feature works
 end-to-end — it does not contain implementation code.
@@ -133,6 +133,27 @@ schema in `contracts/server-configuration.md`.
      directly to this session (unlike Story 4 Step 4's log-only error,
      since there's an active IRC session to reply to here), and the
      server continues running on its previous, still-valid configuration.
+
+## Story 7 — Look Up Information About a User
+
+1. As `alice` (connected, registered, not privileged), send `WHOIS`
+   (no target).
+   - **Expected**: `311 RPL_WHOISUSER` showing alice's own real
+     hostname/IP, then `318 RPL_ENDOFWHOIS` — even if the `cloak`
+     extension is currently enabled and obscuring alice's hostname from
+     everyone else (FR-038 case 1).
+2. As `bob` (connected, registered, not privileged, and not alice), send
+   `WHOIS alice`.
+   - **Expected**: `311` shows alice's *presented* hostname — the same
+     value bob already sees in alice's message prefixes (cloaked if
+     `cloak` is enabled, real otherwise) — never alice's real hostname/IP
+     if it differs from that (FR-038 case 3).
+3. As a privileged session (per Story 6's `OPER`), send `WHOIS alice`.
+   - **Expected**: `311` shows alice's real, unobfuscated hostname/IP,
+     regardless of `cloak` state (FR-038 case 2) — the same value
+     `WHOHOST alice` would return.
+4. Send `WHOIS nonexistent-nick`.
+   - **Expected**: `401 ERR_NOSUCHNICK`, no user data returned.
 
 ## Out of Scope for This Validation Pass
 

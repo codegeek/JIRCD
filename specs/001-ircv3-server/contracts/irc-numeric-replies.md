@@ -7,8 +7,8 @@ has two layers:
    1459/2812 numeric reply catalog. `jircd-protocol`'s `NumericReply` model
    MUST represent all of these, for the same reason its command model
    covers the full command set: a future client library needs to parse
-   `311 RPL_WHOISUSER` from *any* server, not only one that happens to
-   also implement `WHOIS`.
+   `312 RPL_WHOISSERVER` from *any* server, not only one that happens to
+   implement the server-name part of `WHOIS`.
 2. **Server behavior** (`jircd-core` and extensions) — only the numerics
    marked **Used** below are actually sent by this release. Every other
    numeric in the full catalog is defined (correct code, correct name,
@@ -27,10 +27,13 @@ client/administrator can do about it).
 | Numeric | Name | Triggered by | FR |
 |---|---|---|---|
 | `001` | `RPL_WELCOME` | Successful registration | FR-001 |
+| `311` | `RPL_WHOISUSER` | Successful `WHOIS` | FR-037, FR-038 |
+| `318` | `RPL_ENDOFWHOIS` | End of a `WHOIS` reply | FR-037 |
 | `353` | `RPL_NAMREPLY` | `JOIN` | FR-003 |
 | `366` | `RPL_ENDOFNAMES` | `JOIN` | FR-003 |
 | `381` | `RPL_YOUREOPER` | Successful `OPER` | FR-034 |
 | `382` | `RPL_REHASHING` | Successful `REHASH` | FR-011, FR-012 (research.md "Configuration reload mechanism") |
+| `401` | `ERR_NOSUCHNICK` | `WHOIS` for a nickname that isn't connected | FR-037 |
 | `421` | `ERR_UNKNOWNCOMMAND` | Malformed/unrecognized command, or a wire-protocol-recognized command with no handler in this release | FR-015 |
 | `431` | `ERR_NONICKNAMEGIVEN` | `NICK` with no argument | FR-001 (input validation) |
 | `432` | `ERR_ERRONEUSNICKNAME` | `NICK` violating the nickname grammar (invalid leading/body characters or over 9 characters) | irc-protocol-commands.md "Connection Registration Grammar" |
@@ -77,10 +80,10 @@ trigger them is "Recognized only" per irc-protocol-commands.md).
 | `300` | `RPL_NONE` | `301` | `RPL_AWAY` | `367` | `RPL_BANLIST` |
 | `302` | `RPL_USERHOST` | `303` | `RPL_ISON` | `368` | `RPL_ENDOFBANLIST` |
 | `305` | `RPL_UNAWAY` | `306` | `RPL_NOWAWAY` | `369` | `RPL_ENDOFWHOWAS` |
-| `311` | `RPL_WHOISUSER` | `312` | `RPL_WHOISSERVER` | `371` | `RPL_INFO` |
+| `311` | `RPL_WHOISUSER` *(Used)* | `312` | `RPL_WHOISSERVER` | `371` | `RPL_INFO` |
 | `313` | `RPL_WHOISOPERATOR` | `314` | `RPL_WHOWASUSER` | `372` | `RPL_MOTD` |
 | `315` | `RPL_ENDOFWHO` | `317` | `RPL_WHOISIDLE` | `374` | `RPL_ENDOFINFO` |
-| `318` | `RPL_ENDOFWHOIS` | `319` | `RPL_WHOISCHANNELS` | `375` | `RPL_MOTDSTART` |
+| `318` | `RPL_ENDOFWHOIS` *(Used)* | `319` | `RPL_WHOISCHANNELS` | `375` | `RPL_MOTDSTART` |
 | `376` | `RPL_ENDOFMOTD` | `381` | `RPL_YOUREOPER` *(Used)* | `382` | `RPL_REHASHING` *(Used)* |
 | `383` | `RPL_YOURESERVICE` | `391` | `RPL_TIME` | `392` | `RPL_USERSSTART` |
 | `393` | `RPL_USERS` | `394` | `RPL_ENDOFUSERS` | `395` | `RPL_NOUSERS` |
@@ -89,7 +92,7 @@ trigger them is "Recognized only" per irc-protocol-commands.md).
 
 | Numeric | Name | Numeric | Name | Numeric | Name |
 |---|---|---|---|---|---|
-| `401` | `ERR_NOSUCHNICK` | `402` | `ERR_NOSUCHSERVER` | `403` | `ERR_NOSUCHCHANNEL` |
+| `401` | `ERR_NOSUCHNICK` *(Used)* | `402` | `ERR_NOSUCHSERVER` | `403` | `ERR_NOSUCHCHANNEL` |
 | `404` | `ERR_CANNOTSENDTOCHAN` | `405` | `ERR_TOOMANYCHANNELS` | `406` | `ERR_WASNOSUCHNICK` |
 | `407` | `ERR_TOOMANYTARGETS` | `408` | `ERR_NOSUCHSERVICE` | `409` | `ERR_NOORIGIN` |
 | `411` | `ERR_NORECIPIENT` | `412` | `ERR_NOTEXTTOSEND` | `413` | `ERR_NOTOPLEVEL` |

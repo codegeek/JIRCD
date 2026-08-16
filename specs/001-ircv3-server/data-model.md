@@ -28,7 +28,7 @@ guarded by this aggregate.
 | `channelMemberships` | set of `Channel` references | Channels this session has joined; drives cleanup on disconnect (FR-017). |
 | `rateLimitBucket` | token bucket state | Per-connection (FR-016); see research.md "Rate limiting". |
 | `ident` | string | Derived from the `USER` command's username field at registration (FR-030); not independently verified (see spec.md Assumptions re: RFC 1413). |
-| `realHostname` | string | The connection's actual hostname/IP; always populated regardless of cloaking; source of truth for FR-032 admin lookups. Never sent to non-administrator clients directly — see `UserIdentity.presentedForm` for the *display* value. |
+| `realHostname` | string | The connection's actual hostname/IP; always populated regardless of cloaking; source of truth for FR-032 (`WHOHOST`) and FR-038's self-lookup/administrator `WHOIS` cases. Never sent to a non-administrator client looking up a *different* client — see `UserIdentity.presentedForm` for the *display* value that case uses instead. |
 | `administratorPrivilege` | boolean | Granted via FR-034's in-band credential command; authorizes FR-032 administrative commands. Independent of `channelMemberships`/operator status. |
 
 **Validation rules**:
@@ -68,7 +68,7 @@ currently holds it).
 |---|---|---|
 | `nickname` | string | See FR-002 uniqueness rule above. |
 | `username` / `realname` | string | Supplied at registration (FR-001); not independently unique. |
-| *(computed)* `presentedForm` | string | `nickname!ident@displayHostname` (FR-030) — `displayHostname` is `ClientSession.realHostname` unless a cloak extension is currently enabled, in which case it is that extension's obfuscated value (FR-031, research.md "Cloak extension boundary"). Never persisted; computed at send time so a mid-session extension toggle is reflected immediately. |
+| *(computed)* `presentedForm` | string | `nickname!ident@displayHostname` (FR-030) — `displayHostname` is `ClientSession.realHostname` unless the `cloak` `ServerExtension` is currently enabled — live-checked against `ExtensionRegistry` state at computation time, never cached — in which case it is that extension's obfuscated value (FR-031, research.md "Cloak extension boundary"). Never persisted; computed at send time so a mid-session extension toggle is reflected immediately. |
 
 *(Deferred, not modeled here: linking a `UserIdentity` to a persistent
 `Account` — see spec.md's Account entity, FR-023/FR-024/FR-026/FR-027.)*
@@ -85,7 +85,7 @@ a channel a `PRIVMSG` was sent to).
 
 | Field | Type | Notes |
 |---|---|---|
-| `senderPresentedForm` | string | The sender's `UserIdentity.presentedForm` at send time — already cloak-resolved (FR-031), since cloaking is a uniform display transform, not a per-recipient one. Computed once by the sender's thread. |
+| `senderPresentedForm` | string | The sender's `UserIdentity.presentedForm` at send time — resolved by live-checking the current `cloak` `ServerExtension` state at that moment (FR-031), never cached. Computed once by the sender's thread, not per recipient, since cloaking is a uniform display transform applied identically to every viewer — unlike a negotiated capability, no recipient-specific input ever factors into this value (see Validation rules below). |
 | `command` | string | e.g., `PRIVMSG`, `NOTICE`, `JOIN`, `KICK` — which wire command this delivery represents. |
 | `target` | string | Channel name or nickname the original command targeted. |
 | `body` | string, 0..1 | The message text, where applicable (absent for e.g. a bare `JOIN`/`PART` notification). |
@@ -99,7 +99,14 @@ recipient's `ClientSession.negotiatedCapabilities` against the live state
 of the corresponding `CapabilityExtension` (`Capability` validation rules,
 above). A `PendingDelivery` is capability-agnostic by construction — that
 is what makes sharing one instance across recipients with different
-negotiated capabilities safe and correct.
+negotiated capabilities safe and correct. Symmetrically, `senderPresentedForm`
+MUST be resolved solely from the live `cloak` `ServerExtension` state at the
+sender thread's send time — never from a cached hostname value, and never
+influenced by any individual recipient's state (capabilities or otherwise).
+That is what makes baking it once into a shared immutable `PendingDelivery`
+correct rather than merely convenient: server-extension state is uniform
+across every recipient, so resolving it once is equivalent to resolving it
+per recipient, which is exactly the property capability state lacks.
 
 ## Channel — *Aggregate Root, Session & Messaging*
 
