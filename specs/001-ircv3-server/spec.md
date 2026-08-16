@@ -132,9 +132,12 @@ authenticated.
 ### User Story 4 - Tailor the Server with Optional Modules (Priority: P4)
 
 A server administrator enables, disables, and configures optional feature
-modules (for example, specific capabilities, moderation tools, or command
-sets) to match their community's needs, without needing to modify the
-server's core codebase.
+modules (for example, individual IRCv3 capabilities such as `message-tags`
+or `server-time`) to match their community's needs, without needing to
+modify the server's core codebase. Core protocol behavior — including
+channel moderation and the capability-negotiation mechanism itself — is
+always present and is not part of what this story's toggling applies to
+(see FR-035, FR-036).
 
 **Why this priority**: Modularity is a stated goal of the product and
 matters most to administrators, but the server delivers its primary value
@@ -195,6 +198,45 @@ confirm other channel members see the removal reflected.
 
 ---
 
+### User Story 6 - Administer the Server via IRC Commands (Priority: P4)
+
+An administrator, connected as an ordinary IRC client, grants themselves
+administrator privilege via an in-band command and then issues
+administrative commands — such as enabling or disabling an optional module,
+or looking up a client's real hostname — directly through the IRC protocol,
+without needing file system or configuration-file access to the server
+host.
+
+**Why this priority**: In-band administration is a peer capability to
+Story 4's configuration-file path, not a lesser one — administering a
+server that requires host/file access for every change is not practically
+usable, so this shares Story 4's priority tier.
+
+**Independent Test**: Connect as a normal client, issue the
+privilege-granting command with valid administrator credentials, confirm
+privilege is granted, then issue a module-toggle administrative command and
+confirm the module's state change takes effect for other connected
+clients — all without touching the configuration file.
+
+**Acceptance Scenarios**:
+
+1. **Given** a connected, registered client, **When** it issues the
+   administrator-privilege command with valid credentials, **Then** the
+   server grants administrator privilege to that session and confirms it.
+2. **Given** a session without administrator privilege, **When** it
+   attempts an administrative command, **Then** the server rejects it with
+   a clear permissions error and takes no action.
+3. **Given** a session holding administrator privilege, **When** it issues
+   a command to disable an enabled module, **Then** the module becomes
+   unavailable to all clients without a server restart — the same
+   observable effect as a configuration-file-driven change (FR-011).
+4. **Given** a session holding administrator privilege, **When** it
+   requests a specific client's real hostname, **Then** the server returns
+   the real, unobfuscated value even if a cloaking module currently
+   obscures that client's hostname from other clients (FR-031).
+
+---
+
 ### Edge Cases
 
 - What happens when a client attempts to register with a nickname or
@@ -215,6 +257,14 @@ confirm other channel members see the removal reflected.
   defined length or character constraints?
 - What happens when the maximum number of concurrent connections is
   reached and a new client attempts to connect?
+- What happens when a client issues the administrator-privilege command
+  (FR-034) with invalid credentials — is the attempt logged as a
+  security-relevant event (FR-019), and is the client disconnected or just
+  refused privilege?
+- What happens to already-cloaked clients' presented hostnames when the
+  cloaking module is disabled while they remain connected — is cloaking
+  removed immediately, or does it persist for that session until
+  reconnect?
 - *(Applies once Story 3 / the account module is implemented — not
   applicable to the initial release)* How does the server handle an
   authenticated client's underlying account being deleted or suspended
@@ -317,8 +367,8 @@ confirm other channel members see the removal reflected.
   end users as a single chat network) is out of scope for the initial
   release. The core design MUST NOT foreclose adding federation in a
   later release, but this specification does NOT require federation to
-  fit the same independent-module abstraction used for capabilities,
-  moderation tools, and command sets (FR-011): federation introduces a
+  fit the same independent-module abstraction used for individual
+  capabilities and command sets (FR-011): federation introduces a
   server-to-server trust boundary and distributed state that a
   client-facing module does not, so it may need its own extension
   mechanism, to be defined when federation is actually planned rather
@@ -383,8 +433,8 @@ confirm other channel members see the removal reflected.
   applicable to the initial, standalone release)*: Once federation
   (FR-021) is introduced, every server linked into the same network MUST
   present a consistent set of active modules to clients — an optional
-  capability, moderation tool, or other module enabled on one linked
-  server MUST be enabled (or consistently unavailable) network-wide, so a
+  capability or other module enabled on one linked server MUST be enabled
+  (or consistently unavailable) network-wide, so a
   client's experience does not depend on which linked server it happens
   to be connected to.
 - **FR-029** *(Deferred — constrains a future federation effort; not
@@ -394,6 +444,51 @@ confirm other channel members see the removal reflected.
   records MUST be managed by a single authoritative source shared across
   every linked server in the network. No linked server instance may
   operate its own independent, potentially divergent account store.
+- **FR-030**: The server MUST present each client's identity, on protocol
+  messages that include a sender (e.g., channel and direct messages, join/
+  part/quit notifications), in the standard `nickname!ident@hostname` form,
+  where `ident` and `hostname` are derived from the client's connection.
+- **FR-031**: The server MUST support an optional module that replaces the
+  hostname/IP portion of a client's presented identity (FR-030) with an
+  obfuscated value shown to other clients, while the server continues to
+  record that client's real, unobfuscated hostname/IP internally.
+  Administrators MUST be able to view a client's real hostname/IP at any
+  time regardless of whether cloaking is currently applied to it (see
+  FR-032).
+- **FR-032**: The server MUST provide an in-band administrative command
+  interface, available over the IRC protocol itself, through which an
+  authorized administrator can perform administrative actions — at
+  minimum, enabling/disabling optional modules (FR-011) and viewing a
+  client's real, unobfuscated hostname/IP (FR-031) — without requiring
+  direct access to the server's configuration file or host filesystem.
+- **FR-033**: The server MUST restrict administrative commands (FR-032) to
+  sessions holding administrator privilege, and MUST reject attempts from
+  any other session with a clear permissions error — mirroring the
+  channel-operator privilege pattern (FR-014), but as a distinct,
+  server-wide privilege independent of channel-operator status.
+- **FR-034**: The server MUST support granting administrator privilege to
+  an already-registered session via an in-band credential-verification
+  command (classic IRC OPER-style), checked against administrator
+  credentials defined in the Server Configuration. This mechanism MUST be
+  independent of the deferred account module (FR-023/FR-024), since
+  administrative access must not depend on functionality that is out of
+  scope for the initial release. Administrator credentials stored in the
+  Server Configuration MUST be protected the same way as FR-024 requires
+  for the account module (not plain text; industry-standard hashing).
+- **FR-035**: The capability-negotiation mechanism itself (FR-006, FR-007,
+  FR-008 — a client's ability to request the capability list and negotiate
+  a subset) MUST always be available and MUST NOT be an optional module
+  subject to FR-011 toggling. Only the individual capabilities it offers
+  (FR-025's `message-tags`, `server-time`, `echo-message`) are optional,
+  independently toggleable modules; disabling all of them MUST still leave
+  a client able to perform capability negotiation and simply receive an
+  empty or reduced capability list.
+- **FR-036**: Channel moderation (FR-013, FR-014 — channel-operator
+  designation and standard moderation actions) is core protocol behavior,
+  equivalent to user modes and channel modes in standard IRC, and MUST
+  always be available. It MUST NOT be an optional module subject to FR-011
+  toggling; an administrator MUST NOT be able to disable moderation
+  capability network-wide.
 
 ### Key Entities
 
@@ -402,7 +497,15 @@ confirm other channel members see the removal reflected.
   authentication status, and channel memberships.
 - **User Identity**: The persistent, human-recognizable identity a client
   presents (nickname, and optionally a verified account), independent of
-  any single connection.
+  any single connection. Presented on the wire in the standard
+  `nickname!ident@hostname` form (FR-030). The `hostname` portion MAY be
+  obfuscated for other clients by an optional cloaking module (FR-031),
+  but the real value is always retained internally and remains visible to
+  administrators (FR-032).
+- **Administrator Privilege**: A server-wide grant on a Client Session,
+  obtained via FR-034's in-band credential command, that authorizes
+  FR-032's administrative commands. Distinct from channel-operator status
+  (Channel entity) and independent of the deferred Account entity.
 - **Account** *(deferred with Story 3 — not present in the initial
   release)*: A registered identity managed by the account module
   (built-in or external), distinct from a nickname — one account may be
@@ -420,8 +523,10 @@ confirm other channel members see the removal reflected.
   that a client may request; has an availability state (offered/not
   offered) determined by which modules are currently enabled.
 - **Module**: An independently enableable/disableable unit of optional
-  server functionality (e.g., a capability, a moderation tool, a command
-  set) configured by the administrator.
+  server functionality (e.g., an individual capability, a command set)
+  configured by the administrator. Core protocol behavior — channel
+  moderation (FR-036) and the capability-negotiation mechanism itself
+  (FR-035) — is never modeled as a Module; it is always present.
 - **Server Configuration**: The administrator-controlled settings
   determining which modules are active and how core and optional behavior
   is tuned.
@@ -455,19 +560,26 @@ confirm other channel members see the removal reflected.
 - **SC-008**: Administrators can identify the cause of a configuration
   error from the reported error message alone, without consulting source
   code, in under 5 minutes.
+- **SC-009**: An authorized administrator can gain administrator privilege
+  and enable/disable a module entirely through in-band IRC client
+  commands — no file system or configuration-file access to the server
+  host required — with the same effect and timing as SC-005.
 
 ## Assumptions
 
 - The implementation platform is Java, per explicit stakeholder direction;
   specific frameworks, libraries, and build tooling are determined during
   technical planning and are out of scope for this specification.
-- "Modular" is interpreted as: optional functionality (capabilities,
-  moderation tools, command sets) can be independently enabled, disabled,
-  and configured by an administrator without modifying core server code
-  and without restarting the running server process (FR-011). This
-  applies to toggling existing modules on/off; whether entirely new,
-  third-party modules can be installed at runtime without a restart is
-  not required by this specification and is a planning-phase design
+- "Modular" is interpreted as: optional functionality (individual
+  capabilities, command sets) can be independently enabled, disabled, and
+  configured by an administrator without modifying core server code and
+  without restarting the running server process (FR-011). Channel
+  moderation and the capability-negotiation mechanism are explicitly core,
+  always-present behavior, not part of this optional-module surface
+  (FR-035, FR-036). This applies to toggling existing modules on/off;
+  whether entirely new, third-party modules can be installed at runtime
+  without a restart is not required by this specification and is a
+  planning-phase design
   choice.
 - Authentication (Story 3, FR-009/FR-010) and the account module
   (FR-023/FR-024) are deferred and not required for the first iteration;
@@ -485,7 +597,7 @@ confirm other channel members see the removal reflected.
   is out of scope.
 - Server-to-server federation is deferred past initial release (see
   FR-021). It is not assumed to fit Story 4's client-facing module system
-  (capabilities, moderation tools, command sets) — federation's
+  (individual capabilities, command sets) — federation's
   server-to-server trust boundary and distributed state make it a
   different kind of extension, whose own mechanism is a planning-phase
   decision to be made when federation is actually scoped. What this
@@ -496,3 +608,13 @@ confirm other channel members see the removal reflected.
   standing constraints on that future effort itself — module consistency
   across linked servers (FR-028) and a single authoritative account
   source network-wide (FR-029).
+- The `ident` portion of FR-030's `nickname!ident@hostname` identity is
+  derived from the username the client supplies at registration (FR-001),
+  not from an RFC 1413 IDENT-protocol lookup against the client's host —
+  IDENT-protocol verification is out of scope for this release.
+- FR-034's administrator-privilege mechanism intentionally mirrors the
+  classic IRC OPER pattern (credentials defined in server-side
+  configuration, verified in-band) specifically because it must not depend
+  on the deferred account module; if Story 3 is later implemented, whether
+  administrator privilege should additionally support account-based
+  grants is a decision for that future work, not this release.

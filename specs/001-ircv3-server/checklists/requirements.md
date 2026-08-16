@@ -50,3 +50,14 @@
   added: module consistency across all linked servers (FR-028) and a
   single authoritative account source shared network-wide (FR-029).
   Neither applies to the initial, standalone release.
+- Added during planning (not deferred): standard `nickname!ident@hostname`
+  identity presentation with an optional cloaking module and mandatory
+  administrator visibility of real hostnames (FR-030/FR-031), and a new
+  mandatory User Story 6 for in-band IRC administrative commands
+  (FR-032/FR-033/FR-034, SC-009) as an access path alongside the existing
+  configuration-file path (Story 4).
+- Clarified module boundary: channel moderation and the capability-
+  negotiation mechanism are core, always-on protocol behavior, not part of
+  the optional/toggleable module surface (FR-035, FR-036 added; Story 4,
+  FR-028, Key Entities "Module", and Assumptions updated to remove
+  "moderation tools" from the optional-module examples).
