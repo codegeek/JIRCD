@@ -27,6 +27,12 @@ topicMaxLength: 390      # optional (FR-056) — defaults to 390 (a widely-used 
                           # most 400. Enforced by TOPIC-set (417 ERR_INPUTTOOLONG) and
                           # advertised as TOPICLEN.
 
+whoMaskEnabled: true     # optional (FR-061) — defaults to true. Gates WHO's wildcard-mask and
+                          # no-argument forms for non-administrator sessions only; false makes
+                          # both return an empty result (bare 315 RPL_ENDOFWHO), indistinguishable
+                          # from a real zero-match search. Administrators are always exempt.
+                          # WHO's channel-name and exact-nickname forms are unaffected either way.
+
 listeners:
   - port: 6667
     tls: false
@@ -79,6 +85,15 @@ administratorCredentials:
   disconnected or evicted — the limit only gates new claims, the same
   "no retroactive enforcement" posture extension-state changes already
   have (FR-011).
+- **`whoMaskEnabled`** is a plain boolean with no numeric bound to
+  validate (FR-061) — omitting it is valid (defaults to `true`); a
+  non-boolean value is rejected the same way any other malformed
+  configuration value is (FR-012). A successful reload takes effect for
+  `WHO` commands processed after the reload completes, the same
+  immediacy every other reloadable setting has (FR-011) — an
+  in-progress `WHO` isn't retroactively affected, there being nothing
+  in-progress for a single-line command/reply exchange to retroactively
+  affect.
 - **`serverName` IS part of the "refuse to start" validation set** if
   explicitly set: it MUST contain at least one `.` (FR-050, research.md
   "Server identity" — nicknames, FR-002's grammar, never can, so this is

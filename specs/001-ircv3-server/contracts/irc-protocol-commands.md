@@ -285,20 +285,46 @@ was previously missing and needed its own definition (FR-048).
 | Command | Direction | Preconditions | Effect | Replies |
 |---|---|---|---|---|
 | `WHOIS [target]` | C→S | `REGISTERED` session | Looks up `target` (the sender's own session if omitted) and returns its nickname, ident, hostname, and real name (FR-037). The returned hostname follows FR-038's three-tier resolution: real value for a self-lookup or an administrator, otherwise the same presented value the target's message hostmask already shows to this sender (FR-030/031). If `target` currently holds the `operator` user mode, an operator-status line is included — visible to any querying client, not gated like the hostname resolution (FR-037, FR-044) | `311 RPL_WHOISUSER`, then `313 RPL_WHOISOPERATOR` if `target` holds `operator`, then `318 RPL_ENDOFWHOIS` on success; `401 ERR_NOSUCHNICK` if `target` isn't connected |
+| `WHO [mask]` | C→S | `REGISTERED` session | Three forms dispatched on `mask`'s shape (FR-061): a channel name lists that channel's current members (same visibility as `NAMES`, including `invisible` members — FR-041/FR-047, never gated by invisibility or `whoMaskEnabled`); a wildcard (`*`/`?`) pattern matches against nicknames; anything else is an exact nickname; omitted matches every connected user. The latter two forms exclude an `invisible`-holding match (FR-044) unless the requester shares a channel membership with it or holds administrator privilege (FR-032/FR-047's transparency pattern, reused); independently, if `ServerConfiguration.whoMaskEnabled` is `false`, a non-administrator's mask/no-argument form returns no matches at all, administrators exempt (FR-061). Each match's hostname follows the same FR-038 resolution `WHOIS` uses | One `352 RPL_WHOREPLY` per (visible) match, then `315 RPL_ENDOFWHO` — zero matches (whether from a genuine non-match, `invisible` exclusion, or `whoMaskEnabled: false`) is not an error, still closes with `315`, all three indistinguishable to the requester; `403 ERR_NOSUCHCHANNEL` for the channel-name form under the identical private/secret condition `TOPIC`/`NAMES` use (FR-047) |
 
 **Contract notes**:
-- `WHOIS` is core protocol behavior (FR-037), like moderation (FR-036) and
-  capability negotiation (FR-035) — it is never one of the toggleable
-  `jircd-capabilities/*`/`jircd-server-extensions/*` extensions, and an
-  administrator cannot disable it.
+- `WHOIS`/`WHO` are core protocol behavior (FR-037/FR-061), like
+  moderation (FR-036) and capability negotiation (FR-035) — neither is
+  one of the toggleable `jircd-capabilities/*`/`jircd-server-extensions/*`
+  extensions, and an administrator cannot disable either.
 - The hostname field's real-vs-presented resolution (FR-038) MUST reuse
   the exact same computation `UserIdentity.presentedForm` (data-model.md)
   already uses for message hostmasks, and the exact same
   `ClientSession.realHostname` source of truth `WHOHOST` (Administration,
-  below) already reads for the administrator case — `WHOIS` MUST NOT
-  reimplement this resolution independently. Two independent
+  below) already reads for the administrator case — neither `WHOIS` nor
+  `WHO` MUST reimplement this resolution independently. Two independent
   implementations of "who gets to see the real value" is exactly the kind
   of divergence that turns into a privacy bug later.
+- `WHO`'s `352 RPL_WHOREPLY` fields, simplified from RFC 2812's full
+  shape the same way `WHOIS`'s `311` already drops server
+  name/hopcount: `<channel-or-*> <ident> <presented-hostname> <nickname>
+  <status> :0 <realname>` — `<channel>` for the channel-scoped form,
+  `*` otherwise (this server has no server-name-federation concept to
+  put there, FR-021); the trailing `0` is a fixed hopcount (this server
+  is never more than zero hops from itself, having no server-to-server
+  links); `<status>` is always `H` (no `AWAY` in this release, so never
+  `G`) followed by `*` if the target holds `operator` (mirroring `313`'s
+  visibility) and, for the channel-scoped form only, `@`/`+` following
+  the exact same operator/voice precedence `353 RPL_NAMREPLY` already
+  uses (FR-045/FR-046).
+- `WHO`'s mask matching (FR-061) is nickname-only, narrower than RFC
+  2812's full host/server/real-name matching — this server has no
+  server-name-federation concept to match against (FR-021), and nothing
+  requires matching on host or real name yet. A wildcard character
+  (`*`/`?`) anywhere in the argument selects the mask form; its absence
+  and a leading `#` selects the channel form; its absence and no
+  leading `#` selects the exact-nickname form.
+- `whoMaskEnabled` (contracts/server-configuration.md, FR-061) and
+  `invisible` (FR-044) are two independent gates on the same two forms
+  (mask, no-argument), checked separately — either one alone is enough
+  to exclude a match, and both are bypassed entirely by administrator
+  privilege. Neither ever applies to the channel-name or exact-nickname
+  forms.
 
 ### Moderation (Story 5)
 
@@ -352,6 +378,7 @@ was previously missing and needed its own definition (FR-048).
 | `MODE <nickname>` | C→S | `REGISTERED` session; `<nickname>` is the sender's own current nickname | Returns the sender's currently-set user modes | `221 RPL_UMODEIS`; `502 ERR_USERSDONTMATCH` if `<nickname>` isn't the sender's own |
 | `MODE <nickname> +o` | C→S | `REGISTERED` session; `<nickname>` is the sender's own current nickname | No-op if the sender already holds `operator`; otherwise rejected — `+o` can only be acquired via `OPER` (FR-034), never set directly (FR-044) | `481 ERR_NOPRIVILEGES` if the sender does not already hold `operator`; `502 ERR_USERSDONTMATCH` if `<nickname>` isn't the sender's own |
 | `MODE <nickname> -o` | C→S | `REGISTERED` session; `<nickname>` is the sender's own current nickname | Clears `operator` from the sender's user modes and clears `ClientSession.administratorPrivilege` in the same act (FR-044) — a full revocation, not just a display change. No-op if the sender doesn't currently hold it | `MODE` confirmation echoed to the sender; `502 ERR_USERSDONTMATCH` if `<nickname>` isn't the sender's own |
+| `MODE <nickname> +i` / `-i` | C→S | `REGISTERED` session; `<nickname>` is the sender's own current nickname | Sets or clears `invisible` on the sender's user modes, always, with no privilege check (FR-044/FR-061) — affects visibility in `WHO`'s search forms (see "User Queries" above) | `MODE` confirmation echoed to the sender; `502 ERR_USERSDONTMATCH` if `<nickname>` isn't the sender's own |
 
 **Contract notes**:
 - User `MODE` is self-only in this release: a `<nickname>` other than
@@ -360,17 +387,22 @@ was previously missing and needed its own definition (FR-048).
   (FR-058) — regardless of the sender's privilege level. There is no
   administrator override for looking up or changing a *different*
   session's user modes.
-- A mode letter other than `o` is `501 ERR_UMODEUNKNOWNFLAG` — the
+- A mode letter other than `o`/`i` is `501 ERR_UMODEUNKNOWNFLAG` — the
   user-mode counterpart to channel `MODE`'s `472 ERR_UNKNOWNMODE`.
 - `+o`/`-o` here is a narrower surface than it looks: the only way to
   transition from not holding `operator` to holding it is `OPER`
   (FR-034) succeeding, never `MODE` — `MODE <self> +o` can only ever
   confirm a state the sender already has (a no-op) or fail (`481`). Only
   `-o` can actually change state, and only in the revoking direction.
+  `+i`/`-i` has no such asymmetry — either direction always succeeds,
+  the same way an operator may always clear their own `+o`, just without
+  needing to already hold anything first.
 - `WHOIS`'s `313 RPL_WHOISOPERATOR` ("User Queries" above) is the
   *other* place `operator` status surfaces — visible to any client, not
   just the operator's own session, unlike `221 RPL_UMODEIS` which is
-  self-only per the self-only restriction above.
+  self-only per the self-only restriction above. `invisible` has no
+  `WHOIS` equivalent — it affects `WHO` only (FR-061), not `WHOIS`,
+  which remains ungated by it (research.md "WHO and invisibility").
 - `MODE` is one wire command with two independent targets and two
   independent handlers, not two commands that happen to share a name:
   the server determines which applies by inspecting whether `<target>`
@@ -473,7 +505,7 @@ any given server to implement it.
 | `INFO` | 3.4.10 | Recognized only |
 | `SERVLIST` | 3.5.1 | Recognized only — this server has no services-framework concept |
 | `SQUERY` | 3.5.2 | Recognized only |
-| `WHO` | 3.6.1 | Recognized only — no user-query feature in this release |
+| `WHO` | 3.6.1 | **Implemented** — see "User Queries" above (FR-061) |
 | `WHOIS` | 3.6.2 | **Implemented** — see "User Queries" above |
 | `WHOWAS` | 3.6.3 | Recognized only |
 | `KILL` | 3.7.1 | Recognized only — no forced-disconnect admin command in this release (an administrator can approximate this via a future `EXTENSION`-adjacent command, but none exists yet) |
@@ -610,21 +642,24 @@ disambiguates which catalog applies.
 | Flag | RFC 2812 §3.1.5/§4.1 | `id` | Status |
 |---|---|---|---|
 | `o` | 3.1.5 | `operator` | **Implemented** (`CORE`, FR-034/FR-044) — see "User Mode" above; set only via `OPER` (FR-034), self-clearable via `MODE -o`, never directly settable via `MODE +o` |
-| `i` | 3.1.5 | `invisible` | Reserved — no invisibility/`WHO`-hiding behavior in this release; this server's `WHOIS`/`NAMES`/`LIST` behavior doesn't distinguish invisible from visible users at all yet |
+| `i` | 3.1.5 | `invisible` | **Implemented** (`CORE`, `clientSettable: true`, FR-044/FR-061) — see "User Mode" and "User Queries" above; affects `WHO`'s exact-nickname and mask/no-argument forms only — `WHOIS`/`NAMES`/`LIST`/`WHO`'s channel-scoped form remain unaffected by it, deliberately |
 | `w` | 3.1.5 | `wallops` | Reserved — pairs with the wire-recognized-but-unimplemented `WALLOPS` command (Full Command Catalog above); no server-wide operator broadcast exists in this release |
 | `s` | 3.1.5 | `server-notices` | Reserved — no server-notice stream exists in this release; distinct from the `secret` *channel* mode, which also uses `s` in its own, independent namespace |
 | `O` | not in RFC 2812; classic IRC convention | `local-operator` | Reserved — this project has no "local vs. global operator" distinction (`administratorPrivilege` is a single, server-wide level, FR-033); cataloged for completeness since real clients may still send it |
 
 **Contract notes**:
-- Every flag above is `Status: Reserved` except `o`, the only one this
-  release implements or enforces.
+- Every flag above is `Status: Reserved` except `o` and `i`, the only
+  two this release implements or enforces.
 - Unlike the Full Channel Mode Catalog, no `kind`/`gates` columns appear
   here — `UserMode` doesn't have them (research.md "User mode:
-  `operator`" — Alternatives considered explains why not: nothing this
-  release's single flag needs to gate a second command the way
-  `ChannelMode` flags gate `SEND`/`JOIN`/`DISCOVER`).
-- A client sending `MODE <self> +i`/`+w`/`+s`/`+O` (or any other
-  Reserved flag) receives `501 ERR_UMODEUNKNOWNFLAG`, the same as any
+  `operator`" — Alternatives considered explains why not: neither of
+  this release's two flags needs to gate a second command the way
+  `ChannelMode` flags gate `SEND`/`JOIN`/`DISCOVER`; `UserMode` does have
+  a `clientSettable` field, unlike `ChannelMode`, capturing the one
+  per-flag distinction this release's mechanism actually needs — see
+  data-model.md `UserMode`).
+- A client sending `MODE <self> +w`/`+s`/`+O` (or any other Reserved
+  flag) receives `501 ERR_UMODEUNKNOWNFLAG`, the same as any
   genuinely unrecognized letter — "Reserved" is a documentation
   convention for this catalog, not a wire-visible distinction from
   "unrecognized."

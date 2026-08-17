@@ -30,7 +30,7 @@ guarded by this aggregate.
 | `ident` | string, 0..1 | Absent until this session's `USER` command is processed (FR-001), then derived from its username field (FR-030); not independently verified (see spec.md Assumptions re: RFC 1413). Its presence is also the source-of-truth signal for "this session has already processed a `USER` command" (FR-001's one-shot restriction, `UserCommandHandler` precondition) — no separate boolean field duplicates that fact. |
 | `realHostname` | string | The connection's actual hostname/IP; always populated regardless of cloaking; source of truth for FR-032 (`WHOHOST`) and FR-038's self-lookup/administrator `WHOIS` cases. Never sent to a non-administrator client looking up a *different* client — see `UserIdentity.presentedForm` for the *display* value that case uses instead. |
 | `administratorPrivilege` | boolean | Granted via FR-034's in-band credential command; authorizes FR-032 administrative commands. Independent of `channelMemberships`/operator status. Kept in lockstep with `userModes`'s `operator` entry below — never an independent third source of truth (research.md "User mode: `operator`"). |
-| `userModes` | set of `UserMode` (below) | FR-044. This release's only member is `operator` (`o`), added the instant `administratorPrivilege` becomes `true` and removed the instant it becomes `false` — never independently toggled; see `UserMode` below and Validation rules. |
+| `userModes` | set of `UserMode` (below) | FR-044. This release's two possible members: `operator` (`o`), added the instant `administratorPrivilege` becomes `true` and removed the instant it becomes `false` — never independently toggled; and `invisible` (`i`, FR-061), freely set/cleared by the session itself via `MODE`, with no paired field to stay in sync with. See `UserMode` below and Validation rules. |
 | `lastLivenessAt` | instant | Updated whenever this connection is known to be alive — traffic received from it, or a `PONG` answering the server's own `PING`. Read by this session's `LivenessMonitor` (research.md "Connection keep-alive") to decide when to probe and when to time out (FR-039). |
 
 **Validation rules**:
@@ -339,32 +339,42 @@ commands the way `ChannelMode` does).
 
 | Field | Type | Notes |
 |---|---|---|
-| `id` | string | Stable, human-readable identifier (e.g. `operator`), the same role `ChannelMode.id` plays. Unique among every currently-recognized `UserMode` — a separate namespace from `ChannelMode.id`; nothing prevents a `ChannelMode` and a `UserMode` sharing an `id` or, as `operator` does, a `flag`, since a `MODE` command's target (a channel name vs. a nickname) already disambiguates which catalog applies. |
-| `flag` | character | The wire-protocol mode letter (`o` for `operator`). Unique among every currently-recognized `UserMode` — again, independently of `ChannelMode`'s own `flag` uniqueness; `o` is legitimately reused across both catalogs, the way real IRC servers do. |
-| `definedBy` | `CORE` or an `Extension` id | `operator` is `CORE`-defined, always recognized. An extension-defined flag would only be recognized while that extension is `ENABLED`, mirroring `ChannelMode.definedBy`. |
+| `id` | string | Stable, human-readable identifier (e.g. `operator`, `invisible`), the same role `ChannelMode.id` plays. Unique among every currently-recognized `UserMode` — a separate namespace from `ChannelMode.id`; nothing prevents a `ChannelMode` and a `UserMode` sharing an `id` or, as `operator` does, a `flag`, since a `MODE` command's target (a channel name vs. a nickname) already disambiguates which catalog applies. |
+| `flag` | character | The wire-protocol mode letter (`o` for `operator`, `i` for `invisible`). Unique among every currently-recognized `UserMode` — again, independently of `ChannelMode`'s own `flag` uniqueness; `o` is legitimately reused across both catalogs, the way real IRC servers do. |
+| `definedBy` | `CORE` or an `Extension` id | Both `operator` and `invisible` are `CORE`-defined, always recognized. An extension-defined flag would only be recognized while that extension is `ENABLED`, mirroring `ChannelMode.definedBy`. |
+| `clientSettable` | boolean | Whether a client may set (`+`) this flag on itself directly via `MODE`, with no privilege check. `true` for `invisible` (FR-061) — any registered session may set/clear it freely. `false` for `operator` (FR-034) — only a successful `OPER` may transition it `false`→`true`; a client's own `MODE +o` is rejected regardless of this field's value for *clearing* (see Validation rules below — clearing is always allowed, independent of `clientSettable`). |
 
 **Validation rules**:
-- This release populates exactly one `UserMode`: `id: operator, flag: o,
-  definedBy: CORE`. Its membership in a `ClientSession.userModes` set is
-  never independently settable — it tracks `ClientSession.administratorPrivilege`
-  exactly, added the instant that field becomes `true` (FR-034's `OPER`
-  grant) and removed the instant it becomes `false` (including a
-  session's own `MODE <self> -o`, which MUST clear
-  `administratorPrivilege` too, not merely the flag — research.md "User
-  mode: `operator`").
+- This release populates exactly two `UserMode`s: `id: operator, flag:
+  o, definedBy: CORE, clientSettable: false` and `id: invisible, flag:
+  i, definedBy: CORE, clientSettable: true` (FR-061). `operator`'s
+  membership in a `ClientSession.userModes` set is never independently
+  settable — it tracks `ClientSession.administratorPrivilege` exactly,
+  added the instant that field becomes `true` (FR-034's `OPER` grant)
+  and removed the instant it becomes `false` (including a session's own
+  `MODE <self> -o`, which MUST clear `administratorPrivilege` too, not
+  merely the flag — research.md "User mode: `operator`"). `invisible`'s
+  membership has no such paired field to sync with — it is purely
+  `ClientSession.userModes` state, set and cleared directly by the
+  session's own `MODE <self> +i`/`-i`.
 - `MODE <nickname> ...` (query or set) targeting a nickname other than
   the sender's own current one MUST be rejected outright
   (`502 ERR_USERSDONTMATCH`) — this release has no mechanism for a
   session to query or change a *different* session's user modes, not
   even for an administrator (mirrors `SAMODE`'s self-only scope,
-  FR-058).
-- A non-privileged session's own `MODE <self> +o` MUST be rejected
-  (`481 ERR_NOPRIVILEGES`) — setting `operator` this way is equivalent to
-  self-granting administrator privilege, which only FR-034's credential
-  path may do. A session that already holds `administratorPrivilege`
-  issuing `MODE <self> +o` again, or a session that does not hold it
-  issuing `MODE <self> -o`, MUST be treated as a harmless no-op (already
-  in the requested state), not an error.
+  FR-058). This applies identically to both flags.
+- Setting (`+`) a `clientSettable: false` flag (`operator`) from a
+  session that does not already hold it MUST be rejected
+  (`481 ERR_NOPRIVILEGES`) — setting `operator` this way is equivalent
+  to self-granting administrator privilege, which only FR-034's
+  credential path may do. Setting (`+`) a `clientSettable: true` flag
+  (`invisible`) MUST always succeed, with no privilege check
+  (research.md "WHO and invisibility"). *Clearing* (`-`) any flag a
+  session already holds is always permitted regardless of
+  `clientSettable` — mirroring FR-046's channel-operator
+  self-revocation allowance. A session re-asserting a flag it already
+  holds, or clearing one it doesn't hold, MUST be treated as a harmless
+  no-op, not an error.
 - `MODE <self>` with no mode string is a query, answered with
   `221 RPL_UMODEIS` listing currently-set `userModes` — never an error,
   regardless of whether the set is empty.
@@ -373,6 +383,23 @@ commands the way `ChannelMode` does).
   `ChannelMode`'s `472 ERR_UNKNOWNMODE` rejection, a different numeral
   because they are different commands (`MODE <nickname>` vs.
   `MODE <channel>`).
+- `WHO`'s exact-nickname and mask/no-argument forms (FR-061) MUST
+  exclude a session whose `userModes` currently contains `invisible`
+  unless the requester's `channelMemberships` (`ClientSession`, above)
+  intersects that session's `channelMemberships` at all, or the
+  requester's `administratorPrivilege` is `true` — no new field is
+  needed for the "shares a channel" check, it's a set intersection
+  over data both sessions already have. `WHO`'s channel-scoped form
+  MUST NOT apply this exclusion at all — it uses exactly the membership
+  visibility `NAMES` (FR-041/FR-047) already defines, so the two
+  commands can never disagree about a channel's roster.
+- Independently of `invisible`, `WHO`'s mask and no-argument forms MUST
+  short-circuit to an empty result (bare `315`, no `352` lines) for a
+  non-administrator requester when `ServerConfiguration.whoMaskEnabled`
+  is `false` (FR-061) — checked before, and independent of, the
+  `invisible` exclusion above; a requester with `administratorPrivilege`
+  is exempt from this check entirely (checked first). The channel-name
+  and exact-nickname forms are unaffected by this setting.
 
 ## SupportedFeatures — *Value Object, Server Extensibility (computed, server-scoped)*
 
@@ -524,6 +551,7 @@ extension state changes.
 | `nicknameMaxLength` | positive integer, 0..1 | FR-056. Optional; defaults to `9` if unset. Enforced by `NickCommandHandler`'s grammar check (`432 ERR_ERRONEUSNICKNAME`) and advertised as `NICKLEN` (`SupportedFeatures`). MUST NOT exceed `400` (research.md "Configurable protocol length limits"). |
 | `channelNameMaxLength` | positive integer, 0..1 | FR-056. Optional; defaults to `50` if unset (includes the leading `#`). Enforced by `JoinCommandHandler`'s grammar check (`476 ERR_BADCHANMASK`) and advertised as `CHANNELLEN` (`SupportedFeatures`). MUST NOT exceed `400`. |
 | `topicMaxLength` | positive integer, 0..1 | FR-056. Optional; defaults to `390` if unset. Enforced by `TopicCommandHandler` on a `TOPIC`-set attempt (`417 ERR_INPUTTOOLONG`, not `421` — reuses FR-049's length-violation numeric) and advertised as `TOPICLEN` (`SupportedFeatures`). MUST NOT exceed `400`. |
+| `whoMaskEnabled` | boolean, 0..1 | FR-061. Optional; defaults to `true` if unset. Gates `WHO`'s wildcard-mask and no-argument forms for non-administrator sessions only — `false` makes both return a bare `315 RPL_ENDOFWHO` (no `352` lines), indistinguishable from a real zero-match search. An administrator's `WHO` is never affected, checked before this setting (research.md "WHO and invisibility"). The channel-name and exact-nickname forms are never affected by it either way. |
 
 **Validation rules**: An invalid configuration (unknown extension id,
 conflicting listener ports, malformed rate-limit values, or a

@@ -280,7 +280,8 @@ connected clients — all without touching the configuration file.
 A person using an IRC client looks up information about themselves or
 about another connected user — nickname, ident, presented hostname, and
 real name — the same kind of lookup virtually every IRC client performs
-routinely.
+routinely, whether by looking up one specific user, listing a channel's
+current members, or searching by a nickname pattern.
 
 **Why this priority**: This is standard, expected IRC functionality (like
 Story 2's capability negotiation, it rounds out what makes the server feel
@@ -312,6 +313,18 @@ their presented (not real) hostname.
 4. **Given** a client looks up a nickname that is not currently connected,
    **When** the lookup is processed, **Then** the server returns a clear
    "no such nickname" error rather than any user data.
+5. **Given** a client that shares no channel with another, currently
+   `invisible` client, **When** it searches for that client by nickname
+   mask or with no argument at all, **Then** the invisible client is
+   excluded from the results; **When** the same searching client is
+   instead an administrator, or joins a channel the invisible client is
+   also a member of and repeats the search, **Then** the invisible
+   client is included normally (FR-044, FR-061).
+6. **Given** a client requests the member list of a channel via the
+   search command, **When** that channel is public and the requester is
+   not a member, **Then** every current member is listed — including any
+   `invisible` member — exactly matching what a `NAMES` query on the
+   same channel would show (FR-041, FR-061).
 
 ---
 
@@ -725,35 +738,42 @@ their presented (not real) hostname.
   channel modes — a named, non-closed set of flags, each defined by
   either core or an optional server extension, so a future flag is an
   extension addition, not a core-codebase change. This release
-  core-defines exactly one user-mode flag: `operator` (`o`), which
-  MUST be set on a session the moment it is granted administrator
-  privilege (FR-034) and MUST be clearable by that session on itself at
-  any time, revoking administrator privilege as the same act — the flag
-  and the privilege are one fact, not two independently-tracked pieces
-  of state that could drift apart. Unlike channel modes, this release's
+  core-defines two user-mode flags: `operator` (`o`), which MUST be set
+  on a session the moment it is granted administrator privilege
+  (FR-034) and MUST be clearable by that session on itself at any time,
+  revoking administrator privilege as the same act — the flag and the
+  privilege are one fact, not two independently-tracked pieces of state
+  that could drift apart — and `invisible` (`i`, FR-061), which any
+  registered session MAY set or clear on itself at any time, freely,
+  with no privilege check at all. Unlike channel modes, this release's
   user-mode mechanism is deliberately narrower in three ways, since
-  nothing beyond `operator` motivates the fuller shape yet: (1) a
+  nothing beyond these two flags motivates the fuller shape yet: (1) a
   session MAY only ever query or change its *own* user modes, never
   another session's — an attempt to target a different nickname MUST be
   rejected with a clear, specific error, the same posture FR-058 already
-  takes for `SAMODE`; (2) `operator` MAY only be *set* by the
+  takes for `SAMODE`; (2) each flag declares whether a client may set it
+  directly — `invisible` may; `operator` MAY only be *set* by the
   FR-034 grant itself, never directly by a client's own mode command — a
-  non-privileged session attempting to set it directly MUST be rejected
-  with the same privilege error FR-033's other administrator-only
+  non-privileged session attempting to set `operator` directly MUST be
+  rejected with the same privilege error FR-033's other administrator-only
   actions use, since setting it is exactly equivalent to self-granting
-  administrator privilege; (3) an already-satisfied set (already an
-  operator, setting `+o` again) or an already-absent clear (not an
-  operator, clearing `-o`) MUST be treated as a harmless no-op, not an
-  error. A user-mode command naming a flag neither core nor any
-  currently-enabled extension defines MUST be rejected with a clear,
-  specific error distinct from FR-043's channel-mode equivalent — same
-  posture (reject an undefined flag explicitly), different numeral
-  (they are different commands). This mechanism's flag catalog is what
-  the Registration Completion Burst's user-mode letter list (FR-051)
-  reads from — no longer an always-empty list now that `operator`
-  exists. `RPL_ISUPPORT` (FR-055) advertises no equivalent token for
-  user modes, matching real IRC convention — only `004`'s letter list
-  covers them.
+  administrator privilege; *clearing* a flag a session already holds,
+  by contrast, is always permitted regardless of that flag's setting
+  rule, the same self-revocation-needs-no-permission posture FR-046
+  already grants channel operators over their own status; (3) an
+  already-satisfied set (e.g., already an operator, setting `+o` again)
+  or an already-absent clear (e.g., not an operator, clearing `-o`)
+  MUST be treated as a harmless no-op, not an error. A user-mode
+  command naming a flag neither core nor any currently-enabled
+  extension defines MUST be rejected with a clear, specific error
+  distinct from FR-043's channel-mode equivalent — same posture (reject
+  an undefined flag explicitly), different numeral (they are different
+  commands). This mechanism's flag catalog is what the Registration
+  Completion Burst's user-mode letter list (FR-051) reads from — no
+  longer an always-empty list now that `operator`/`invisible` exist.
+  `RPL_ISUPPORT` (FR-055) advertises no equivalent token for user
+  modes, matching real IRC convention — only `004`'s letter list covers
+  them.
 - **FR-045**: The server MUST allow a channel operator to grant a "voice"
   privilege to a specific member, and to later revoke it, the same way
   standard IRC does — restricted to operators, the same as every other
@@ -992,6 +1012,48 @@ their presented (not real) hostname.
   between. A session that has not yet completed registration MAY still
   send `QUIT` to cleanly close its connection — it simply has no channel
   memberships yet to clean up, not a case this command needs to reject.
+- **FR-061**: The server MUST support a user-search command (`WHO`)
+  allowing a registered client to query connected users in three forms:
+  by channel name, returning that channel's current members (subject to
+  the same private/secret visibility restriction FR-047 already applies
+  to `TOPIC`/`NAMES`/`LIST` — a non-member/non-administrator querying a
+  private or secret channel MUST get the identical "as if it doesn't
+  exist" treatment those commands already give); by an exact nickname,
+  returning that one user if currently connected; or by a wildcard mask
+  pattern (`*`/`?`), returning every currently-connected user whose
+  nickname matches — and, with no argument at all, every currently-
+  connected user. Each returned entry MUST use the same real-vs-presented
+  hostname resolution FR-038 already defines for `WHOIS`. The
+  channel-name form MUST NOT be affected by invisibility (FR-044) —
+  a channel's membership list is exactly what `NAMES` (FR-041) already
+  shows to anyone with visibility into that channel, and `WHO` on the
+  same channel MUST NOT show a different membership than `NAMES` does.
+  The exact-nickname and mask forms, by contrast, MUST exclude a user
+  currently holding the `invisible` user mode (FR-044) from the results
+  unless the requester shares at least one channel with them or holds
+  administrator privilege — administrators, and any requester who
+  shares a channel with an invisible user, MUST see that user normally,
+  the same transparency guarantee FR-032/FR-047 already establish for
+  other privacy-affecting cases elsewhere in this specification. This
+  exclusion exists specifically to keep invisibility meaningful against
+  enumeration/search (the mask and no-argument forms) and against being
+  found by a guessed or otherwise-learned nickname outside any shared
+  context (the exact-nickname form) — not to hide a user from people who
+  can already see them in a channel they share. The server MUST also
+  allow an administrator to configure whether the wildcard-mask and
+  no-argument forms are available to non-administrator clients at all,
+  independent of the `invisible`-based exclusion above; when configured
+  off, a non-administrator's wildcard-mask or no-argument `WHO` MUST
+  return an empty result (a bare "end of list" completion, indistinguishable
+  from a real search that happened to match nobody) rather than an error
+  — a client MUST NOT be able to tell "the server found nothing" apart
+  from "this form of search is disabled here." An administrator MUST be
+  able to use both forms normally regardless of this configuration —
+  this setting restricts non-administrator search capability, not
+  administrator visibility, which FR-032/FR-047's transparency guarantee
+  already covers. The channel-name and exact-nickname forms MUST NOT be
+  affected by this configuration at all; only the two forms capable of
+  broad enumeration are.
 
 ### Key Entities
 
@@ -1200,3 +1262,12 @@ their presented (not real) hostname.
   on the deferred account module; if Story 3 is later implemented, whether
   administrator privilege should additionally support account-based
   grants is a decision for that future work, not this release.
+- FR-061's non-administrator mask/no-argument `WHO` restriction defaults
+  to enabled (available to everyone) rather than disabled — the
+  `invisible` user mode (FR-044) is this release's primary, per-user
+  answer to enumeration concerns; this server-wide setting is an
+  additional, coarser lever for deployments that want to restrict
+  search capability entirely, not the default posture, matching this
+  project's general "permissive zero-configuration default, restrict
+  explicitly if needed" pattern (e.g., TLS offered but not mandatory,
+  FR-018).

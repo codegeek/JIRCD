@@ -216,6 +216,40 @@ schema in `contracts/server-configuration.md`.
      `WHOHOST alice` would return.
 4. Send `WHOIS nonexistent-nick`.
    - **Expected**: `401 ERR_NOSUCHNICK`, no user data returned.
+5. Have alice and bob both `JOIN #lobby` (from Story 1). As a third
+   client, carol (not a member), send `WHO #lobby`.
+   - **Expected**: one `352 RPL_WHOREPLY` for alice and one for bob, then
+     `315 RPL_ENDOFWHO` — the same membership `NAMES #lobby` would show
+     (FR-061).
+6. As bob, send `MODE bob +i`.
+   - **Expected**: `MODE` confirmation, no error — any client may set
+     `invisible` on itself freely (FR-044).
+7. As carol (not sharing a channel with bob — leave `#lobby` first if
+   carol joined it in Step 5), send `WHO bob` (exact nickname) and
+   `WHO b*` (mask).
+   - **Expected**: both return bare `315 RPL_ENDOFWHO` with no `352` —
+     bob is invisible and carol shares no channel with him (FR-061).
+8. As carol, `JOIN #lobby`, then repeat `WHO bob`.
+   - **Expected**: now returns a `352` match — sharing a channel with an
+     invisible user makes them visible to `WHO` again (FR-061).
+9. As a privileged session (per Story 6's `OPER`), send `WHO bob` without
+   joining `#lobby`.
+   - **Expected**: returns a `352` match — administrator privilege also
+     bypasses the `invisible` exclusion (FR-032/FR-047's pattern, reused
+     by FR-061).
+10. Edit the config file to add `whoMaskEnabled: false`, then `REHASH`
+    as the privileged session.
+    - **Expected**: `382 RPL_REHASHING`.
+11. As a non-privileged client that has *not* set `+i`, send
+    `WHO <its own nickname>*` (mask) and bare `WHO`.
+    - **Expected**: both now return bare `315 RPL_ENDOFWHO` with no
+      `352` lines, even though this client isn't invisible — the
+      restriction is server-wide, not tied to any individual's
+      `invisible` state (FR-061). The same client's exact-nickname
+      `WHO` and `WHO #lobby` still return normal results, unaffected.
+12. As the privileged session, repeat a mask `WHO`.
+    - **Expected**: still returns real matches — administrators are
+      exempt from `whoMaskEnabled` regardless of its value (FR-061).
 
 ## Out of Scope for This Validation Pass
 

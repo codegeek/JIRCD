@@ -51,13 +51,15 @@ during that window.
 | `311` | `RPL_WHOISUSER` | Successful `WHOIS` | FR-037, FR-038 |
 | `313` | `RPL_WHOISOPERATOR` | `WHOIS` for a target currently holding the `operator` user mode — visible to any querying client, not gated by administrator privilege or self-lookup (FR-037, FR-044) | FR-037, FR-044 |
 | `318` | `RPL_ENDOFWHOIS` | End of a `WHOIS` reply | FR-037 |
+| `352` | `RPL_WHOREPLY` | `WHO`, one per (visible) matching user (FR-061) | FR-061 |
+| `315` | `RPL_ENDOFWHO` | End of a `WHO` reply, including a zero-match one (FR-061) | FR-061 |
 | `221` | `RPL_UMODEIS` | `MODE <nickname>` self-query with no mode string (FR-044) | FR-044 |
 | `353` | `RPL_NAMREPLY` | `JOIN`, `NAMES` — nicknames prefixed `@` (operator) or `+` (voiced, non-operator) per irc-protocol-commands.md "Channel Operations" | FR-003, FR-041, FR-045, FR-046 |
 | `366` | `RPL_ENDOFNAMES` | `JOIN`, `NAMES` | FR-003, FR-041 |
 | `381` | `RPL_YOUREOPER` | Successful `OPER` | FR-034 |
 | `382` | `RPL_REHASHING` | Successful `REHASH` | FR-011, FR-012 (research.md "Configuration reload mechanism") |
 | `401` | `ERR_NOSUCHNICK` | `WHOIS` for a nickname that isn't connected | FR-037 |
-| `403` | `ERR_NOSUCHCHANNEL` | `TOPIC`/`NAMES` for a channel that doesn't exist, or that is private/secret and the requester is neither a member nor an administrator (identical response either way, FR-047) | FR-047 |
+| `403` | `ERR_NOSUCHCHANNEL` | `TOPIC`/`NAMES`/`WHO` (channel-name form) for a channel that doesn't exist, or that is private/secret and the requester is neither a member nor an administrator (identical response either way, FR-047) | FR-047, FR-061 |
 | `417` | `ERR_INPUTTOOLONG` | A line exceeding the 512-byte base limit or the 4096-byte `message-tags` allowance (FR-049), or a `TOPIC`-set attempt exceeding the configured `topicMaxLength` (FR-056) — not part of RFC 1459/2812 (there is no numeric defined in that gap, 416-420), but a widely-adopted de facto standard purpose-built for exactly this case, the same way this project already treats IRCv3's `CAP` numerics as belonging alongside the RFC set | FR-049, FR-056 |
 | `421` | `ERR_UNKNOWNCOMMAND` | Malformed/unrecognized command, a wire-protocol-recognized command with no handler in this release, or a human-readable-content parameter (`PRIVMSG`/`NOTICE` body, topic, realname, channel name) containing invalid UTF-8 (FR-054) | FR-015, FR-054 |
 | `431` | `ERR_NONICKNAMEGIVEN` | `NICK` with no argument | FR-001 (input validation) |
@@ -102,7 +104,7 @@ trigger them is "Recognized only" per irc-protocol-commands.md).
 | `206` | `RPL_TRACESERVER` | `254` | `RPL_LUSERCHANNELS` | `348` | `RPL_EXCEPTLIST` |
 | `207` | `RPL_TRACESERVICE` | `255` | `RPL_LUSERME` | `349` | `RPL_ENDOFEXCEPTLIST` |
 | `208` | `RPL_TRACENEWTYPE` | `256` | `RPL_ADMINME` | `351` | `RPL_VERSION` |
-| `209` | `RPL_TRACECLASS` | `257` | `RPL_ADMINLOC1` | `352` | `RPL_WHOREPLY` |
+| `209` | `RPL_TRACECLASS` | `257` | `RPL_ADMINLOC1` | `352` | `RPL_WHOREPLY` *(Used)* |
 | `210` | `RPL_TRACERECONNECT` | `258` | `RPL_ADMINLOC2` | `353` | `RPL_NAMREPLY` *(Used)* |
 | `261` | `RPL_TRACELOG` | `259` | `RPL_ADMINEMAIL` | `364` | `RPL_LINKS` |
 | `262` | `RPL_TRACEEND` | `265` | `RPL_LOCALUSERS` | `365` | `RPL_ENDOFLINKS` |
@@ -112,7 +114,7 @@ trigger them is "Recognized only" per irc-protocol-commands.md).
 | `305` | `RPL_UNAWAY` | `306` | `RPL_NOWAWAY` | `369` | `RPL_ENDOFWHOWAS` |
 | `311` | `RPL_WHOISUSER` *(Used)* | `312` | `RPL_WHOISSERVER` | `371` | `RPL_INFO` |
 | `313` | `RPL_WHOISOPERATOR` *(Used)* | `314` | `RPL_WHOWASUSER` | `372` | `RPL_MOTD` |
-| `315` | `RPL_ENDOFWHO` | `317` | `RPL_WHOISIDLE` | `374` | `RPL_ENDOFINFO` |
+| `315` | `RPL_ENDOFWHO` *(Used)* | `317` | `RPL_WHOISIDLE` | `374` | `RPL_ENDOFINFO` |
 | `318` | `RPL_ENDOFWHOIS` *(Used)* | `319` | `RPL_WHOISCHANNELS` | `375` | `RPL_MOTDSTART` |
 | `376` | `RPL_ENDOFMOTD` | `381` | `RPL_YOUREOPER` *(Used)* | `382` | `RPL_REHASHING` *(Used)* |
 | `383` | `RPL_YOURESERVICE` | `391` | `RPL_TIME` | `392` | `RPL_USERSSTART` |

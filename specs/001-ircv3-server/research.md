@@ -920,16 +920,23 @@ extended here to channel visibility.
 
 **Decision**: `UserMode` (data-model.md) is a new Value Object, deliberately
 a much smaller sibling of `ChannelMode` rather than a reuse of the same
-type — it has `id`, a wire `flag` character, and `definedBy` (`CORE` or a
-`ServerExtension`), but no `kind` and no `gates`: every user mode this
-release's design actually needs to represent is a plain boolean with
-exactly one, fixed rule for who may set it, so those two `ChannelMode`
-fields would be pure unused surface if copied over. Core contributes
-exactly one entry: `operator` (`o`). `ClientSession` gains a
-`userModes: Set<UserMode>` field, but `operator`'s membership in it is
-never independently toggled — it is set and cleared as a direct
-side-effect of `ClientSession.administratorPrivilege` changing, in both
-directions:
+type — it has `id`, a wire `flag` character, `definedBy` (`CORE` or a
+`ServerExtension`), and `clientSettable` (boolean), but no `kind` and no
+`gates`: every user mode this release's design actually needs to
+represent is a plain boolean, and none of them needs to gate a second
+command the way `ChannelMode` flags gate `SEND`/`JOIN`/`DISCOVER`, so
+those two `ChannelMode` fields would be pure unused surface if copied
+over. *(Revised from this decision's original shape, which asserted
+"exactly one, fixed rule for who may set it" and had no `clientSettable`
+field at all — true when `operator` was the only flag, no longer true
+now that `invisible` exists with the opposite rule; see "WHO and
+invisibility" below for why a field, not a second special case, is the
+right fix.)* Core contributes two entries: `operator` (`o`,
+`clientSettable: false`) and `invisible` (`i`, `clientSettable: true`,
+FR-061). `ClientSession` gains a `userModes: Set<UserMode>` field.
+`operator`'s membership in it is never independently toggled — it is
+set and cleared as a direct side-effect of
+`ClientSession.administratorPrivilege` changing, in both directions:
 - `OPER` succeeding (FR-034, `OperCommandHandler`) sets both
   `administratorPrivilege = true` and adds `operator` to `userModes` in
   the same operation.
@@ -947,22 +954,27 @@ directions:
 
 `MODE`'s user-targeted form is scoped narrowly: `MODE <nickname>` with no
 mode string is a query (`221 RPL_UMODEIS`); `MODE <nickname>
-<+/->o` is the only settable form this release defines. A target other
-than the sender's own current nickname is rejected outright
-(`502 ERR_USERSDONTMATCH`, RFC 2812's own numeral for exactly this) —
-this release has no "set another user's modes" capability, mirroring the
-same self-only scope decision FR-058's `SAMODE` already made, for the
-same reason (nothing has asked for a broader one, and a broader one is a
-strict widening that can be added later without redesigning this one).
-Setting `+o` directly (not via `OPER`) from a non-privileged session is
-rejected with `481 ERR_NOPRIVILEGES` — the same numeral every other
-administrator-only action already uses, since self-granting `+o` this
-way would be indistinguishable from self-granting administrator
-privilege, which is exactly what FR-034 exists to gate. An unrecognized
-flag letter is rejected with `501 ERR_UMODEUNKNOWNFLAG` — the RFC's own
-user-mode equivalent of `472 ERR_UNKNOWNMODE`, reused for the same
-reason `472` was: an exact-fit existing numeral, not a project-specific
-invention. `WHOIS` (FR-037) additionally surfaces `operator` status via
+<+/->o` and `MODE <nickname> <+/->i` are the only settable forms this
+release defines. A target other than the sender's own current nickname
+is rejected outright (`502 ERR_USERSDONTMATCH`, RFC 2812's own numeral
+for exactly this) — this release has no "set another user's modes"
+capability, mirroring the same self-only scope decision FR-058's
+`SAMODE` already made, for the same reason (nothing has asked for a
+broader one, and a broader one is a strict widening that can be added
+later without redesigning this one). Setting `+o` directly (not via
+`OPER`) from a non-privileged session is rejected with `481
+ERR_NOPRIVILEGES` — the same numeral every other administrator-only
+action already uses, since self-granting `+o` this way would be
+indistinguishable from self-granting administrator privilege, which is
+exactly what FR-034 exists to gate. Setting or clearing `+i`/`-i`, by
+contrast, always succeeds instantly for any registered session — `i` is
+`clientSettable: true`, so no privilege check applies at all, the same
+way an operator may always clear their own `+o` with no check. An
+unrecognized flag letter is rejected with `501 ERR_UMODEUNKNOWNFLAG` —
+the RFC's own user-mode equivalent of `472 ERR_UNKNOWNMODE`, reused for
+the same reason `472` was: an exact-fit existing numeral, not a
+project-specific invention. `WHOIS` (FR-037) additionally surfaces
+`operator` status via
 `313 RPL_WHOISOPERATOR` when the target holds it — visible to any
 querying client, not gated by administrator privilege or self-lookup,
 since operator status is public information on real IRC networks (unlike
@@ -1029,6 +1041,163 @@ else's permission to be granted it via `OPER` either.
   idempotent case (FR-049's line-length, FR-054's UTF-8, FR-056's topic
   length all reject rather than silently drop); `481` already exists and
   already means exactly this failure class.
+- *Add `invisible` as a second hardcoded special case in prose,
+  alongside `operator`'s, rather than a `clientSettable` field*:
+  rejected once a second flag with a genuinely different setting rule
+  existed — two special cases in handler logic is exactly the pattern
+  `ChannelMode.gates` was introduced specifically to avoid for channel
+  modes (research.md "Channel/user mode extensibility" — "Validating the
+  extensibility promise against a future `JOIN`-gating flag"), and
+  letting the identical mistake happen here, one flag later, would
+  undermine the same lesson already learned once. A `clientSettable`
+  field costs one boolean and means a third future flag needs zero new
+  branches in `UserModeCommandHandler`, only a new catalog entry.
+
+## WHO and invisibility (FR-044/FR-061)
+
+**Decision**: `WHO` (RFC 2812 §3.6.1) is implemented with three query
+forms, dispatched on its single argument's shape: a channel name (per
+`ChannelName`'s grammar, T018) lists that channel's current members; an
+argument containing `*`/`?` is treated as a wildcard mask matched
+against nicknames (case-insensitively, the same rfc1459 casemapping
+`NICK`/`JOIN` already use); anything else is treated as an exact
+nickname; no argument at all matches every currently-connected user.
+Real RFC 2812 `WHO` masks can also match host/server/real-name fields —
+this release's mask matching is deliberately narrower, nickname only
+(see Alternatives). Each match produces one `352 RPL_WHOREPLY`,
+reusing FR-038's real-vs-presented hostname resolution verbatim (the
+same computation `WHOIS`/`WHOHOST` already share) and `ChannelMode`'s
+existing `@`/`+` operator/voice prefix convention (FR-045/FR-046) when
+the query is channel-scoped, plus a `*` marker if the target holds the
+`operator` user mode (mirroring `313 RPL_WHOISOPERATOR`'s visibility —
+public information, not gated). No `H`/`G` (here/away) distinction is
+sent — this release has no `AWAY` — always `H`. The reply always closes
+with `315 RPL_ENDOFWHO`, even for zero matches; unlike `WHOIS`, a `WHO`
+with no matches is not an error (RFC convention — `WHO` is a search,
+and an empty search result isn't a failure the way a `WHOIS` of a named,
+expected-to-exist nickname is).
+
+`invisible` (`i`) gates the exact-nickname and mask/no-argument forms
+only: a result is excluded unless the requester shares at least one
+`Channel` membership with the target (a set-intersection check against
+both sessions' `channelMemberships`, no new field needed — data-model.md
+`ClientSession`) or the requester holds `administratorPrivilege`
+(FR-032/FR-047's established admin-transparency pattern, reused rather
+than inventing a new one). The channel-scoped form is exempt from this
+check entirely — it reuses `NAMES`'s exact membership-visibility rules
+(FR-041/FR-047's `DISCOVER` gate for private/secret, nothing about
+invisibility), so `WHO #chan` and `NAMES #chan` always agree on who's a
+member, never silently diverging.
+
+A new `ServerConfiguration.whoMaskEnabled` field (boolean, default
+`true`) gates the mask and no-argument forms a second, coarser way —
+independent of any individual target's `invisible` state. When `false`,
+a non-administrator's mask or no-argument `WHO` returns bare `315
+RPL_ENDOFWHO` with no `352` lines at all, indistinguishable from a real
+search that matched nobody — the same "don't let the requester
+distinguish policy from an empty result" posture `private`/`secret`
+channels already use for `DISCOVER` failures (FR-047). An
+administrator's mask/no-argument `WHO` is never affected by this
+setting, checked before it: `administratorPrivilege` short-circuits the
+whole gate, the same precedence order the `invisible` check above
+already uses. The channel-name and exact-nickname forms are untouched
+by this setting entirely, same as they're untouched by `invisible`.
+
+**Rationale**: The channel-scoped/search-scoped split matters because
+they answer genuinely different questions: "who is in this channel" (an
+already-public fact to anyone who can see the channel at all — `NAMES`
+already answers it with no invisibility filtering, so `WHO` disagreeing
+would be a confusing, undocumented inconsistency between two commands
+that otherwise look interchangeable) versus "find users matching this
+pattern across the whole server" (an enumeration/search capability,
+exactly what `invisible` exists to blunt — RFC 2812's own stated purpose
+for the flag). Gating the exact-nickname form the same as the mask form,
+rather than treating a known nickname as automatically exempt (the way
+`WHOIS` is never gated by invisibility at all), matters because
+nicknames are frequently guessable or learnable outside any shared
+context (a support channel's topic, a pasted log, a previous session) —
+if an exact-nickname `WHO` bypassed invisibility, any stranger who
+merely learned someone's nickname could route around the flag entirely,
+which would make `invisible` far weaker than its RFC-stated intent.
+`WHOIS` staying ungated is a deliberate, pre-existing asymmetry this
+change does not touch: `WHOIS` already requires knowing the exact
+nickname up front (no wildcard/no-argument form exists for it at all),
+so it doesn't carry the same enumeration risk `WHO`'s mask and
+no-argument forms do.
+
+`whoMaskEnabled` is a separate lever from `invisible` because they solve
+different problems for different actors: `invisible` is a per-user,
+self-service choice ("don't let strangers find *me* by searching"),
+while `whoMaskEnabled` is a deployment-wide, administrator choice ("this
+server doesn't offer broad user-search to ordinary clients at all,"
+independent of what any individual user has opted into) — real IRC
+networks commonly run with exactly this second kind of restriction
+(oper-only mask `WHO`) regardless of individual `+i` settings, since
+unrestricted enumeration is also a load/abuse concern, not only a
+privacy one. Defaulting `whoMaskEnabled` to `true` (available to
+everyone) rather than `false` keeps the zero-configuration case
+matching ordinary client expectations — most IRC clients assume
+wildcard `WHO` works — while giving administrators who want the
+stricter, oper-only posture a one-line way to get it; `invisible`
+remains the primary, always-on protection for individual users
+regardless of which way this setting is configured.
+
+**Alternatives considered**:
+- *Full RFC-shape mask matching against nickname, host, server, and real
+  name, all at once*: rejected as scope beyond what was asked — this
+  release has no server-name-federation concept to match against
+  anyway (FR-021), and matching against host/real-name introduces its
+  own privacy question (should a real-vs-presented-hostname distinction
+  apply to *matching*, not just *display*?) that nothing currently
+  requires answering. Nickname-only matching is the minimal shape that
+  satisfies "list of users based on mask pattern" and can be widened
+  later without redesigning the command.
+- *Gate the channel-scoped form by invisibility too, hiding invisible
+  members from a non-member's `WHO #channel`*: rejected — this would
+  make `WHO #channel` and `NAMES #channel` disagree on membership for
+  the exact same channel and requester, an inconsistency with no
+  precedent elsewhere in this specification (every other pair of
+  commands answering the same underlying question — e.g. `TOPIC`/`NAMES`/
+  `LIST`'s shared `DISCOVER` gate — agree by construction, not by
+  coincidence).
+- *Let an exact-nickname `WHO` bypass invisibility, matching `WHOIS`'s
+  ungated behavior*: rejected — see Rationale; this would make
+  `invisible` trivially defeatable by anyone who already has the
+  target's nickname from any source, undermining the flag's entire
+  purpose for the one query form (search/enumeration) it exists to
+  blunt.
+- *Error (e.g., `401 ERR_NOSUCHNICK`) when a `WHO` mask/nickname matches
+  nothing*: rejected — this is RFC 2812's own convention (a search
+  yielding zero results isn't a failure) and matches this project's
+  existing `LIST`/`NAMES`-on-empty-set precedent (an empty result set is
+  never itself an error condition).
+- *Fold mask-restriction into `invisible` itself (e.g., "if any user has
+  `+i` set, disable mask search server-wide") instead of a separate
+  config field*: rejected — this conflates two independent questions
+  (an individual's own privacy choice vs. an administrator's
+  server-wide search policy) into one signal, and would mean a single
+  user setting `+i` silently changes search behavior for every *other*
+  user too, a surprising, hard-to-reason-about side effect nothing
+  requires.
+- *Reject a disabled mask/no-argument `WHO` with a specific error
+  instead of a silent empty result*: rejected — this is the same
+  "don't let policy be distinguishable from an empty result" reasoning
+  `private`/`secret`'s `DISCOVER` gate already established (FR-047); an
+  explicit "search disabled" error would tell a prospective abuser
+  exactly what's blocking them (useful information to a bad actor,
+  worthless to a well-behaved client, which would get the same "no
+  matches" experience either way).
+- *Default `whoMaskEnabled` to `false` (restricted by default,
+  administrators opt in to opening it)*: considered and rejected in
+  favor of `true` — see Rationale; this project's zero-configuration
+  defaults consistently favor matching ordinary client/deployment
+  expectations (e.g., TLS offered but optional, FR-018; a server name
+  falls back to the host's own hostname rather than refusing to start,
+  FR-050) over defaulting to the more locked-down posture, reserving
+  "secure by default" treatment for cases with a clear, specific risk
+  this project has already named (credential hashing, FR-034; UTF-8
+  validation, FR-054) rather than applying it uniformly to every new
+  setting regardless of context.
 
 ## Deterministic testing under concurrency
 
