@@ -410,6 +410,15 @@ their presented (not real) hostname.
   already has an extension-contributed mode flag set when the
   administrator disables that extension — does the flag disappear, does
   it linger inertly, or something else?
+- *(Applies once a connection-admission extension exists — no extension
+  contributes one in this release, FR-066)* When an administrator adds a
+  network mask that matches a client already past registration, is that
+  client retroactively disconnected, or does the new block only apply to
+  future connection attempts? Also left open: whether a match is judged
+  against a client's real host/IP only, or also against a presented
+  value a cloaking extension (FR-031) might show — both are FR-066
+  mechanism-design questions for when this extension is actually built,
+  not this release's concern.
 - *(Resolved — see Clarifications, Session 2026-08-17)* What happens to a
   member's voice privilege (FR-045) when they leave a channel and
   rejoin?
@@ -1225,6 +1234,27 @@ their presented (not real) hostname.
   transfer it if its target later changes nickname before joining — an
   invitation is a nickname-keyed record, the same treatment FR-062's
   ban entries already give the operator identity that created them.
+- **FR-066**: The server MUST provide an extension point through which a
+  future optional extension can reject an incoming connection whose
+  host/IP matches an administrator-defined network mask — closing the
+  connection before it can register (FR-001), the same kind of
+  pre-registration block classic IRC networks call a "G-line," and
+  distinct from FR-062's per-channel ban-mask, which only restricts a
+  client's standing within one channel (`SEND`/`JOIN`) and never closes
+  the underlying connection. Implementing this rejection capability
+  itself — the actual mask matching, the blocked-mask list and its
+  storage, the administrative interface used to manage it, and any
+  expiration policy — is deferred and out of scope for the initial
+  release; no such extension ships, and no administrator-facing command
+  exists yet to manage one. What this release commits to now is
+  narrower: the connection-acceptance path (the point at which the
+  server decides whether a newly-connected client may proceed toward
+  registration) MUST be structured so that capability can be added
+  later purely as an optional extension (FR-011's existing
+  enable/disable/no-restart model), without requiring a redesign of
+  core connection-handling logic — the same "the mechanism exists now,
+  empty of any concrete rule, extended later without a core change"
+  posture FR-043 already establishes for channel-mode flags.
 
 ### Key Entities
 
@@ -1263,9 +1293,11 @@ their presented (not real) hostname.
   that a client may request; has an availability state (offered/not
   offered) determined by which extensions are currently enabled.
 - **Extension**: An independently enableable/disableable unit of optional
-  server functionality (e.g., an individual capability, a command set, or
-  a channel/user-mode flag an extension chooses to contribute, FR-043/
-  FR-044) configured by the administrator. Core protocol behavior —
+  server functionality (e.g., an individual capability, a command set, a
+  channel/user-mode flag an extension chooses to contribute, FR-043/
+  FR-044, or — once one is eventually built — a connection-admission
+  rule rejecting matching connections by network mask, FR-066)
+  configured by the administrator. Core protocol behavior —
   every currently-implemented channel-mode flag (FR-013, FR-045/FR-046,
   FR-047, FR-062, FR-065) and the capability-negotiation mechanism
   itself (FR-035) — is never modeled as an Extension; it is always
@@ -1430,6 +1462,25 @@ their presented (not real) hostname.
   standing constraints on that future effort itself — extension
   consistency across linked servers (FR-028) and a single authoritative
   account source network-wide (FR-029).
+- Administrator-defined connection-level network-mask blocking
+  ("G-line"-style, FR-066) is deferred past this release the same way
+  federation (FR-021) and Story 3's `AUTHENTICATE`/SASL are — but unlike
+  federation, this specification does not leave FR-066's extension
+  mechanism itself as an open planning-phase question: the existing
+  optional-extension model (FR-011) is already a structural fit — an
+  extension that rejects a connection is architecturally the same shape
+  as `cloak` (FR-031) supplying a hostname-display transform or `admin`
+  (FR-032) supplying administrative commands, just applied at connection
+  acceptance instead of message display or command dispatch. What
+  remains a genuine planning-phase decision, deferred to when this
+  extension is actually built, is everything about the rejection rule
+  itself: mask storage/persistence, the administrative interface used to
+  manage it, any expiration policy, and whether a match is judged by
+  real host/IP alone or also against a cloaked presented value (see
+  Edge Cases) — none of which this specification invents an answer for
+  now, the same "don't guess the shape without a concrete consumer"
+  discipline already applied to `VALUE`/`LIST`-kind channel modes beyond
+  `ban-mask` (see the channel-mode deferral bullet above).
 - The `ident` portion of FR-030's `nickname!ident@hostname` identity is
   derived from the username the client supplies at registration (FR-001),
   not from an RFC 1413 IDENT-protocol lookup against the client's host —

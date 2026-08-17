@@ -1930,6 +1930,53 @@ extension manages) — rejected because it makes administrator lookups
 extension's own bookkeeping being correct, which is a larger trust surface
 for what should be a purely presentational concern.
 
+## Connection-admission extension point (FR-066)
+
+**Decision**: Reuse the existing `extensionPoint` single-owner-claim
+mechanism (data-model.md `Extension`, this document's "Extension system")
+rather than inventing a new one. `jircd-core`'s connection-acceptance path
+consults a new named point, `connection-admission`, once per accepted
+connection, before that session may proceed toward registration (FR-001)
+— structurally the same call-out shape `hostname-display` already uses
+for `cloak` (see "Cloak extension boundary" above), just invoked earlier
+in a connection's life and answering "may this proceed?" instead of
+"what value should this show?" With no extension claiming
+`connection-admission` in this release (none exists yet — FR-066 defers
+the actual G-line capability), the call-out always permits the
+connection, the same default-permissive behavior `hostname-display`
+falls back to when `cloak` is disabled. No new `Extension` role, no new
+`ExtensionRegistry` mechanism, and no new Gradle subproject are needed to
+satisfy FR-066 this release — only the call-out site itself, inside
+`jircd-core/session`'s `PlaintextListener`/`TlsListener`/
+`ConnectionHandler` path (plan.md "Project Structure").
+
+**Rationale**: FR-066 only requires that adding a future network-mask
+connection block not force a redesign of core connection-handling logic.
+Since `ExtensionRegistry`'s ownership-claim mechanism is already generic
+over "what value or decision does the claiming extension supply," a
+connection-admission predicate (host/IP → allow/deny) is not a new kind
+of extension point conceptually, just a new point at a new call site —
+the same reasoning that let `admin` (FR-032) and `cloak` (FR-031) share
+one mechanism despite doing unrelated things. Building a second,
+G-line-specific extensibility mechanism now, for a capability that isn't
+being implemented this release, would be exactly the kind of speculative
+generality the constitution's Development Workflow section warns
+against; reusing the existing mechanism costs only the one call-out site.
+
+**Alternatives considered**: *A dedicated `ConnectionGate`/
+`ConnectionExtension` interface, separate from `Extension`* — rejected
+for the same reason a second `LIST`-kind storage mechanism was rejected
+for `bans` (FR-062, "Channel/user mode extensibility"): no second
+concrete consumer exists yet to justify a parallel mechanism, and
+`extensionPoint` already fits without modification. *Wiring the call-out
+only into `ConnectionHandler` (post-accept, pre-dispatch) rather than the
+raw listener accept path* — deferred as a planning-phase decision for
+when the `gline` extension is actually built (see spec.md Edge Cases:
+whether a match is judged before or after TLS negotiation, and against
+real vs. presented identity, are open questions this release doesn't
+need to answer, since nothing calls the extension point with real
+data yet).
+
 ## TLS approach
 
 **Decision** *(revised)*: `SSLServerSocket`/`SSLSocket` — the blocking TLS

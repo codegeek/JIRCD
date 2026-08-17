@@ -86,12 +86,16 @@ TLS MUST be offered but MUST NOT be mandatory (FR-018); the initial release
 MUST NOT require any other server instance or external service to run
 (FR-021); nickname/channel uniqueness, channel message delivery, and
 connection-loss handling MUST be implemented so they remain extensible to a
-future networked (federated) scope without redesign (FR-022).
+future networked (federated) scope without redesign (FR-022); the
+connection-acceptance path MUST call out to an as-yet-unclaimed extension
+point before a session proceeds toward registration, so a future
+connection-admission `ServerExtension` (e.g., a "G-line"-style network-mask
+block) can be added without changing that path's core logic (FR-066).
 
 **Scale/Scope**: ~1,000 concurrent client connections (SC-003); 6 user
 stories (Stories 1, 2, 4, 5, 6, 7 mandatory for this plan; Story 3 and
 everything that depends on it are deferred and excluded from this plan's
-scope); 64 functional requirements, 56 of which are in scope for this
+scope); 65 functional requirements, 57 of which are in scope for this
 release (FR-009, FR-010, FR-023, FR-024, FR-026, FR-027, FR-028, FR-029 are
 deferred).
 
@@ -270,6 +274,24 @@ are called out here only so a future plan for Story 3 or federation can
 slot them in (as their own bounded context(s), per the same modeling
 approach) without restructuring what's built now.
 
+FR-066's future connection-admission capability (a "G-line"-style
+network-mask block) is a narrower case than either of those: it doesn't
+need its own bounded context or module scaffolding today, or even when
+it's eventually built — it fits the existing Server Extensibility
+pattern directly, as a future `:jircd-server-extensions:gline` (or
+similarly named) subproject claiming its own `extensionPoint`, the same
+way `cloak` claims `hostname-display` today. The one piece of this
+plan's *current* scope FR-066 actually constrains is `jircd-core`'s
+connection-acceptance path (`PlaintextListener`/`TlsListener`/
+`ConnectionHandler`): it MUST already call out to that not-yet-claimed
+extension point on every accepted connection, always allowing the
+connection through today (nothing claims it), so that a future `gline`
+extension is a pure extension addition later, not a change to this
+path's shape — see "Domain Model & Bounded Contexts" below and
+research.md "Connection-admission extension point" for why the existing
+`extensionPoint` mechanism is already a structural fit, unlike
+federation's genuinely undecided extension shape.
+
 ## Domain Model & Bounded Contexts
 
 This section makes the domain analysis behind "Project Structure" explicit,
@@ -331,6 +353,24 @@ mirrors the `CapabilityExtension`/`ServerExtension` distinction directly)
 — keeps the same word in the administrator's vocabulary, the spec's
 vocabulary, and the code's vocabulary, which is the actual point of
 applying DDD here rather than renaming for its own sake.
+
+**FR-066's connection-admission extension point**: `ExtensionRegistry`'s
+existing `extensionPoint` single-owner-claim mechanism (data-model.md
+`Extension`) already generalizes to "an extension supplies a value/
+decision core code consumes at a specific point" — `cloak` claiming
+`hostname-display` is today's only example. FR-066 adds a second,
+currently-unclaimed named point, `connection-admission`, that `jircd-core`
+must consult once per accepted connection before that session may
+proceed toward registration (FR-001): with nothing claiming it (this
+release's actual state), the connection always proceeds, the same
+default-permissive behavior `hostname-display` has when `cloak` is
+disabled. No new bounded context and no new Gradle subproject are needed
+now — only the call-out point itself, inside Session & Messaging
+(`jircd-core/session`), the same package `ConnectionHandler` already
+lives in. A future `gline` `ServerExtension` claiming
+`connection-admission` would live under `jircd-server-extensions/`
+alongside `cloak`/`admin`, following the exact same pattern, whenever it
+is actually planned and built.
 
 ## Complexity Tracking
 

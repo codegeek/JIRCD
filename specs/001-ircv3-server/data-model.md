@@ -40,6 +40,13 @@ guarded by this aggregate.
   the same nickname even under concurrent registration attempts.
 - A session in `CONNECTING` state MUST reject channel/messaging commands
   that require `REGISTERED` (FR-001).
+- Before a session is even admitted to `CONNECTING` (i.e., before it can
+  send any command at all), the connection-acceptance path MUST consult
+  the `connection-admission` `extensionPoint` (FR-066, above) — a claiming
+  extension's decision to reject closes the connection immediately, with
+  no `ClientSession` ever created for it; with no extension currently
+  claiming that point (this release's actual state), every connection is
+  admitted, unconditionally.
 - `USER` MUST be rejected (`462 ERR_ALREADYREGISTRED`,
   contracts/irc-protocol-commands.md "Registration completion
   sequencing") if `ident` is already set — regardless of whether this
@@ -619,7 +626,7 @@ extension-provided behavior (FR-020).
 | `id` | string | Stable identifier used in Server Configuration (FR-012). This release's full set: `message-tags`, `server-time`, `echo-message` (`CapabilityExtension`), `cloak`, `admin` (`ServerExtension`) — one Gradle subproject each. |
 | `state` | enum: `ENABLED`, `DISABLED`, `FAILED` | `FAILED` = failed to start/errored at runtime without affecting other extensions (FR-020). |
 | `providedCapability` | `Capability` name, 0..1 | Present only for `CapabilityExtension`; absent for `ServerExtension` (e.g., cloak, admin). |
-| `extensionPoint` | string, 0..1 | Set only for extensions that supply a value core code consumes rather than just adding a capability (e.g., `cloak` claims `hostname-display`). `null` for extensions with no such claim. |
+| `extensionPoint` | string, 0..1 | Set only for extensions that supply a value or decision core code consumes rather than just adding a capability (e.g., `cloak` claims `hostname-display`). `null` for extensions with no such claim. `connection-admission` (FR-066, research.md "Connection-admission extension point") is a second recognized point — unclaimed by any extension in this release, since the future "G-line"-style connection-blocking extension it's reserved for isn't built yet; `jircd-core` still calls out to it on every accepted connection, always permitting the connection through while nothing claims it, the same default-permissive fallback `hostname-display` has when `cloak` is disabled. |
 | `contributedChannelModes` | set of `ChannelMode`, 0..* | `ServerExtension`-only (research.md "Channel/user mode extensibility"). Empty for every extension in this release — no extension contributes a mode yet — but the field exists now so a future one (e.g., a registered-channel flag) is an extension change, not a `Channel`/`ChannelMode` data-model change. Unlike `extensionPoint`, this isn't exclusive single-owner claim: multiple extensions may each contribute different flags, only conflicting if two claim the same `flag` character (`ChannelMode` validation rules). |
 | `contributedUserModes` | set of `UserMode`, 0..* | `ServerExtension`-only, the `UserMode` counterpart to `contributedChannelModes` (FR-044, research.md "User mode: `operator`"). Empty for every extension in this release — only `CORE`'s `operator` flag exists — but the field exists now so a future extension-contributed user-mode flag is an extension change, not a `ClientSession`/`UserMode` data-model change. Same non-exclusive-claim behavior as `contributedChannelModes`; conflicts only if two claim the same `flag` character within the `UserMode` namespace (independent of `ChannelMode`'s namespace, `UserMode` validation rules). |
 
