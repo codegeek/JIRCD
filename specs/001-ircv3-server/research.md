@@ -279,9 +279,11 @@ practice across the deployed IRC ecosystem. This release's token set
 `CASEMAPPING=rfc1459` (FR-052), `CHANTYPES=#` (FR-048), `NICKLEN`,
 `CHANNELLEN`, `TOPICLEN` (FR-056 — 9/50/390 by default, but each
 administrator-configurable via `ServerConfiguration`, not fixed
-constants the way `CASEMAPPING`/`CHANTYPES` are), `MODES=1`,
-`CHANMODES=,,,mnps` (from the `ChannelMode` catalog, FR-043),
-`PREFIX=(ov)@+` (FR-045/FR-046), and `UTF8ONLY` (FR-054) — every token
+constants the way `CASEMAPPING`/`CHANTYPES` are), `MODES` (FR-064 — `6`
+by default, likewise configurable), `CHANMODES=b,,,mnps` (from the
+`ChannelMode` catalog, FR-043; `b` populates the list-type `A` group,
+FR-062), `PREFIX=(ov)@+` (FR-045/FR-046), and `UTF8ONLY` (FR-054) —
+every token
 restates a value this project already committed to elsewhere, none is a
 new, independently-configurable setting *this decision itself*
 introduces (FR-056 introduces the configurability; this decision only
@@ -868,6 +870,111 @@ grant an `administratorPrivilege` bypass (FR-047) — mirroring FR-032's
 existing hostname-cloaking transparency guarantee for administrators,
 extended here to channel visibility.
 
+**`LIST`-kind flags in practice: ban-mask (FR-062)**: `ban-mask` (`b`)
+is this release's first — and, for now, only — `LIST`-kind `ChannelMode`
+actually implemented, giving the deferral above ("`Channel`'s shape
+would need to grow... deliberately left undesigned until a real
+consumer exists") its real consumer. `Channel` gains a
+`bans: List<BanEntry>` field (data-model.md), where `BanEntry` is a new
+Value Object (`mask`, `setBy` — the setting operator's nickname,
+`setAt` — an instant), the accountability metadata real IRC clients
+already expect a ban-list UI to show and which costs nothing extra to
+capture (`Channel.operators`/the acting session's nickname and the
+current time are both already available at the point `MODE +b` is
+processed). `ban-mask` doesn't occupy a slot in `activeModes` the way
+`BOOLEAN`-kind flags do — like `MEMBER`-kind flags before it, its state
+lives in its own dedicated field, `Channel.activeModes` staying
+exactly what its own decision above says it is: a `Set` that can only
+represent "which `BOOLEAN` flags are on," nothing more.
+
+`gates: {SEND, JOIN}`, not `{JOIN}` alone: RFC 1459/2811's original text
+only describes `+b` blocking future joins, but the modern IRC client
+protocol specification — the maintained, current documentation those
+frozen RFCs no longer track — defines `ban-mask` as controlling masks
+"banned from joining **or** speaking in the channel." Gating both
+actions is therefore the spec-aligned reading of `ban-mask`, not an
+invented, stricter-than-standard extension of it (see Alternatives
+considered, below, for the one place this project *does* stop short of
+a fuller reading: no automatic `KICK` on ban).
+
+This is also the first `gates: {SEND, JOIN}` flag whose gate check
+isn't "is this flag present in `activeModes`" at all (the check every
+`BOOLEAN`-kind flag above uses) — `ban-mask` is always "present" in the
+sense that its restriction is always live, and what varies per-check is
+whether the *specific acting session* currently matches any entry in
+the list. This is exactly the generalization the `gates` mechanism was
+designed to allow (research.md above: "The pass/fail decision for each
+flag is provided by whoever defines it... not hardcoded per-flag-id
+inside the command handler") — `MessageCommandHandler`'s and
+`JoinCommandHandler`'s `SEND`/`JOIN`-gate check points now iterate every
+currently-recognized flag whose `gates` includes their action (not just
+those in `activeModes`), asking each one's own kind-appropriate
+predicate: a `BOOLEAN` flag's predicate is "am I currently in
+`activeModes`, and if so does the actor satisfy my exemption (e.g.
+operator/voice)"; `ban-mask`'s predicate is "does the actor's current
+`UserIdentity.presentedForm` **or** `ClientSession.realHostname`-based
+identity match any entry in `Channel.bans`" — a different question,
+answered by the same mechanism, exactly validating
+FR-043's extensibility promise a second time (research.md above already
+validated it once, hypothetically, for a future `JOIN`-gating
+invite-only extension; `ban-mask` is the first flag to actually need
+both `SEND` and `JOIN` gating from *core* itself, not a hypothetical
+extension).
+
+Mask matching checks **both** of a target's identities independently —
+its presented form (`UserIdentity.presentedForm`, FR-030/FR-031) and its
+real, unobfuscated form (`nickname!ident@ClientSession.realHostname`,
+FR-032) — and the ban applies if *either* matches. This was originally
+designed as presented-form-only, on the reasoning that matching against
+the real value would grant every channel operator FR-032's
+administrator-only real-hostname visibility through the back door; that
+reasoning conflated two different things (*seeing* a real value vs. a
+*pattern happening to match* one) and was corrected once the actual
+requirement was stated explicitly: an operator specifying, say,
+`*!*@*.example.com` never learns any member's real hostname/IP from
+doing so — they only ever observe the same binary outcome any ban
+produces (a match mutes/blocks; a non-match doesn't), exactly as
+opaque as before. What dual-matching actually buys is ban-evasion
+resistance: without it, a client could dodge a mask like
+`*!*@1.2.3.4` — a pattern chosen specifically because it targets the
+member's real, persistent network identity — simply by having a
+cloaking extension present a different value, even though nothing
+about who they are changed. Checking the real identity too closes that
+gap, and does so uniformly for *every* ban any operator adds, not as a
+privilege-gated special case (see "Administrator channel override"
+above for the `SABAN` design this replaced). A partial mask (e.g., bare
+`alice`, or `*@example.net`) has its missing
+`user`/`host` segment(s) filled with `*` before being stored — standard
+IRC ban-mask convention, and simple to apply once at `+b` time rather
+than at every match. `*`/`?` wildcard matching against the full
+`nick!user@host` string is case-insensitive (ASCII fold, consistent
+with this project's other casemapping decisions, research.md "IRC
+casemapping" — applied uniformly across the whole string rather than
+mixing casemapping rules per segment, which would be more "correct" per
+RFC nuance but adds complexity nothing here needs).
+
+Numerals: `367 RPL_BANLIST` (one per active mask) then `368
+RPL_ENDOFBANLIST` for the query form — both exact-fit, previously
+unused RFC 2811 numerals; `474 ERR_BANNEDFROMCHAN` for a banned
+client's rejected `JOIN` — RFC 2812's own numeral for exactly this
+case; `478 ERR_BANLISTFULL` when an addition would exceed the fixed
+per-channel cap (100 entries — a fixed constant, not administrator-
+configurable, chosen as a conventional real-world ircd default; this
+project's config-value additions so far — FR-056, FR-061 — have all
+been genuinely administrator-tunable operational limits with a real
+reason to vary by deployment, whereas a ban-list cap exists purely as a
+resource-growth safety bound with no comparable reason an administrator
+would need to retune it per deployment). Muting an already-matched, already-present
+member reuses `404 ERR_CANNOTSENDTOCHAN` — which also, as a side effect
+of implementing this, retroactively fixes a real, pre-existing gap:
+`moderated`-mode's own `SEND`-gate rejection had never actually been
+pinned to a specific numeral anywhere in this project (only
+`members-only`'s `442 ERR_NOTONCHANNEL` was), an oversight this project
+has repeatedly caught and fixed for other flags/commands; `404` is the
+correct, exact-fit numeral for both cases now — "you're in the channel,
+but a channel restriction still blocks you from sending" — distinct
+from `442`'s "you're not even a member" case.
+
 **Alternatives considered**:
 - *Keep the enum, widen it each time a new mode is needed*: rejected —
   exactly the "requires core codebase changes" outcome the Extension
@@ -915,6 +1022,171 @@ extended here to channel visibility.
   else agrees on; treating them identically (full hiding, like `secret`
   unambiguously requires) is simpler, defensible, and easy to relax later
   if a concrete reason to distinguish them ever shows up.
+- *Automatically `KICK` an already-present member the moment a matching
+  ban is added, instead of only muting them*: rejected — this project
+  implements exactly what was specified: mute in place, not remove.
+  Muting is not an invented deviation from RFC 1459/2811's original,
+  narrower `JOIN`-only wording — the modern IRC client protocol
+  specification (the maintained, current successor documentation those
+  RFCs no longer track) defines `+b` explicitly as controlling masks
+  "banned from joining **or** speaking in the channel," so gating both
+  `JOIN` and `SEND` is the *correct*, spec-aligned reading of `ban-mask`,
+  not a stricter-than-standard choice. Auto-`KICK`-on-ban, by contrast,
+  genuinely would be this project inventing behavior no version of the
+  ban-mode specification (classic or modern) describes — rejected for
+  that reason, not because muting-in-place was already "one deviation
+  too many": an operator who wants both effects can still issue `KICK`
+  explicitly (FR-013), a single extra command, not a missing capability.
+- *Match ban masks against a member's real hostname/IP **instead of**
+  (not in addition to) their presented identity*: rejected — an
+  operator without a cloak-evasion concern would have no way to write a
+  mask that reliably matches what they actually see in every member's
+  message hostmask; matching *both* independently (adopted, see
+  Rationale above) covers the ordinary case (presented identity) and the
+  evasion-resistant case (real identity) without forcing a choice
+  between them.
+- *Match only the real hostname/IP was initially rejected as a privacy
+  escalation, on the reasoning that it would let a channel operator use
+  `MODE +b` as a backdoor around FR-032's administrator-only
+  real-hostname visibility*: this reasoning was itself the error,
+  corrected once stated precisely — see Rationale above. Matching
+  against a value never *exposes* that value to whoever wrote the
+  pattern; it only reports whether the pattern currently matches
+  something, the same non-disclosing signal every ban already produces.
+  No visibility escalation actually occurs.
+- *No per-channel ban-list cap at all*: rejected — this is an
+  operator-populated, unbounded-by-default list on a long-lived
+  `Channel` aggregate, exactly the kind of unbounded growth this
+  project bounds everywhere else it appears (FR-016's rate limits,
+  FR-049's line length, FR-056's name/topic lengths); `478
+  ERR_BANLISTFULL` already exists, reserved, specifically for this
+  case — using it costs nothing and closes a real, if minor, resource
+  concern.
+
+## MODE command grouping (FR-064)
+
+**Verifying the formal basis first**: RFC 2812 §3.2.3 defines `MODE`'s
+own grammar as `MODE <channel> *( ( "-" / "+" ) *<modes> *<modeparam>
+)` — a repeatable sequence of signed groups, each carrying zero or more
+mode letters (`*<modes>`) and the parameters (`*<modeparam>`) they
+consume. This is not a convention layered on top of the base protocol;
+it's the base grammar itself, and every deployed IRC server implements
+it — this project's earlier single-flag-per-command design was a real,
+unnecessary narrowing of what `MODE` already allows, not a faithful
+minimal implementation of it. What the base RFC does *not* define is
+how many parameter-consuming changes a server must accept in one
+command; that cap is server-defined and conventionally advertised via
+the `MODES` token in `RPL_ISUPPORT` (data-model.md `SupportedFeatures`,
+already implemented, FR-055) — the same de facto/"modern IRC"-standard
+category `CASEMAPPING`/`CHANMODES`/`PREFIX` already belong to, not
+something this project is introducing a new category for.
+
+**Decision**: `jircd-protocol` gains `ModeStringParser`, a pure,
+stateless utility (no `jircd-core` dependency, reusable by a future
+client library the same way `NickMask`/`Hostmask`/`ChannelName` already
+are) that parses a modestring like `+bbb-o` into an ordered list of
+`(sign, flag)` pairs — `[(+,b), (+,b), (+,b), (-,o)]` — with no
+knowledge of what any flag *means* or whether it needs a parameter;
+that's `ChannelMode.kind`'s job, which `jircd-core`'s `ModeCommandHandler`
+already has access to. `ModeCommandHandler` then walks that list
+left-to-right, and for each `(sign, flag)`:
+1. Resolves `flag` against the currently-recognized `ChannelMode`
+   catalog (core plus enabled extensions) — an unknown flag stops
+   processing here (see step 4) and replies `472 ERR_UNKNOWNMODE`.
+2. If the flag's `kind` needs a parameter (`MEMBER` or `LIST` — `VALUE`
+   would too, but none exist yet) and the count of parameter-consuming
+   flags already applied in this command has reached
+   `ServerConfiguration.maxModesPerCommand`, processing stops here —
+   silently, no reply beyond whatever `MODE` confirmation already
+   covers what was applied before this point (see Rationale for why no
+   error).
+3. If the flag needs a parameter and none remains in the command's
+   parameter list, processing stops here and replies `461
+   ERR_NEEDMOREPARAMS`.
+4. Otherwise the flag is applied (consuming the next parameter if it
+   needed one) using the exact same per-`kind` logic already defined
+   for a single flag (FR-045/FR-046's `MEMBER` grant/revoke, FR-062's
+   `LIST` add/remove/normalize, `BOOLEAN`'s `activeModes`
+   toggle/mutual-exclusion) — nothing about *how* an individual flag is
+   applied changes, only that many can now be attempted in one command.
+   An applied flag's own failure (e.g. `MEMBER`-kind naming a
+   non-member, `441 ERR_USERNOTINCHANNEL`) also stops processing at
+   that point, the same as steps 1/3.
+
+Processing is deliberately **not atomic**: a flag applied before a
+later stop condition stays applied — `MODE #chan +ov nick1 baduser`
+still grants `nick1` operator status even though `baduser` (not a
+member) halts processing at `+v` with `441`. This matches real deployed
+ircd behavior and needs no new rollback mechanism this project would
+otherwise have to invent. The `MODE` confirmation echoed to channel
+members (FR-013/FR-045/FR-046/FR-062's existing echo requirement)
+reflects only the flags actually applied — never the originally
+requested set when the two differ, so the echo itself is always an
+accurate record of what happened, doubling as the client's only
+feedback for the silent cap-exceeded case (step 2).
+
+`ServerConfiguration.maxModesPerCommand` (positive integer, default `6`,
+capped at `20`) feeds `SupportedFeatures`'s `MODES` token the same way
+`nicknameMaxLength`/`channelNameMaxLength`/`topicMaxLength` already feed
+`NICKLEN`/`CHANNELLEN`/`TOPICLEN` (data-model.md `SupportedFeatures`) —
+recomputed on `ServerConfiguration` load/reload, not per-command, and
+`MODES` stops being a `Fixed: 1` constant.
+
+**Rationale**: The single-flag-per-command design was a real,
+unrequested restriction — nothing about it was a deliberate scope
+decision documented anywhere in this project, it was simply the
+shape the first `MODE` implementation happened to take, and the
+formal grammar it was quietly narrowing was never checked against
+until now. `6` as the default matches a long-standing, still-common
+convention among deployed ircds (values in the 3-6 range are typical;
+this project picks the more generous, still-conventional end).
+Stopping (not skipping-and-continuing) at the first unresolvable flag
+in a group keeps the processing model simple — one linear pass with
+one clear stopping point — rather than a "collect all failures, apply
+all successes out of order" model that would need its own
+harder-to-reason-about semantics for no clear benefit. Not emitting an
+error for the cap-exceeded case specifically (as opposed to the
+missing-param/unknown-flag/invalid-target cases, which all keep their
+existing numerals) is the one deliberate departure from this project's
+otherwise-consistent "reject explicitly" posture (FR-049, FR-054,
+FR-056, FR-062's ban-list cap all reject with a specific numeral) —
+justified narrowly because, unlike those cases, no RFC numeral or
+later widely-adopted addition actually covers this one, and this
+project's own discipline (research.md "Wire-protocol command & numeric
+completeness") is to reuse an exact-fit existing numeral or a genuine
+de facto standard, never invent one from nothing. The truncated,
+accurate `MODE` echo is a real, non-silent feedback channel, just not
+a numbered error reply.
+
+**Alternatives considered**:
+- *Reject the entire command if its parameter-consuming flag count
+  exceeds the configured cap, rather than applying up to the limit*:
+  rejected — this would need a numeral this project has no honest
+  candidate for (see Rationale), and would also discard flags that
+  legitimately fit within the limit purely because later ones in the
+  same command didn't — a well-behaved client that undershoots the
+  limit slightly would still lose everything. Applying what fits is
+  strictly more useful and no harder to specify correctly.
+- *Invent a project-specific numeral for the cap-exceeded case*:
+  rejected — directly against this project's established numeral
+  discipline; a numeral that only this server sends would defeat the
+  interoperability point of reusing RFC/de-facto-standard numerals in
+  the first place.
+- *Make the entire multi-flag command atomic (all flags succeed or none
+  do, with rollback on any failure)*: rejected — no real deployed ircd
+  works this way, it would require a transaction/rollback mechanism
+  this project has no other use for, and it would make a single typo'd
+  flag in an otherwise-valid batch discard every other change in it,
+  worse UX than partial application for no compensating benefit.
+- *Count `BOOLEAN`-kind flags toward the `maxModesPerCommand` cap too,
+  not just parameter-consuming ones*: rejected — the `MODES`
+  `RPL_ISUPPORT` token's own conventional meaning ("maximum number of
+  channel modes **with parameters**...") is specifically about
+  parameter-consuming changes; `BOOLEAN` flags never consume a
+  parameter, and FR-049's line-length limit already bounds how many
+  flags of any kind a single command can physically carry, so a second,
+  narrower cap on non-parameterized flags would just be an invented
+  restriction nothing requires.
 
 ## User mode: `operator` (FR-034/FR-044)
 
@@ -1356,7 +1628,7 @@ reason to weaken it for this one credential type.
 
 ## Administrator channel override: SAJOIN/SAMODE (FR-057/FR-058)
 
-**Decision**: Two new administrator-only in-band commands, following the
+**Decision**: Two administrator-only in-band commands, following the
 same "restricted to administrator privilege" pattern as `OPER`/`EXTENSION`/
 `WHOHOST`/`REHASH` (contracts/irc-protocol-commands.md "Administration"):
 
@@ -1378,7 +1650,13 @@ same "restricted to administrator privilege" pattern as `OPER`/`EXTENSION`/
 Both are wired into `jircd-server-extensions/admin`, the same module
 `OPER`/`EXTENSION`/`WHOHOST`/`REHASH` already live in — this is squarely
 "administrator/operational concerns specific to running this service,"
-plan.md's own description of that bounded context, not a new one.
+plan.md's own description of that bounded context, not a new one. A
+third command in this family, `SABAN` (an administrator-only ban
+override), was proposed and then withdrawn — see "`LIST`-kind flags in
+practice: ban-mask" below for what replaced it: the actual requirement
+turned out not to be administrator-specific at all, so it needed no new
+command, just a change to how any operator's existing ban already
+matches.
 
 **Rationale**: Real deployed IRC networks distinguish an administrator's
 *ordinary* client commands from their *privileged override* commands
@@ -1410,11 +1688,32 @@ guidance would flag.
   mode change against any target, admin-privilege-gated* (the fuller
   real-world `SAMODE` shape on some networks): rejected as scope beyond
   what was asked — this release has no request for administrators to
-  override bans, revoke *other* members' operator status, or set
-  arbitrary channel modes on someone else's behalf; a self-op-only
-  command is the minimal shape that satisfies the actual requirement,
-  and a fuller `SAMODE` can be added later without redesigning this one
-  (it would be a strict widening, not a breaking change).
+  revoke *other* members' operator status or set arbitrary channel
+  modes on someone else's behalf; a self-op-only command is the minimal
+  shape that satisfies the actual requirement, and a fuller `SAMODE`
+  can be added later without redesigning this one (it would be a
+  strict widening, not a breaking change).
+- *A dedicated `SABAN` command, administrator-only, for adding/removing
+  bans on channels the administrator doesn't operate*: proposed, built,
+  and then withdrawn on reconsideration. `SABAN` was never a real,
+  established IRCd convention the way `SAJOIN`/`SAMODE` are — unlike
+  those two, there was no existing real-world name being reused, only
+  one invented by extending a naming pattern, which is exactly the kind
+  of "invented because it looked consistent" reasoning this project's
+  numeral/command-naming discipline exists to avoid (research.md "Wire-
+  protocol command & numeric completeness" — reuse an existing
+  convention or don't invent one at all). More importantly, framing this
+  as an *administrator* capability was itself a category error: the
+  actual need was for ban masks to reliably match a client's real
+  network identity, not administrator-only *access* to the ban list —
+  any channel operator already has full ban-list access (FR-062), and
+  the operator adding a host/IP-shaped mask doesn't need to see the
+  real value to specify a pattern that happens to match it. Once the
+  fix was correctly identified as a matching-logic change rather than a
+  privilege-gating one, a separate admin-only command became not just
+  unnecessary but actively wrong — it would have kept the real
+  capability (dual-matching bans) hidden behind a privilege level it
+  never needed to depend on.
 - *Have `SAJOIN` also auto-grant operator status*, folding FR-057 and
   FR-058 into one command: rejected — the two are independently useful
   (an administrator investigating a channel via `SAJOIN` may deliberately

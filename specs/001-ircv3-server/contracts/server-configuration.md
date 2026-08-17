@@ -33,6 +33,13 @@ whoMaskEnabled: true     # optional (FR-061) — defaults to true. Gates WHO's w
                           # from a real zero-match search. Administrators are always exempt.
                           # WHO's channel-name and exact-nickname forms are unaffected either way.
 
+maxModesPerCommand: 6    # optional (FR-064) — defaults to 6, a long-standing convention among
+                          # deployed IRC servers. Positive integer, at most 20. The maximum
+                          # number of parameter-consuming channel-mode flags (MEMBER/LIST-kind)
+                          # a single MODE command applies; flags beyond it are silently not
+                          # applied (no error — the MODE echo reflects only what was applied).
+                          # Advertised as MODES.
+
 listeners:
   - port: 6667
     tls: false
@@ -94,6 +101,15 @@ administratorCredentials:
   in-progress `WHO` isn't retroactively affected, there being nothing
   in-progress for a single-line command/reply exchange to retroactively
   affect.
+- **`maxModesPerCommand` IS part of the "refuse to start" validation
+  set** (FR-064): if set, MUST be a positive integer not exceeding
+  `20`; a non-positive value, a non-integer value, or a value above
+  `20` is rejected the same way a malformed listener value is. Omitting
+  it is valid — the conventional default (`6`) is used instead. A
+  successful reload changes the value `SupportedFeatures` advertises
+  (`MODES`) and the value newly processed `MODE` commands are checked
+  against immediately, the same immediacy `nicknameMaxLength`/etc.
+  already have (FR-011).
 - **`serverName` IS part of the "refuse to start" validation set** if
   explicitly set: it MUST contain at least one `.` (FR-050, research.md
   "Server identity" — nicknames, FR-002's grammar, never can, so this is

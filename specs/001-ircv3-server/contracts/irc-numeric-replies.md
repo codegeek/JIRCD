@@ -67,6 +67,11 @@ during that window.
 | `433` | `ERR_NICKNAMEINUSE` | `NICK` naming an already-claimed nickname | FR-002 |
 | `441` | `ERR_USERNOTINCHANNEL` | `MODE +v`/`-v` or `+o`/`-o <nickname>` naming a nickname that isn't a current member of the target channel | FR-045, FR-046 |
 | `442` | `ERR_NOTONCHANNEL` | `PART`/`KICK`/`MODE` on a channel the sender hasn't joined; `PRIVMSG`/`NOTICE` to a channel with `members-only` active that the sender hasn't joined (FR-004, FR-013/FR-043 — membership is not required for `PRIVMSG`/`NOTICE` otherwise); `SAMODE` from an administrator who isn't currently a member of the target channel (FR-058) | FR-003, FR-004, FR-014, FR-058 |
+| `404` | `ERR_CANNOTSENDTOCHAN` | `PRIVMSG`/`NOTICE` to a channel blocked by `moderated` (sender not an operator/voiced) or by an active `ban-mask` match (sender muted in place, not removed) — distinct from `442`'s "not even a member" case (FR-013, FR-062) | FR-013, FR-062 |
+| `474` | `ERR_BANNEDFROMCHAN` | `JOIN` naming a channel the joiner's presented identity matches an active `ban-mask` entry on — `SAJOIN` bypasses this check entirely (FR-057, FR-062) | FR-062 |
+| `367` | `RPL_BANLIST` | `MODE <channel> b`, one per currently-active ban mask (FR-062) | FR-062 |
+| `368` | `RPL_ENDOFBANLIST` | End of a `MODE <channel> b` reply, including a zero-ban one (FR-062) | FR-062 |
+| `478` | `ERR_BANLISTFULL` | `MODE <channel> +b <mask>` when the channel already has 100 active bans (FR-062) | FR-062 |
 | `476` | `ERR_BADCHANMASK` | `JOIN` or `SAJOIN` naming a channel that violates the Channel Name Grammar (irc-protocol-commands.md "Channel Operations") — `SAJOIN` bypasses `JOIN`-gating flags, not the name grammar itself (FR-057) | FR-048, FR-057 |
 | `461` | `ERR_NEEDMOREPARAMS` | Command missing required parameters | FR-015 |
 | `462` | `ERR_ALREADYREGISTRED` | `USER` from a session that has already processed one, before or after reaching `REGISTERED` (FR-001) | FR-001 |
@@ -109,8 +114,8 @@ trigger them is "Recognized only" per irc-protocol-commands.md).
 | `261` | `RPL_TRACELOG` | `259` | `RPL_ADMINEMAIL` | `364` | `RPL_LINKS` |
 | `262` | `RPL_TRACEEND` | `265` | `RPL_LOCALUSERS` | `365` | `RPL_ENDOFLINKS` |
 | `263` | `RPL_TRYAGAIN` | `266` | `RPL_GLOBALUSERS` | `366` | `RPL_ENDOFNAMES` *(Used)* |
-| `300` | `RPL_NONE` | `301` | `RPL_AWAY` | `367` | `RPL_BANLIST` |
-| `302` | `RPL_USERHOST` | `303` | `RPL_ISON` | `368` | `RPL_ENDOFBANLIST` |
+| `300` | `RPL_NONE` | `301` | `RPL_AWAY` | `367` | `RPL_BANLIST` *(Used)* |
+| `302` | `RPL_USERHOST` | `303` | `RPL_ISON` | `368` | `RPL_ENDOFBANLIST` *(Used)* |
 | `305` | `RPL_UNAWAY` | `306` | `RPL_NOWAWAY` | `369` | `RPL_ENDOFWHOWAS` |
 | `311` | `RPL_WHOISUSER` *(Used)* | `312` | `RPL_WHOISSERVER` | `371` | `RPL_INFO` |
 | `313` | `RPL_WHOISOPERATOR` *(Used)* | `314` | `RPL_WHOWASUSER` | `372` | `RPL_MOTD` |
@@ -125,7 +130,7 @@ trigger them is "Recognized only" per irc-protocol-commands.md).
 | Numeric | Name | Numeric | Name | Numeric | Name |
 |---|---|---|---|---|---|
 | `401` | `ERR_NOSUCHNICK` *(Used)* | `402` | `ERR_NOSUCHSERVER` | `403` | `ERR_NOSUCHCHANNEL` *(Used)* |
-| `404` | `ERR_CANNOTSENDTOCHAN` | `405` | `ERR_TOOMANYCHANNELS` | `406` | `ERR_WASNOSUCHNICK` |
+| `404` | `ERR_CANNOTSENDTOCHAN` *(Used)* | `405` | `ERR_TOOMANYCHANNELS` | `406` | `ERR_WASNOSUCHNICK` |
 | `407` | `ERR_TOOMANYTARGETS` | `408` | `ERR_NOSUCHSERVICE` | `409` | `ERR_NOORIGIN` |
 | `411` | `ERR_NORECIPIENT` | `412` | `ERR_NOTEXTTOSEND` | `413` | `ERR_NOTOPLEVEL` |
 | `414` | `ERR_WILDTOPLEVEL` | `415` | `ERR_BADMASK` | `417` | `ERR_INPUTTOOLONG` *(Used)* |
@@ -138,8 +143,8 @@ trigger them is "Recognized only" per irc-protocol-commands.md).
 | `461` | `ERR_NEEDMOREPARAMS` *(Used)* | `462` | `ERR_ALREADYREGISTRED` *(Used)* | `463` | `ERR_NOPERMFORHOST` |
 | `464` | `ERR_PASSWDMISMATCH` *(Used)* | `465` | `ERR_YOUREBANNEDCREEP` | `466` | `ERR_YOUWILLBEBANNED` |
 | `467` | `ERR_KEYSET` | `471` | `ERR_CHANNELISFULL` | `472` | `ERR_UNKNOWNMODE` *(Used)* |
-| `473` | `ERR_INVITEONLYCHAN` | `474` | `ERR_BANNEDFROMCHAN` | `475` | `ERR_BADCHANNELKEY` |
-| `476` | `ERR_BADCHANMASK` *(Used)* | `477` | `ERR_NOCHANMODES` | `478` | `ERR_BANLISTFULL` |
+| `473` | `ERR_INVITEONLYCHAN` | `474` | `ERR_BANNEDFROMCHAN` *(Used)* | `475` | `ERR_BADCHANNELKEY` |
+| `476` | `ERR_BADCHANMASK` *(Used)* | `477` | `ERR_NOCHANMODES` | `478` | `ERR_BANLISTFULL` *(Used)* |
 | `481` | `ERR_NOPRIVILEGES` *(Used)* | `482` | `ERR_CHANOPRIVSNEEDED` *(Used)* | `483` | `ERR_CANTKILLSERVER` |
 | `484` | `ERR_RESTRICTED` | `485` | `ERR_UNIQOPPRIVSNEEDED` | `491` | `ERR_NOOPERHOST` |
 | `501` | `ERR_UMODEUNKNOWNFLAG` *(Used)* | `502` | `ERR_USERSDONTMATCH` *(Used)* | | |

@@ -127,6 +127,58 @@ schema in `contracts/server-configuration.md`.
 3. Confirm `KICK` is available immediately after server startup with no
    configuration step required — validates FR-036 (core, always present,
    not something an administrator needs to enable).
+4. As the operator of `#lobby` (bob still a member from Story 1), send
+   `MODE #lobby +b bob`.
+   - **Expected**: `MODE` confirmation echoed to members. Then, as bob,
+     send `PRIVMSG #lobby :can you hear me`.
+   - **Expected**: `404 ERR_CANNOTSENDTOCHAN`; bob is still listed in
+     `NAMES #lobby` — muted, not removed (FR-062).
+5. Have bob `PART #lobby`, then attempt `JOIN #lobby` again while the
+   ban is still active.
+   - **Expected**: `474 ERR_BANNEDFROMCHAN`.
+6. As the operator, send `MODE #lobby b`.
+   - **Expected**: `367 RPL_BANLIST #lobby bob!*@* <operator-nick>
+     <timestamp>` (the partial mask `bob` was normalized to `bob!*@*`),
+     then `368 RPL_ENDOFBANLIST`.
+7. As the operator, send `MODE #lobby -b bob!*@*`, then have bob `JOIN
+   #lobby` again.
+   - **Expected**: the join succeeds normally — validates FR-062's
+     removal path and Story 5 Acceptance Scenario 7 end-to-end.
+8. Enable the `cloak` extension (Story 4's config-file/`SIGHUP` path or
+   Story 6's `EXTENSION` command), have bob rejoin `#lobby`, and note
+   the cloaked hostname other members now see in his message prefixes.
+   As the operator, send `MODE #lobby +b *!*@<bob's real hostname>` (the
+   *real*, uncloaked value — obtain it via `WHOHOST bob` as a
+   privileged session, per Story 6 Step 4, or from server logs).
+   - **Expected**: bob is muted (`404 ERR_CANNOTSENDTOCHAN` on his next
+     `PRIVMSG`) even though the mask does not match his cloaked,
+     publicly-visible hostmask — validates FR-062's dual-matching and
+     Story 5 Acceptance Scenario 8: a ban targeting a real hostname/IP
+     is not evadable via cloaking.
+9. With alice and carol both members of `#lobby` (neither an operator),
+   as the operator send `MODE #lobby +ov alice carol` in one command.
+   - **Expected**: a single `MODE` echo reflecting both changes; `NAMES
+     #lobby` shows alice with the operator prefix and carol with the
+     voice prefix — validates FR-064's multi-flag, multi-parameter
+     grouping (RFC 2812 §3.2.3).
+   Next, send `MODE #lobby +ov-b dave eve bob!*@*` where `dave` is not
+   currently a member.
+   - **Expected**: `eve` still receives voice (the first flag/parameter
+     pair processed) and `bob!*@*` is still removed from the ban list
+     (the third pair), but the command stops at `441
+     ERR_USERNOTINCHANNEL` for `dave` — confirms processing is left to
+     right and non-atomic: an earlier flag's success is not undone by a
+     later flag's failure (FR-064).
+10. Lower the configured cap — set `maxModesPerCommand: 2` in the config
+    file and trigger a reload (Story 4's `SIGHUP`/`REHASH` path) — then
+    as the operator send `MODE #lobby +bbb mask1!*@* mask2!*@*
+    mask3!*@*` (three ban masks in one command).
+    - **Expected**: `MODE #lobby b` afterward shows only `mask1` and
+      `mask2` on the list; there is no error reply naming the third —
+      the `MODE` echo simply reflects the two that were applied,
+      validating FR-064's silent-truncation behavior at the configured
+      `maxModesPerCommand` limit and the `MODES` token in `005
+      RPL_ISUPPORT` advertising `2`.
 
 ## Story 6 — Administer the Server via IRC Commands
 
@@ -176,11 +228,11 @@ schema in `contracts/server-configuration.md`.
      as every other command in this section (FR-057).
 8. As the privileged session, send `SAJOIN #staff-only`.
    - **Expected**: joins the channel via the normal `JOIN`/`353`/`366`
-     replies — validates FR-057. (No currently-defined channel mode
-     actually gates `JOIN` this release, so this step only confirms the
-     command works identically to `JOIN` when there's nothing to bypass
-     yet — the bypass itself has no observable effect until a future
-     JOIN-gating extension exists.)
+     replies — validates FR-057. (`ban-mask` is this release's one
+     `JOIN`-gating flag, FR-062; if `#staff-only` has no active ban
+     matching this session, this step still just confirms `SAJOIN`
+     behaves like `JOIN` — see Steps 11-13 below for `SAJOIN` actually
+     bypassing an active ban.)
 9. Have two ordinary clients join `#busy`, letting the first become its
    operator (FR-013); have the privileged session `JOIN #busy` normally
    (now a member, but not an operator), then send `SAMODE #busy +o`.
@@ -195,6 +247,19 @@ schema in `contracts/server-configuration.md`.
     channel it has not joined.
     - **Expected**: `442 ERR_NOTONCHANNEL` — `SAMODE` does not implicitly
       join; `SAJOIN` (Step 8) is the separate step for that.
+11. As `#busy`'s own operator (from Step 9, not the privileged session),
+    send `MODE #busy +b *!*@*.example.com`.
+    - **Expected**: `MODE` confirmation echoed to `#busy`'s members —
+      an ordinary channel operator can already ban by host/IP pattern,
+      no administrator involvement needed (FR-062).
+12. Have a third client whose hostname matches `*.example.com` attempt
+    `JOIN #busy`.
+    - **Expected**: `474 ERR_BANNEDFROMCHAN`.
+13. As the privileged session (still not a member of `#busy`), send
+    `SAJOIN #busy`.
+    - **Expected**: succeeds despite the same ban that just blocked
+      Step 12's client — `SAJOIN` bypasses `ban-mask`'s `JOIN` gate the
+      same as it would bypass any other `JOIN`-gating flag (FR-057).
 
 ## Story 7 — Look Up Information About a User
 

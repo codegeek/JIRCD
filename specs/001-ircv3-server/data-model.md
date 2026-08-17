@@ -151,6 +151,7 @@ enforced at channel-creation time, not left to callers).
 | `voiced` | set of `ClientSession` references (subset of `members`, independent of `operators`) | Who, in addition to `operators`, may send while `MODERATED` is active (FR-045). Granted/revoked only by an operator via `MODE +v`/`-v <nickname>` (FR-013, FR-045) — unlike `operators`, nothing grants this at JOIN time; a channel MAY have any number of voiced members, none of whom need to be operators. |
 | `activeModes` | set of `ChannelMode` (below) | Which recognized *channel-scoped* mode flags are currently set on this channel. `MEMBERS_ONLY` and `MODERATED` (FR-013) are the only two flags any code defines in this release, but the type is an open set, not a closed enum — see `ChannelMode` below for why (FR-043, research.md "Channel/user mode extensibility"). The two flags are independent: a channel MAY have neither, either, or both set at once (matches standard IRC's per-flag `MODE` semantics — this replaces an earlier, incorrect single-mutually-exclusive-state design). Set/cleared only by an operator via `MODE` (FR-013, FR-014). `voice` (FR-045) is a *`MEMBER`-scoped* `ChannelMode` (see `ChannelMode.kind` below) — its state lives in `voiced` above, not here, the same way `operator` status lives in `operators` rather than `activeModes`. |
 | `topic` | string, 0..1 | Absent (no topic set) by default. Visible to any client via `TOPIC` regardless of membership (FR-041's discovery framing applies here too); settable only by an `operator` (FR-040). Distinct from `activeModes` — viewing/setting the topic is not a "who may send a `PRIVMSG`" concern. MUST be valid UTF-8 (FR-054) — a `TOPIC`-set attempt with an invalid byte sequence is rejected as malformed (FR-015), leaving the previous topic (or absence of one) unchanged. MUST NOT exceed `ServerConfiguration.topicMaxLength` (FR-056, default `390`) — a `TOPIC`-set attempt exceeding it is rejected with `417 ERR_INPUTTOOLONG`, leaving the previous topic unchanged, the same "reject, don't apply partially" treatment as the UTF-8 check. |
+| `bans` | list of `BanEntry` (below) | The `ban-mask` `ChannelMode`'s `LIST`-kind state (FR-062) — unlike `activeModes`, this is its own dedicated field, the same "each `kind` gets appropriate storage" pattern `operators`/`voiced` already established for `MEMBER`-kind flags (research.md "Channel/user mode extensibility" — "`LIST`-kind flags in practice"). Set/cleared only by an operator via `MODE +b`/`-b <mask>` (FR-013, FR-062). Bounded to a fixed maximum of 100 entries — `478 ERR_BANLISTFULL` rejects an addition beyond it. |
 
 **Validation rules**:
 - `name` uniqueness is enforced the same way as nickname uniqueness (single
@@ -191,41 +192,55 @@ enforced at channel-creation time, not left to callers).
 - Any command whose semantics a `ChannelMode` can gate (currently `SEND`
   — `PRIVMSG`/`NOTICE` — `JOIN`, and `DISCOVER` — `TOPIC`-viewing,
   `NAMES`, `LIST` — `ChannelMode.gates` above) MUST reject the attempt
-  unless it passes every currently-active flag in
-  `activeModes` whose `gates` includes that command's action, checked
-  independently per flag, not as alternative states of one variable
-  (FR-013, FR-043's "not limited to... sending" clause). The pass/fail
-  decision for each flag is provided by whoever defines it — `CORE`'s own
-  logic for its built-in flags, or a future extension's own logic for one
-  it contributes — not hardcoded per-flag-id inside the command handler;
-  this is what makes it possible to add a new gating flag (FR-043's
-  example: a future invite-only extension gating `JOIN`) without editing
-  the handler for whichever command it gates.
+  unless it passes every currently-recognized flag whose `gates`
+  includes that command's action, checked independently per flag, not
+  as alternative states of one variable (FR-013, FR-043's "not limited
+  to... sending" clause). "Currently-recognized" is deliberately not
+  "currently in `activeModes`" — that was this check's original,
+  narrower framing, correct only as long as every gating flag was
+  `BOOLEAN`-kind; `ban-mask` (`LIST`-kind, FR-062) is always "in effect"
+  in the sense that its restriction is always live, so the check point
+  asks *every* recognized gating flag for its own kind-appropriate
+  pass/fail predicate rather than first filtering by `activeModes`
+  membership (research.md "Channel/user mode extensibility" — "`LIST`-kind
+  flags in practice"). The pass/fail decision for each flag is provided
+  by whoever defines it — `CORE`'s own logic for its built-in flags, or
+  a future extension's own logic for one it contributes — not hardcoded
+  per-flag-id inside the command handler; this is what makes it possible
+  to add a new gating flag without editing the handler for whichever
+  command it gates.
   - For `SEND` today: `MEMBERS_ONLY` requires the sender to be in
     `members`; `MODERATED` requires the sender to be in `operators` **or**
     `voiced` (FR-045) — matching classic IRC's `+m` semantics in full, not
     just the operator half of it; `operators`-or-`voiced` *is* the one
     condition for `MODERATED`, not two independent ones — an operator
-    does not additionally need to be voiced.
-  - For `JOIN` today: no currently-defined `ChannelMode` gates `{JOIN}`
-    (see the Full Channel Mode Catalog's `Gates` column,
-    contracts/irc-protocol-commands.md), so this check point exists but
-    is always a no-op in this release — every `JOIN` succeeds subject
-    only to FR-003's channel-creation/join behavior. `SAJOIN` (FR-057)
-    is wired to this exact check point and skips it unconditionally,
-    regardless of whether it's currently a no-op — so a future
-    `JOIN`-gating flag is bypassed by `SAJOIN` automatically, with no
-    change to `SAJOIN` itself required when that flag is added. A future
-    `JOIN`-gating flag (extension-contributed or core) does not require
-    changing `JoinCommandHandler`'s shape to add, only registering a
-    `ChannelMode` with `gates: {JOIN}` and the logic behind it — which,
-    per FR-043, is exactly the promise this mechanism has to keep. Such
-    an extension typically would not need `Channel` itself to grow a new
-    field either: its pass/fail logic can consult the extension's own
-    bookkeeping (e.g., an invited-nicknames record, keyed by channel and
-    session) rather than a field this data model would need to define —
-    `Channel.activeModes` only needs to know the flag is active, not how
-    its own consult-logic is implemented.
+    does not additionally need to be voiced. `ban-mask`'s predicate
+    (FR-062): neither the sender's current `UserIdentity.presentedForm`
+    **nor** `nickname!ident@ClientSession.realHostname` MUST match any
+    entry in `bans` — checking both independently, not just the
+    presented form, so a mask targeting a member's real, underlying
+    identity still applies even if a cloaking extension currently
+    presents something else (research.md "Channel/user mode
+    extensibility" — "`LIST`-kind flags in practice"). A match on either
+    mutes (rejects the send) without removing the sender from `members`;
+    `442`/`404` are otherwise unrelated failure classes checked
+    independently (a banned member who also isn't a member at all,
+    impossible by construction since a ban-mute only applies to someone
+    already in `members`, is not a case that can arise).
+  - For `JOIN` today: `ban-mask`'s predicate (FR-062) is the first
+    currently-defined `ChannelMode` gating `{JOIN}` — the same dual
+    check as `SEND`'s: neither the joiner's `UserIdentity.presentedForm`
+    nor their real-hostname-based identity may match any entry in
+    `bans`, rejected with `474 ERR_BANNEDFROMCHAN` if either does. This
+    is exactly the future case this check point's design was validated
+    against before any real flag needed it (research.md "Validating the
+    extensibility promise against a future `JOIN`-gating flag") — no
+    change to `JoinCommandHandler`'s shape was required to add it, only
+    a `ChannelMode` catalog entry and `bans`-matching logic, confirming
+    the promise held. `SAJOIN` (FR-057) is wired to this exact check
+    point and skips it unconditionally, including `ban-mask`'s — an
+    administrator's force-join bypasses a ban the same way it would
+    bypass any other future `JOIN`-gating flag.
   - For `DISCOVER` today: `private` and `secret` (FR-047) both require
     the requester to either be in `members` or hold
     `administratorPrivilege`; unlike `SEND`/`JOIN`'s gate failures, a
@@ -253,6 +268,29 @@ enforced at channel-creation time, not left to callers).
   member's part/leave. An operator MAY revoke their own status; the
   server MUST NOT reject a self-revocation or treat it specially, even if
   it leaves the channel with zero operators (see above).
+- `bans` MUST only be modified by a session in `operators` via `MODE
+  +b`/`-b <mask>` (FR-013, FR-062); a non-operator's attempt MUST be
+  rejected with the same `482 ERR_CHANOPRIVSNEEDED` error every other
+  operator-gated action uses. A supplied mask missing its `user` and/or
+  `host` segment MUST have the missing segment(s) filled with `*` before
+  being stored or matched against `bans` (standard IRC ban-mask
+  convention) — `MODE +b alice` is stored as `alice!*@*`. Adding a mask
+  already present (after this normalization), or removing one not
+  present, MUST be treated as a harmless no-op, not an error — the same
+  idempotent-change posture every other mode change in this
+  specification uses. `bans` is NOT reset on membership changes the way
+  `operators`/`voiced` are — a ban persists whether or not its target,
+  or anyone else, is currently a member; it IS reset when the channel
+  itself is recreated from zero members (above), the same as every other
+  per-channel state. Adding a mask that would bring `bans` above 100
+  entries MUST be rejected with `478 ERR_BANLISTFULL`, the previous
+  contents left untouched — removing a mask is never subject to this
+  limit. Each `BanEntry`'s `setBy`/`setAt` (below) MUST reflect the
+  acting operator's nickname and the current time at the moment `+b`
+  succeeds — never retroactively altered by anything other than a
+  further `MODE +b` re-adding the same (already-normalized) mask after
+  it was removed, which creates a fresh `BanEntry`, not a
+  mutation of a prior one.
 - `MEMBERS_ONLY` and `MODERATED` are defined by core and MUST always be
   recognized, unconditionally, never gated by `Extension` state (FR-036).
   A `ServerExtension` MAY additionally contribute further `ChannelMode`
@@ -269,6 +307,24 @@ enforced at channel-creation time, not left to callers).
 **Lifecycle**: created on first JOIN → members join/part → removed when
 membership reaches zero (no persistence across recreation, per above).
 
+## BanEntry — *Value Object, Session & Messaging*
+
+One active ban-mask entry on a `Channel` (FR-062) — the element type of
+`Channel.bans`. Immutable once created; removing a ban deletes the
+entry rather than mutating it, and re-adding the same mask later
+creates a fresh one with a new `setBy`/`setAt`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `mask` | string | A `nick!user@host` pattern, `*`/`?` wildcards permitted in any segment — always fully normalized (no segment omitted) before storage; a partial mask supplied to `MODE +b` has its missing segment(s) filled with `*` first (`Channel` validation rules, above). Matched against a client's `UserIdentity.presentedForm` (FR-030/FR-031) **and**, independently, against `nickname!ident@ClientSession.realHostname` (FR-032) — a match on either applies the ban, case-insensitively (research.md "Channel/user mode extensibility" — "`LIST`-kind flags in practice"). |
+| `setBy` | string | The nickname of the operator whose `MODE +b` created this entry, captured at that moment — not updated if that operator later changes their own nickname. |
+| `setAt` | instant | When this entry was created. |
+
+**Validation rules**: `mask` uniqueness within one `Channel.bans` is
+enforced after normalization — two `MODE +b` calls that normalize to
+the same string MUST NOT produce two entries (`Channel` validation
+rules' idempotent-add behavior, above).
+
 ## ChannelMode — *Value Object, Session & Messaging*
 
 One recognized channel-mode flag *definition* — not a flag being on or
@@ -282,23 +338,25 @@ the same role `Capability` plays for `CAP` (data-model.md "Capability").
 |---|---|---|
 | `id` | string | Stable, human-readable identifier (e.g. `moderated`, `members-only`), independent of `flag` — the same role `Extension.id`/`Capability.name` play elsewhere in this data model. Unique among every currently-recognized `ChannelMode`. Exists separately from `flag` because the wire-letter namespace is far scarcer (52 possible characters, shared across every current and future flag) than the id namespace, and because error messages and administrator-facing output need something more legible than a single letter (constitution Principle III). |
 | `flag` | character | The wire-protocol mode letter (`m` for `moderated`, `n` for `members-only` — RFC 2811 §4.2.6/§4.2.5). Unique among every currently-recognized flag — core's plus every currently-`ENABLED` extension's — independently of `id` uniqueness; a conflicting registration (either kind) is rejected the same way `Extension.extensionPoint` ownership conflicts are (research.md "Extension-point ownership"). |
-| `kind` | enum: `BOOLEAN`, `VALUE`, `LIST`, `MEMBER` | Classifies the flag's shape, per RFC 2811's own mode taxonomy (contracts/irc-protocol-commands.md "Full Channel Mode Catalog"). `BOOLEAN`: a per-channel on/off flag, represented in `Channel.activeModes`. `VALUE` (e.g. a channel key) and `LIST` (e.g. a ban-mask list) carry data no field on `Channel` holds yet. `MEMBER` (operator, voice) is a per-nickname privilege, not a per-channel flag — its state lives in its own dedicated `Channel` field (`operators` for `operator`, FR-046; `voiced` for `voice`, FR-045), not in `activeModes`. Both `MEMBER`-kind flags this release defines are implemented — unlike `VALUE`/`LIST`, `MEMBER`-kind is fully representable today because it just means "a dedicated per-member set," and `Channel` already has two of those. |
-| `gates` | set of `GateableAction` (`SEND`, `JOIN`, `DISCOVER`), 0..* | Which command(s) this flag restricts, independent of `kind` — a `BOOLEAN` flag isn't assumed to gate `PRIVMSG`/`NOTICE` just because that's what this release's first two happen to do (FR-043's "Critically, the guarantee is not limited to..." clause). `moderated`/`members-only` gate `{SEND}`. `private`/`secret` gate `{DISCOVER}` (FR-047) — `TOPIC`-viewing, `NAMES`, and `LIST` for a non-member. `voice`/`operator` gate `{}` (empty) — they're privileges other flags' gate checks *consult*, not gates in their own right; nothing directly requires having voice or being an operator to perform an action, except as an input to `moderated`'s `SEND` check or FR-014's operator-gated actions (which aren't `ChannelMode`-driven at all). `DISCOVER`'s gate-failure convention differs from `SEND`/`JOIN`'s: a failed `DISCOVER` check MUST produce the same response as "this channel does not exist," never a distinguishable permission error (FR-047) — the whole point is that a non-member can't tell the two apart. See `Channel.activeModes` validation rules for how a command handler uses this to decide which flags apply to it. |
-| `definedBy` | `CORE` or an `Extension` id | `CORE`-defined flags (`moderated`, `members-only`, `voice`, `operator`, `private`, `secret`) are always recognized (FR-036). An extension-defined flag is only recognized while that extension is `ENABLED` — see `Channel.activeModes` validation rules above. |
+| `kind` | enum: `BOOLEAN`, `VALUE`, `LIST`, `MEMBER` | Classifies the flag's shape, per RFC 2811's own mode taxonomy (contracts/irc-protocol-commands.md "Full Channel Mode Catalog"). `BOOLEAN`: a per-channel on/off flag, represented in `Channel.activeModes`. `VALUE` (e.g. a channel key) still carries data no field on `Channel` holds — not implemented this release. `LIST` (ban-mask) is implemented for exactly the one `CORE` flag that needs it, state in `Channel.bans` (FR-062) — not a generic LIST-storage mechanism a future extension-contributed `LIST`-kind flag could reuse as-is (see Validation rules). `MEMBER` (operator, voice) is a per-nickname privilege, not a per-channel flag — its state lives in its own dedicated `Channel` field (`operators` for `operator`, FR-046; `voiced` for `voice`, FR-045), not in `activeModes`. |
+| `gates` | set of `GateableAction` (`SEND`, `JOIN`, `DISCOVER`), 0..* | Which command(s) this flag restricts, independent of `kind` — a `BOOLEAN` flag isn't assumed to gate `PRIVMSG`/`NOTICE` just because that's what this release's first two happen to do (FR-043's "Critically, the guarantee is not limited to..." clause). `moderated`/`members-only` gate `{SEND}`. `private`/`secret` gate `{DISCOVER}` (FR-047) — `TOPIC`-viewing, `NAMES`, and `LIST` for a non-member. `ban-mask` gates `{SEND, JOIN}` (FR-062) — the first flag to gate more than one action at once, muting an already-present match's `SEND` and rejecting a not-yet-present match's `JOIN`. `voice`/`operator` gate `{}` (empty) — they're privileges other flags' gate checks *consult*, not gates in their own right; nothing directly requires having voice or being an operator to perform an action, except as an input to `moderated`'s `SEND` check or FR-014's operator-gated actions (which aren't `ChannelMode`-driven at all). `DISCOVER`'s gate-failure convention differs from `SEND`/`JOIN`'s: a failed `DISCOVER` check MUST produce the same response as "this channel does not exist," never a distinguishable permission error (FR-047) — the whole point is that a non-member can't tell the two apart. See `Channel.activeModes` validation rules for how a command handler uses this to decide which flags apply to it. |
+| `definedBy` | `CORE` or an `Extension` id | `CORE`-defined flags (`moderated`, `members-only`, `voice`, `operator`, `private`, `secret`, `ban-mask`) are always recognized (FR-036). An extension-defined flag is only recognized while that extension is `ENABLED` — see `Channel.activeModes` validation rules above. |
 
 **Validation rules**:
 - `flag` uniqueness and `id` uniqueness are independent requirements, both
   enforced at all times: two flags MUST NOT share a `flag` character, and
   two flags MUST NOT share an `id`, regardless of whether one, both, or
   neither is core-defined (research.md "Channel/user mode extensibility").
-- This release populates exactly six `ChannelMode`s, all `CORE`-defined:
+- This release populates exactly seven `ChannelMode`s, all `CORE`-defined:
   four `BOOLEAN` (`id: moderated, flag: m`, `gates: {SEND}` and
   `id: members-only, flag: n`, `gates: {SEND}`, FR-013/FR-043;
   `id: private, flag: p` and `id: secret, flag: s`, both `gates:
-  {DISCOVER}`, FR-047) and two `MEMBER`, `gates: {}` (`id: voice,
+  {DISCOVER}`, FR-047), two `MEMBER`, `gates: {}` (`id: voice,
   flag: v`, FR-045, granted/revoked via `MODE +v`/`-v <nickname>`, state
   in `Channel.voiced`; `id: operator, flag: o`, FR-046, granted/revoked
-  via `MODE +o`/`-o <nickname>`, state in `Channel.operators`); no
+  via `MODE +o`/`-o <nickname>`, state in `Channel.operators`), and one
+  `LIST` (`id: ban-mask, flag: b`, `gates: {SEND, JOIN}`, FR-062,
+  granted/revoked via `MODE +b`/`-b <mask>`, state in `Channel.bans`); no
   extension in this release contributes one. The mechanism exists now so
   a future `BOOLEAN`, `gates: {SEND}` or `gates: {JOIN}` one (e.g., a
   registered-channel flag once the account module exists, or a
@@ -319,14 +377,30 @@ the same role `Capability` plays for `CAP` (data-model.md "Capability").
   gives administrators over a cloaked member's real hostname
   (research.md "Cloak extension boundary"), extended here to channel
   visibility rather than identity.
-- A `VALUE`- or `LIST`-kind `ChannelMode` MUST NOT be contributed in this
-  release: `Channel.activeModes`' shape (a plain set) has nowhere to hold
-  a value or a list, and no mechanism here defines one. This is a real,
-  currently-unfilled gap, not an oversight masked by convenient scoping —
-  the first `ServerExtension` that needs one (e.g., a channel-key or
-  ban-list feature) requires a `Channel` shape change alongside it, which
-  this data model deliberately does not attempt to pre-design without a
-  concrete consumer driving the actual requirements.
+- A `VALUE`-kind `ChannelMode` (e.g. a channel key) MUST NOT be
+  contributed in this release, by `CORE` or any extension:
+  `Channel`'s shape has nowhere to hold a value, and no mechanism here
+  defines one. This is a real, currently-unfilled gap, not an oversight
+  masked by convenient scoping — the first consumer that needs one
+  (e.g., a channel-key feature) requires a `Channel` shape change
+  alongside it, which this data model deliberately does not attempt to
+  pre-design without a concrete consumer driving the actual
+  requirements, the same judgment call that was made for `LIST`-kind
+  flags until `ban-mask` (FR-062) became that concrete consumer.
+- A `LIST`-kind `ChannelMode` MUST NOT be contributed by a
+  `ServerExtension` in this release — only `CORE`'s single `ban-mask`
+  flag is implemented, backed by the purpose-built `Channel.bans`
+  field (`BanEntry`, above), not a generic, reusable LIST-storage
+  mechanism. A future extension-contributed `LIST`-kind flag (e.g., an
+  invite-exception or ban-exception list) would need its own
+  purpose-built field the same way `ban-mask` got `bans`, designed
+  against that flag's actual requirements when it exists — this data
+  model does not attempt to generalize `bans` into a reusable
+  "any `LIST`-kind flag's storage" shape speculatively, the same
+  "don't guess the right general shape before a second concrete
+  consumer exists" discipline this project applies elsewhere (e.g.,
+  research.md "Alternatives considered" — general-purpose extension
+  data bags, rejected for the identical reason).
 
 ## UserMode — *Value Object, Session & Messaging*
 
@@ -427,20 +501,22 @@ convenient one.
 | `NICKLEN` | `ServerConfiguration.nicknameMaxLength` (FR-056; default `9`), recomputed whenever `ServerConfiguration` is (re)loaded — not a fixed constant |
 | `CHANNELLEN` | `ServerConfiguration.channelNameMaxLength` (FR-056; default `50`), same recomputation trigger as `NICKLEN` |
 | `TOPICLEN` | `ServerConfiguration.topicMaxLength` (FR-056; default `390`), same recomputation trigger as `NICKLEN` — newly introduced alongside `NICKLEN`/`CHANNELLEN` (research.md "Configurable protocol length limits"); no equivalent existed before FR-056 |
-| `MODES` | Fixed: `1` — this release's `MODE` command handler accepts exactly one flag (and, for `MEMBER`-kind flags, one target) per invocation; not a value distinct from that behavior, a direct statement of it |
-| `CHANMODES` | Recomputed from the `ChannelMode` catalog whenever `ExtensionRegistry`'s state changes (FR-011/FR-012 — an `EXTENSION` command or config reload enabling/disabling a mode-contributing extension), not on every registration: every currently-recognized (core plus enabled-extension) flag, grouped into ISUPPORT's four parameter-behavior categories (`A,B,C,D`) by `kind` — `BOOLEAN` flags populate `D` (no parameter ever); `VALUE`/`LIST` flags would populate `B`/`C`/`A` respectively, but none exist this release (`ChannelMode` validation rules), so those three groups are empty and this recomputation is a no-op in practice (no extension changes it this release) |
+| `MODES` | `ServerConfiguration.maxModesPerCommand` (FR-064; default `6`), recomputed whenever `ServerConfiguration` is (re)loaded — the same trigger `NICKLEN`/`CHANNELLEN`/`TOPICLEN` already use — not a fixed constant |
+| `CHANMODES` | Recomputed from the `ChannelMode` catalog whenever `ExtensionRegistry`'s state changes (FR-011/FR-012 — an `EXTENSION` command or config reload enabling/disabling a mode-contributing extension), not on every registration: every currently-recognized (core plus enabled-extension) flag, grouped into ISUPPORT's four parameter-behavior categories (`A,B,C,D`) by `kind` — `LIST` flags populate `A` (`ban-mask`/`b`, FR-062 — this release's one `A`-group member); `VALUE` flags would populate `B`/`C`, but none exist this release (`ChannelMode` validation rules); `BOOLEAN` flags populate `D` (`moderated`/`members-only`/`private`/`secret` — `m`,`n`,`p`,`s`) — this release's value is `b,,,mnps` |
 | `PREFIX` | Same recomputation trigger as `CHANMODES`, from the `MEMBER`-kind `ChannelMode` entries and their established prefix characters: `(ov)@+` this release (`operator`→`@`, `voice`→`+`, FR-045/FR-046, contracts/irc-protocol-commands.md "Channel Operations" `@`/`+` convention) — ordered highest-privilege first, the same order `353 RPL_NAMREPLY` already prefixes with |
 | `UTF8ONLY` | Fixed: present, no value (FR-054 — this server always enforces it, so the token is unconditional) |
 
-**Validation rules**: `CHANMODES`'s `D` group (and `B`/`C`, once either is
-non-empty) MUST list exactly the same flags `004 RPL_MYINFO`'s
-channel-mode-letter list already does (FR-051) — both read the same
-`ChannelMode` catalog, recomputed on the same `ExtensionRegistry` state
-transitions, so they cannot disagree by construction, not by convention
-two independent code paths have to remember to keep in sync. Similarly,
-`NICKLEN`/`CHANNELLEN`/`TOPICLEN` MUST always equal the value actually
-enforced by `NickCommandHandler`/`JoinCommandHandler`/`TopicCommandHandler`
-at that moment (FR-056) — both read the same `ServerConfiguration`
+**Validation rules**: `CHANMODES`'s `A` group (`ban-mask`/`b`) and `D`
+group (and `B`/`C`, once either is non-empty) MUST list exactly the same
+flags `004 RPL_MYINFO`'s channel-mode-letter list already does (FR-051)
+— both read the same `ChannelMode` catalog, recomputed on the same
+`ExtensionRegistry` state transitions, so they cannot disagree by
+construction, not by convention two independent code paths have to
+remember to keep in sync. Similarly,
+`NICKLEN`/`CHANNELLEN`/`TOPICLEN`/`MODES` MUST always equal the value
+actually enforced by
+`NickCommandHandler`/`JoinCommandHandler`/`TopicCommandHandler`/`ModeCommandHandler`
+at that moment (FR-056, FR-064) — all read the same `ServerConfiguration`
 fields, recomputed on the same load/reload transition, so these too
 cannot disagree by construction. A new session's registration burst MUST
 read the current, already-computed `SupportedFeatures` value, never
@@ -552,12 +628,14 @@ extension state changes.
 | `channelNameMaxLength` | positive integer, 0..1 | FR-056. Optional; defaults to `50` if unset (includes the leading `#`). Enforced by `JoinCommandHandler`'s grammar check (`476 ERR_BADCHANMASK`) and advertised as `CHANNELLEN` (`SupportedFeatures`). MUST NOT exceed `400`. |
 | `topicMaxLength` | positive integer, 0..1 | FR-056. Optional; defaults to `390` if unset. Enforced by `TopicCommandHandler` on a `TOPIC`-set attempt (`417 ERR_INPUTTOOLONG`, not `421` — reuses FR-049's length-violation numeric) and advertised as `TOPICLEN` (`SupportedFeatures`). MUST NOT exceed `400`. |
 | `whoMaskEnabled` | boolean, 0..1 | FR-061. Optional; defaults to `true` if unset. Gates `WHO`'s wildcard-mask and no-argument forms for non-administrator sessions only — `false` makes both return a bare `315 RPL_ENDOFWHO` (no `352` lines), indistinguishable from a real zero-match search. An administrator's `WHO` is never affected, checked before this setting (research.md "WHO and invisibility"). The channel-name and exact-nickname forms are never affected by it either way. |
+| `maxModesPerCommand` | positive integer, 0..1 | FR-064. Optional; defaults to `6` if unset. The maximum number of parameter-consuming channel-mode flags (`MEMBER`/`LIST`-kind) a single `MODE` command applies — flags beyond it within the same command are silently not applied (no error; the `MODE` echo reflects only what was applied). Advertised as `MODES` (`SupportedFeatures`). MUST NOT exceed `20` (research.md "MODE command grouping"). |
 
 **Validation rules**: An invalid configuration (unknown extension id,
-conflicting listener ports, malformed rate-limit values, or a
+conflicting listener ports, malformed rate-limit values, a
 `nicknameMaxLength`/`channelNameMaxLength`/`topicMaxLength` that isn't a
-positive integer or exceeds `400`, FR-056) MUST be rejected with a
-specific, actionable error identifying the problem field (FR-012,
+positive integer or exceeds `400` (FR-056), or a `maxModesPerCommand`
+that isn't a positive integer or exceeds `20` (FR-064)) MUST be rejected
+with a specific, actionable error identifying the problem field (FR-012,
 SC-008) rather than falling back to a partially-applied state. An id MUST
 appear in the field matching its actual kind: a `CapabilityExtension` id
 listed in `serverExtensionStates`, or a `ServerExtension` id listed in

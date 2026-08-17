@@ -223,6 +223,24 @@ confirm other channel members see the removal reflected.
    channel list, **Then** the response is indistinguishable from the
    channel not existing; **When** a current member does the same,
    **Then** they see it normally.
+7. **Given** an operator adds a ban mask matching a member currently in
+   the channel, **When** that member attempts to send a message,
+   **Then** it is not delivered, the same as Scenario 3, and the member
+   remains a channel member (not removed); **When** that same member
+   later leaves and attempts to `JOIN` again while the ban is still
+   active, **Then** the attempt is rejected. **Given** the operator then
+   removes that ban mask, **When** the formerly-banned client attempts
+   to `JOIN` again, **Then** it succeeds normally. **Given** an operator
+   requests the channel's current ban list, **When** the request is
+   processed, **Then** every currently-active mask is returned
+   (FR-062).
+8. **Given** a hostname-cloaking extension is presenting a member's
+   channel-visible hostmask as something other than their real,
+   underlying hostname/IP, **When** an operator adds a ban mask
+   matching that member's *real* hostname/IP (not their cloaked,
+   publicly-visible one), **Then** the member is muted the same as any
+   other ban match — a ban is not evadable simply because a cloaking
+   extension changes what other clients see (FR-062).
 
 ---
 
@@ -1054,6 +1072,71 @@ their presented (not real) hostname.
   already covers. The channel-name and exact-nickname forms MUST NOT be
   affected by this configuration at all; only the two forms capable of
   broad enumeration are.
+- **FR-062**: The server MUST allow a channel operator to maintain a
+  per-channel ban list of nickmask patterns (`nick!user@host`, with
+  `*`/`?` wildcards in any segment) — adding a mask, removing a
+  specific mask, and listing every currently-active mask, restricted to
+  operators the same as every other moderation action (FR-013, FR-014).
+  A mask MUST be matched against a client's *presented* identity (the
+  same `nickname!ident@hostname` form its message hostmask already
+  shows, FR-030/FR-031) **and**, independently, against its real,
+  unobfuscated hostname/IP (FR-032) in the same `nickname!ident@hostname`
+  shape — a match against either MUST cause the ban to apply. This MUST
+  hold regardless of which channel operator added the mask or whether
+  they themselves can see the client's real hostname/IP (FR-032's
+  restriction on *viewing* a real hostname/IP is unrelated to and
+  unaffected by this — an operator specifying a mask that happens to
+  match a client's real value still never gets to see that value, only
+  whether their supplied pattern currently matches something). This
+  keeps a ban resistant to evasion via a hostname-obfuscation extension
+  (FR-031): a client cannot escape a mask targeting their real,
+  underlying network identity merely because a cloaking extension
+  presents a different value to other clients. An operator supplying a
+  partial mask (missing
+  the `user` and/or `host` segment) MUST have the missing segment(s)
+  filled with a wildcard automatically, matching standard IRC ban-mask
+  convention. A currently-active ban MUST have two effects: (1) a client
+  already in the channel whose presented identity or real hostname/IP
+  matches it MUST be prevented from sending further channel messages to
+  it — muted, not removed from the channel — until the matching ban is
+  lifted or neither of their identities matches it any longer; (2) a
+  client not currently in the channel whose presented identity or real
+  hostname/IP matches it MUST have a `JOIN` attempt on that channel
+  rejected. Adding a mask already
+  present, or removing one not present, MUST be treated as a harmless
+  no-op, not an error — the same idempotent-change posture this
+  specification already applies to every other mode change (FR-043).
+  The server MUST enforce a reasonable maximum number of active bans per
+  channel and reject an attempt to add beyond it with a clear,
+  specific error distinct from every other rejection this requirement
+  defines — an unbounded, operator-populated list is the kind of
+  unbounded growth this specification consistently guards against
+  elsewhere (e.g., FR-016's rate limiting, FR-049's line-length limit).
+- **FR-064**: The server's channel `MODE` command MUST accept multiple
+  mode-flag changes in a single invocation — multiple letters after one
+  sign (e.g., `+bbb` naming three ban masks), multiple signed groups in
+  the same command (e.g., `+o-v`), and any mix of flag kinds together —
+  not only the single-flag-per-invocation shape earlier requirements in
+  this specification illustrated with. Each flag that requires a
+  parameter (a `MEMBER`-kind target, FR-045/FR-046, or a `LIST`-kind
+  mask, FR-062) MUST consume the next not-yet-used parameter supplied
+  with the command, in the same left-to-right order the flags
+  themselves appear in. Flags MUST be applied in that same order,
+  each independently — a later flag's rejection (e.g., an unknown mode
+  letter, or a target that isn't a current member) MUST NOT undo an
+  earlier flag's already-applied change within the same command, and
+  processing MUST stop at the first such rejection rather than skipping
+  it and continuing with later flags. The server MUST allow an
+  administrator to configure a maximum number of parameter-consuming
+  flags accepted in a single command; if a command's flags would exceed
+  it, the server MUST apply flags up to that limit, in order, and MUST
+  NOT apply anything beyond it — this specific limit MUST NOT produce
+  an error reply (see Assumptions for why this is a deliberate exception
+  to this specification's usual "reject explicitly" posture elsewhere).
+  The confirmation this specification already requires echoing to
+  channel members for a mode change MUST reflect only the flags
+  actually applied, never the full originally-requested set when the
+  two differ.
 
 ### Key Entities
 
@@ -1271,3 +1354,39 @@ their presented (not real) hostname.
   project's general "permissive zero-configuration default, restrict
   explicitly if needed" pattern (e.g., TLS offered but not mandatory,
   FR-018).
+- FR-062's ban list blocking both sending and joining is not this
+  specification inventing behavior beyond IRC's own ban-mode definition:
+  RFC 1459/2811's original wording only describes blocking future joins,
+  but the modern IRC client protocol specification — the maintained,
+  current documentation those frozen RFCs no longer track — defines the
+  ban-mask channel mode as controlling masks "banned from joining or
+  speaking in the channel." Gating both `SEND` and `JOIN` is therefore
+  the specification-aligned reading of ban-mask, not a stricter,
+  project-specific extension of it.
+- FR-064's multi-flag `MODE` grouping is not this specification inventing
+  new command syntax: RFC 2812 §3.2.3 already defines the `MODE` command's
+  grammar as `*( ( "-" / "+" ) *<modes> *<modeparam> )` — a repeatable
+  sequence of signed groups, each carrying zero or more mode letters and
+  the parameters they need — the same shape every deployed IRC server
+  already implements. What the base RFC leaves server-defined is the cap
+  on how many parameter-consuming changes one command may carry; this is
+  conventionally advertised via the `MODES` token in `RPL_ISUPPORT`
+  (FR-055), which this project already sends (previously a fixed `1`,
+  now sourced from the new configurable limit). This project defaults
+  that limit to `6`, a long-established convention among deployed IRC
+  server implementations, administrator-configurable like FR-056's other
+  operational limits, bounded to a fixed ceiling of `20` to catch a
+  clearly-mistaken configuration value rather than for any specific
+  exploit concern (FR-049's line-length limit already bounds what a
+  single command can carry regardless of this setting). FR-064's "no
+  error reply when the parameter-consuming cap is exceeded" is a
+  deliberate, narrow exception to this specification's usual posture:
+  every other size/count limit in this specification (FR-049, FR-056,
+  FR-062's ban-list cap) rejects with a specific numeral because a
+  fitting one exists; no numeral in the RFC 1459/2812 catalog, nor any
+  later widely-adopted addition (the way `417`/`474`/`478` are), covers
+  "too many parameter-consuming mode changes in one command" — inventing
+  one here would repeat the mistake this project has deliberately never
+  made elsewhere (research.md "Wire-protocol command & numeric
+  completeness"). The truncated `MODE` echo itself — reflecting only
+  what was actually applied — is the feedback a client receives instead.
