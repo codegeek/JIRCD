@@ -498,7 +498,7 @@ was previously missing and needed its own definition (FR-048).
 
 | Command | Direction | Preconditions | Effect | Replies |
 |---|---|---|---|---|
-| `OPER <username> <password>` | C→S | `REGISTERED` session | Verifies credentials against `ServerConfiguration.administratorCredentials` (FR-034); on success, grants administrator privilege to this session | `381 RPL_YOUREOPER` on success; `464 ERR_PASSWDMISMATCH` on failure (also logged, FR-019) |
+| `OPER <username> <password>` | C→S | `REGISTERED` session | Verifies credentials against `ServerConfiguration.administratorCredentials` (FR-034); on success, grants administrator privilege to this session and resets `ClientSession.failedOperAttempts` to `0`; on failure, increments it | `381 RPL_YOUREOPER` on success; `464 ERR_PASSWDMISMATCH` on failure (also logged, FR-019) — if this failure brings `failedOperAttempts` to `ServerConfiguration.operFailureThreshold` (default `5`), the connection is also closed immediately after, per FR-017's cleanup (FR-034, research.md "OPER failed-attempt lockout") |
 | `EXTENSION <ENABLE\|DISABLE> <extension-id>` | C→S | Sender holds administrator privilege | Toggles the named `CapabilityExtension` or `ServerExtension`'s state, in effect immediately for all clients (FR-011, FR-032) | Confirmation notice on success; `481 ERR_NOPRIVILEGES` if sender lacks administrator privilege (FR-033); `421 ERR_UNKNOWNCOMMAND`-style error naming the extension id if it doesn't exist |
 | `WHOHOST <nickname>` | C→S | Sender holds administrator privilege | Returns the target's real, unobfuscated hostname/IP regardless of any active cloaking (FR-031, FR-032) | Notice containing the real hostname on success; `481 ERR_NOPRIVILEGES` if unauthorized; standard "no such nickname" error if the target isn't connected |
 | `REHASH` | C→S | Sender holds administrator privilege | Manually re-reads and re-validates the Server Configuration file and reconciles it against live state — the in-band equivalent of a `SIGHUP` (research.md "Configuration reload mechanism", contracts/server-configuration.md "Live reload") | `382 RPL_REHASHING` on success; on validation failure, the same specific, actionable error startup validation would report (FR-012, SC-008), and the previously-active configuration remains untouched; `481 ERR_NOPRIVILEGES` if unauthorized |
@@ -512,6 +512,12 @@ was previously missing and needed its own definition (FR-048).
 - These six commands are the FR-032/FR-057/FR-058 minimum; additional
   administrative commands MAY be added by future extensions without
   changing this contract.
+- `OPER`'s lockout counter (`failedOperAttempts`) is scoped to the
+  connection, not the username being attempted — a client that fails
+  five times as `root-admin` then tries a different configured username
+  on the same still-open connection continues incrementing the same
+  counter, not a fresh one per username (research.md "OPER failed-
+  attempt lockout").
 - Command names (`EXTENSION`, `WHOHOST`, `REHASH`, `SAJOIN`, `SAMODE`)
   are illustrative for this plan; the tasks phase may finalize different
   verbs as long as the preconditions/effects/replies contract above

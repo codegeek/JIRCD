@@ -89,9 +89,9 @@ connection-loss handling MUST be implemented so they remain extensible to a
 future networked (federated) scope without redesign (FR-022).
 
 **Scale/Scope**: ~1,000 concurrent client connections (SC-003); 6 user
-stories (Stories 1, 2, 4, 5, 6 mandatory for this plan; Story 3 and
+stories (Stories 1, 2, 4, 5, 6, 7 mandatory for this plan; Story 3 and
 everything that depends on it are deferred and excluded from this plan's
-scope); 36 functional requirements, 28 of which are in scope for this
+scope); 64 functional requirements, 56 of which are in scope for this
 release (FR-009, FR-010, FR-023, FR-024, FR-026, FR-027, FR-028, FR-029 are
 deferred).
 

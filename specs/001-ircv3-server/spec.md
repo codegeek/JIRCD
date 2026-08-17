@@ -32,6 +32,14 @@
 - Q: Should the server enforce a maximum protocol line length, and how should an over-length message be handled? → A: 512-byte base line limit (command+params, CRLF-inclusive, classic IRC), plus the IRCv3 message-tags specification's required server-side allowance of up to 4096 additional bytes for the tags section (since FR-025 already implements message-tags). A line exceeding either budget MUST be rejected under FR-015's existing malformed-message handling, not silently truncated.
 - Q: Should the server enforce/assume a specific character encoding for message text, or treat it as an opaque byte stream? → A: UTF-8, validated — message text (`PRIVMSG`/`NOTICE` bodies, topics, realnames, and channel names) MUST be valid UTF-8; the server MUST reject a message containing an invalid UTF-8 byte sequence in one of these fields as malformed (FR-015), not pass it through, mistranscode it, or silently discard just the invalid portion.
 
+### Session 2026-08-17
+
+- Q: When every operator of a channel revokes their own operator status (or leaves) without granting it to anyone else first, what should happen to that channel? → A: Leaderless until admin intervenes — the channel is left with members but no operator; only an administrator can restore order (force-join via FR-057, then self-op via FR-058). No automatic promotion occurs.
+- Q: FR-011 requires a configuration-file change (enabling/disabling an extension) to take effect without a server restart — how does the running server learn the file changed? → A: Explicit reload trigger only, via two equivalent paths — a `SIGHUP` signal sent to the process, and an in-band, administrator-privileged `REHASH` command (FR-032/FR-033) for when file-system/host access isn't available (Story 6's peer-tier path to Story 4's). No automatic file-watching; editing the file alone has no effect until one of these two triggers fires.
+- Q: When a client issues the administrator-privilege command (`OPER`, FR-034) with invalid credentials, what should the server do beyond rejecting it? → A: Refuse the attempt with a clear error and log it as a security-relevant event (FR-019), the same as every other permission error — but additionally track failed `OPER` attempts per connection and disconnect the client once an administrator-configurable threshold is exceeded (brute-force lockout), the same "reasonable, administrator-configurable default" posture FR-016's rate limiting already uses.
+- Q: When a member with the voice privilege (FR-045) leaves a channel and later rejoins, do they keep voice, or does an operator need to grant it again? → A: Lost on part, must be re-granted — voice (and, symmetrically, operator status) is tied to current membership, not the nickname's history with the channel; leaving clears all per-member privileges, the classic IRC behavior.
+- Q: When the hostname-cloaking extension is disabled while a client is still connected and was already benefiting from it, does that client's presented hostname change immediately, or stay cloaked until they reconnect? → A: Immediate — the moment the extension is disabled (via FR-011's `SIGHUP`/`REHASH` reload), every currently-connected cloaked client's presented hostname reverts to the real value right away, consistent with SC-005's "connected and new clients" wording.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Connect and Chat in Real Time (Priority: P1)
@@ -402,13 +410,12 @@ their presented (not real) hostname.
   already has an extension-contributed mode flag set when the
   administrator disables that extension — does the flag disappear, does
   it linger inertly, or something else?
-- What happens to a member's voice privilege (FR-045) when they leave a
-  channel and rejoin — do they keep it, or does an operator need to grant
-  it again?
-- What happens if every operator of a channel revokes their own operator
-  status (or leaves) without first granting it to anyone else (FR-046) —
-  does the server automatically promote a remaining member, or can an
-  existing channel end up with members but no operator at all?
+- *(Resolved — see Clarifications, Session 2026-08-17)* What happens to a
+  member's voice privilege (FR-045) when they leave a channel and
+  rejoin?
+- *(Resolved — see Clarifications, Session 2026-08-17)* What happens if
+  every operator of a channel revokes their own operator status (or
+  leaves) without first granting it to anyone else (FR-046)?
 - What happens if an operator marks a channel both private and secret at
   once — does one silently override the other, or is it rejected as
   contradictory (FR-047)?
@@ -422,14 +429,12 @@ their presented (not real) hostname.
   defined length or character constraints?
 - What happens when the maximum number of concurrent connections is
   reached and a new client attempts to connect?
-- What happens when a client issues the administrator-privilege command
-  (FR-034) with invalid credentials — is the attempt logged as a
-  security-relevant event (FR-019), and is the client disconnected or just
-  refused privilege?
-- What happens to already-cloaked clients' presented hostnames when the
-  cloaking extension is disabled while they remain connected — is cloaking
-  removed immediately, or does it persist for that session until
-  reconnect?
+- *(Resolved — see Clarifications, Session 2026-08-17)* What happens when
+  a client issues the administrator-privilege command (FR-034) with
+  invalid credentials?
+- *(Resolved — see Clarifications, Session 2026-08-17)* What happens to
+  already-cloaked clients' presented hostnames when the cloaking
+  extension is disabled while they remain connected?
 - What does a client see when it looks itself up while a cloaking
   extension is obscuring its own hostname from everyone else — its real
   value (since it's the client's own data) or the same obscured value
@@ -512,7 +517,13 @@ their presented (not real) hostname.
 - **FR-011**: The server MUST allow an administrator to enable or disable
   individual optional extensions via configuration, without requiring
   changes to the server's core codebase, and without requiring the running
-  server process to be restarted for the change to take effect.
+  server process to be restarted for the change to take effect. Editing
+  the configuration file alone does not apply a change — the server MUST
+  provide two equivalent, explicit reload triggers: a `SIGHUP` signal
+  sent to the running process, and (once the `admin` extension of Story 6
+  is enabled) an in-band, administrator-privileged `REHASH` command
+  (FR-032/FR-033) for deployments without file-system/host access. There
+  is no automatic file-watching.
 - **FR-012**: The server MUST report a clear, specific error when an
   administrator's configuration is invalid, rather than silently ignoring
   the problem or starting in an inconsistent state.
@@ -645,7 +656,12 @@ their presented (not real) hostname.
   record that client's real, unobfuscated hostname/IP internally.
   Administrators MUST be able to view a client's real hostname/IP at any
   time regardless of whether cloaking is currently applied to it (see
-  FR-032).
+  FR-032). If this extension is disabled while a client it was cloaking
+  is still connected (FR-011's reload path), that client's presented
+  hostname MUST revert to its real value immediately, for every other
+  connected client observing it from that point forward — not merely
+  for new connections — consistent with SC-005's "connected and new
+  clients" guarantee.
 - **FR-032**: The server MUST provide an in-band administrative command
   interface, available over the IRC protocol itself, through which an
   authorized administrator can perform administrative actions — at
@@ -670,7 +686,15 @@ their presented (not real) hostname.
   on that session in the same act — a client observing that session's
   user modes (via its own `MODE` query, FR-044, or another client's
   `WHOIS`, FR-037) MUST see it reflected immediately, not only through
-  administrator-only commands becoming usable.
+  administrator-only commands becoming usable. A failed `OPER` attempt
+  (invalid credentials) MUST be rejected with a clear error and logged
+  as a security-relevant event (FR-019), the same as any other
+  permission error (FR-014/FR-033) — but the server MUST additionally
+  track failed `OPER` attempts per connection and disconnect the client
+  once an administrator-configurable threshold of consecutive failures
+  is exceeded, the same "reasonable, administrator-configurable default"
+  posture FR-016's rate limiting already establishes for abuse
+  protection.
 - **FR-035**: The capability-negotiation mechanism itself (FR-006, FR-007,
   FR-008 — a client's ability to request the capability list and negotiate
   a subset) MUST always be available and MUST NOT be an optional extension
@@ -817,7 +841,12 @@ their presented (not real) hostname.
   definition is "operators and voiced members may send," not
   "operators only." A non-existent target, or one who isn't currently a
   member of the channel, MUST be rejected with a clear error rather than
-  silently granting a privilege to no one.
+  silently granting a privilege to no one. Voice is tied to current
+  membership, not the nickname's history with the channel: a member who
+  leaves and later rejoins MUST NOT retain a previously-granted voice
+  privilege — an operator MUST grant it again if wanted. The same holds
+  symmetrically for operator status (FR-046): rejoining after leaving
+  never restores a member's prior operator status either.
 - **FR-046**: The server MUST allow a channel operator to grant operator
   status to another member, and to revoke operator status (including
   their own), the same way voice is granted and revoked (FR-045) —
@@ -830,7 +859,15 @@ their presented (not real) hostname.
   operator status subsequently spreads to other members. A non-existent
   target, or one who isn't currently a
   member of the channel, MUST be rejected with a clear error rather than
-  silently granting a privilege to no one.
+  silently granting a privilege to no one. If the last remaining
+  operator revokes their own status, or leaves the channel, without
+  first granting operator to another member, the server MUST leave that
+  channel without an operator rather than auto-promoting any remaining
+  member — the channel continues to exist and function for messaging
+  purposes (subject to any moderation flags already set), just with no
+  member able to perform operator-gated actions on it, until an
+  administrator restores order via FR-057 (force-join) and FR-058
+  (self-op).
 - **FR-047**: The server MUST allow a channel operator to mark a channel
   private or secret (restricted to operators, the same as every other
   moderation action, FR-013/FR-014), and MUST hide such a channel's
@@ -1120,12 +1157,16 @@ their presented (not real) hostname.
   present, or removing one not present, MUST be treated as a harmless
   no-op, not an error — the same idempotent-change posture this
   specification already applies to every other mode change (FR-043).
-  The server MUST enforce a reasonable maximum number of active bans per
-  channel and reject an attempt to add beyond it with a clear,
+  The server MUST enforce a maximum of 100 active bans per channel and
+  reject an attempt to add a mask beyond that limit with a clear,
   specific error distinct from every other rejection this requirement
   defines — an unbounded, operator-populated list is the kind of
   unbounded growth this specification consistently guards against
   elsewhere (e.g., FR-016's rate limiting, FR-049's line-length limit).
+  Unlike FR-016's rate-limiting thresholds or FR-039's keep-alive timing,
+  this specific ceiling is a fixed value, not administrator-configurable
+  — see Assumptions for why a ban list gets a hard number where those
+  others don't.
 - **FR-064**: The server's channel `MODE` command MUST accept multiple
   mode-flag changes in a single invocation — multiple letters after one
   sign (e.g., `+bbb` naming three ban masks), multiple signed groups in
@@ -1468,7 +1509,7 @@ their presented (not real) hostname.
   be core- or extension-defined.
 - FR-065's invitation records deliberately carry no expiration timeout
   and no cap on how many a channel may accumulate, unlike FR-062's
-  ban list (bounded at 100 entries, `478 ERR_BANLISTFULL`). A ban list
+  ban list (a maximum of 100 entries, `478 ERR_BANLISTFULL`). A ban list
   needed an explicit cap because RFC 1459/2812 already defines a
   fitting numeral family for list-limit rejections and unbounded growth
   there is administrator-visible, standing state; an invitation is
@@ -1482,4 +1523,17 @@ their presented (not real) hostname.
   Assumptions entry above); ordinary flood/rate-limiting (FR-016)
   already bounds how quickly one member can issue invitations, the same
   general-purpose safeguard that already covers every other
-  high-frequency command in this specification.
+  high-frequency command in this specification. FR-062's 100-entry
+  ceiling is deliberately a fixed value rather than an
+  administrator-configurable Server Configuration setting like FR-016's
+  rate-limit thresholds, FR-056's length limits, or FR-064's
+  parameter-consuming-flags cap: those all trade off differently across
+  deployments (a busy public network vs. a small private one legitimately
+  want different values), whereas 100 active bans is already generous
+  headroom for a single channel's moderation needs regardless of
+  deployment size, and RFC 1459/2812's `478 ERR_BANLISTFULL` numeral
+  carries no administrator-tunable-limit convention the way `417
+  ERR_INPUTTOOLONG` does for FR-056/FR-064's configurable limits — adding
+  configurability here would be complexity without a concrete deployment
+  need behind it (constitution Development Workflow's "no speculative
+  generality" guidance).

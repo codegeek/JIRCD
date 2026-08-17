@@ -32,6 +32,7 @@ guarded by this aggregate.
 | `administratorPrivilege` | boolean | Granted via FR-034's in-band credential command; authorizes FR-032 administrative commands. Independent of `channelMemberships`/operator status. Kept in lockstep with `userModes`'s `operator` entry below — never an independent third source of truth (research.md "User mode: `operator`"). |
 | `userModes` | set of `UserMode` (below) | FR-044. This release's two possible members: `operator` (`o`), added the instant `administratorPrivilege` becomes `true` and removed the instant it becomes `false` — never independently toggled; and `invisible` (`i`, FR-061), freely set/cleared by the session itself via `MODE`, with no paired field to stay in sync with. See `UserMode` below and Validation rules. |
 | `lastLivenessAt` | instant | Updated whenever this connection is known to be alive — traffic received from it, or a `PONG` answering the server's own `PING`. Read by this session's `LivenessMonitor` (research.md "Connection keep-alive") to decide when to probe and when to time out (FR-039). |
+| `failedOperAttempts` | non-negative integer, defaults to `0` | Count of consecutive `OPER` credential failures on this connection since its last successful `OPER` (or since connecting, if none). Incremented on each `464 ERR_PASSWDMISMATCH`; reset to `0` on a successful `OPER`. Read by `OperCommandHandler` against `ServerConfiguration.operFailureThreshold` (FR-034) to decide when to disconnect. Never reset by anything other than a successful `OPER` — an unrelated command in between does not clear the count. |
 
 **Validation rules**:
 - `nickname` MUST be unique across all `ClientSession`s at the moment it is
@@ -58,6 +59,17 @@ guarded by this aggregate.
   path allowed to change it — and doing so MUST also remove `operator`
   from `userModes` in the same act, never leaving the two out of sync
   (research.md "User mode: `operator`").
+- `failedOperAttempts` MUST increment by exactly one on each `OPER`
+  credential failure (`464 ERR_PASSWDMISMATCH`) and MUST reset to `0` the
+  instant this session's `OPER` succeeds. Once it reaches
+  `ServerConfiguration.operFailureThreshold`, the *same* `OPER` command
+  that pushed it there MUST — after replying `464` and logging the
+  attempt via `SecurityEventLog` (FR-019) as usual — transition this
+  session to `CLOSING` and run the identical FR-017 cleanup any other
+  connection loss uses (FR-034, research.md "OPER failed-attempt
+  lockout"). This is evaluated per-connection, not per-nickname or
+  per-IP — a fresh connection always starts at `0`, the same scope
+  `rateLimitBucket` already uses.
 - `outboundQueue` reaching capacity (a member too slow to keep up with
   fan-out) MUST transition that session to `CLOSING` and run the same
   FR-017 cleanup as any other connection loss — a sender MUST NOT block
@@ -649,12 +661,15 @@ extension state changes.
 | `topicMaxLength` | positive integer, 0..1 | FR-056. Optional; defaults to `390` if unset. Enforced by `TopicCommandHandler` on a `TOPIC`-set attempt (`417 ERR_INPUTTOOLONG`, not `421` — reuses FR-049's length-violation numeric) and advertised as `TOPICLEN` (`SupportedFeatures`). MUST NOT exceed `400`. |
 | `whoMaskEnabled` | boolean, 0..1 | FR-061. Optional; defaults to `true` if unset. Gates `WHO`'s wildcard-mask and no-argument forms for non-administrator sessions only — `false` makes both return a bare `315 RPL_ENDOFWHO` (no `352` lines), indistinguishable from a real zero-match search. An administrator's `WHO` is never affected, checked before this setting (research.md "WHO and invisibility"). The channel-name and exact-nickname forms are never affected by it either way. |
 | `maxModesPerCommand` | positive integer, 0..1 | FR-064. Optional; defaults to `6` if unset. The maximum number of parameter-consuming channel-mode flags (`MEMBER`/`LIST`-kind) a single `MODE` command applies — flags beyond it within the same command are silently not applied (no error; the `MODE` echo reflects only what was applied). Advertised as `MODES` (`SupportedFeatures`). MUST NOT exceed `20` (research.md "MODE command grouping"). |
+| `operFailureThreshold` | positive integer, 0..1 | FR-034. Optional; defaults to `5` if unset. The number of consecutive `OPER` credential failures a single connection may accrue (`ClientSession.failedOperAttempts`) before the server disconnects it, the same "reasonable, administrator-configurable default" posture `rateLimit` already uses for abuse protection (FR-016). MUST NOT exceed `20`, the same ceiling `maxModesPerCommand` uses to catch a clearly-mistaken configuration value (research.md "OPER failed-attempt lockout"). |
 
 **Validation rules**: An invalid configuration (unknown extension id,
 conflicting listener ports, malformed rate-limit values, a
 `nicknameMaxLength`/`channelNameMaxLength`/`topicMaxLength` that isn't a
-positive integer or exceeds `400` (FR-056), or a `maxModesPerCommand`
-that isn't a positive integer or exceeds `20` (FR-064)) MUST be rejected
+positive integer or exceeds `400` (FR-056), a `maxModesPerCommand`
+that isn't a positive integer or exceeds `20` (FR-064), or an
+`operFailureThreshold` that isn't a positive integer or exceeds `20`
+(FR-034)) MUST be rejected
 with a specific, actionable error identifying the problem field (FR-012,
 SC-008) rather than falling back to a partially-applied state. An id MUST
 appear in the field matching its actual kind: a `CapabilityExtension` id

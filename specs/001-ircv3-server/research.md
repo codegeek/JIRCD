@@ -1764,6 +1764,39 @@ disclosure, e.g., via backup leak or misconfigured permissions) is the same
 threat FR-024 is already written to defend against; there's no principled
 reason to weaken it for this one credential type.
 
+## OPER failed-attempt lockout (FR-034)
+
+**Decision**: Track consecutive `OPER` credential failures per connection
+(`ClientSession.failedOperAttempts`, data-model.md); once a connection
+reaches `ServerConfiguration.operFailureThreshold` (administrator-
+configurable, defaulting to `5`, capped at `20` — the same ceiling
+`maxModesPerCommand` uses), the server disconnects it after the final
+`464 ERR_PASSWDMISMATCH` reply and security-event log entry (FR-019),
+running the same FR-017 cleanup path any other connection loss uses. The
+counter resets to `0` on that connection's next successful `OPER` and is
+scoped per-connection, never per-nickname or per-IP — a client that
+reconnects starts fresh, the same scope `rateLimitBucket` already uses.
+
+**Rationale**: `OPER` is a credential-verification command guarding
+server-wide administrative privilege — brute-forcing it is a real threat
+model FR-019 already asks the server to log against, and this project's
+established pattern for exactly this kind of abuse (FR-016's rate
+limiting) is "reasonable, administrator-configurable default," not a
+fixed universal threshold or no protection at all. Disconnecting (rather
+than merely rate-limiting further attempts) matches how `LivenessMonitor`
+and other abuse-adjacent paths already terminate a misbehaving connection
+outright rather than degrading it in place.
+
+**Alternatives considered**: *Rate-limiting `OPER` attempts via the
+existing `rateLimitBucket` (FR-016) instead of a dedicated counter* —
+rejected because `rateLimitBucket` governs message/command throughput
+generally and slowing `OPER` attempts down doesn't bound how many a
+sufficiently patient attacker eventually gets to try; a hard disconnect
+after a fixed count is the stronger, simpler guarantee FR-034's own
+wording ("disconnect the client once a threshold is exceeded") calls
+for. *No lockout at all, logging only* — rejected as insufficient given
+FR-034's explicit MUST for disconnection, not just visibility.
+
 ## Administrator channel override: SAJOIN/SAMODE (FR-057/FR-058)
 
 **Decision**: Two administrator-only in-band commands, following the
