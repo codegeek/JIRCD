@@ -16,6 +16,17 @@ serverName: irc.example.net  # optional (FR-050) — source prefix on every serv
                               # explicitly set (nicknames never can, FR-002/FR-050) — a
                               # dot-free value here is a validation error, not accepted as-is
 
+nicknameMaxLength: 9    # optional (FR-056) — defaults to 9 (RFC 2812 baseline). Positive
+                          # integer, at most 400. Enforced by NICK (432 ERR_ERRONEUSNICKNAME)
+                          # and advertised as NICKLEN.
+channelNameMaxLength: 50 # optional (FR-056) — defaults to 50, including the leading "#".
+                          # Positive integer, at most 400. Enforced by JOIN
+                          # (476 ERR_BADCHANMASK) and advertised as CHANNELLEN.
+topicMaxLength: 390      # optional (FR-056) — defaults to 390 (a widely-used real-world IRC
+                          # default; RFC 2812 defines no topic length). Positive integer, at
+                          # most 400. Enforced by TOPIC-set (417 ERR_INPUTTOOLONG) and
+                          # advertised as TOPICLEN.
+
 listeners:
   - port: 6667
     tls: false
@@ -54,6 +65,20 @@ administratorCredentials:
   `rateLimit` value MUST cause the server to refuse to start with an error
   naming the exact offending key/value (FR-012, SC-008) — not a stack
   trace, not a silent default substitution.
+- **`nicknameMaxLength`/`channelNameMaxLength`/`topicMaxLength` ARE part
+  of the "refuse to start" validation set** (FR-056): each, if set, MUST
+  be a positive integer not exceeding `400`; a non-positive value, a
+  non-integer value, or a value above `400` is rejected the same way a
+  malformed listener or rate-limit value is. Omitting any of the three
+  is valid — the RFC/convention-matching default (`9`/`50`/`390`) is
+  used instead. A successful reload changes the value `SupportedFeatures`
+  advertises (`NICKLEN`/`CHANNELLEN`/`TOPICLEN`) and the value newly
+  processed `NICK`/`JOIN`/`TOPIC` commands are checked against
+  immediately; sessions already holding a nickname or channel membership
+  that would now violate a newly-lowered limit are NOT retroactively
+  disconnected or evicted — the limit only gates new claims, the same
+  "no retroactive enforcement" posture extension-state changes already
+  have (FR-011).
 - **`serverName` IS part of the "refuse to start" validation set** if
   explicitly set: it MUST contain at least one `.` (FR-050, research.md
   "Server identity" — nicknames, FR-002's grammar, never can, so this is

@@ -231,9 +231,11 @@ confirm other channel members see the removal reflected.
 An administrator, connected as an ordinary IRC client, grants themselves
 administrator privilege via an in-band command and then issues
 administrative commands — such as enabling or disabling an optional
-extension, or looking up a client's real hostname — directly through the
-IRC protocol, without needing file system or configuration-file access to
-the server host.
+extension, looking up a client's real hostname, forcing their way into a
+channel a regular client couldn't join, or granting themselves channel-
+operator status without waiting on an existing operator — directly
+through the IRC protocol, without needing file system or configuration-
+file access to the server host.
 
 **Why this priority**: In-band administration is a peer capability to
 Story 4's configuration-file path, not a lesser one — administering a
@@ -262,6 +264,14 @@ connected clients — all without touching the configuration file.
    requests a specific client's real hostname, **Then** the server returns
    the real, unobfuscated value even if a cloaking extension currently
    obscures that client's hostname from other clients (FR-031).
+5. **Given** a session holding administrator privilege, **When** it issues
+   the force-join command against a channel that a currently-active
+   channel-mode flag would otherwise block a regular client from joining,
+   **Then** the server joins that session to the channel anyway; **When**
+   that same session, now a member of a channel that already has other
+   members and an existing operator, issues the self-op command, **Then**
+   the server grants it channel-operator status immediately, without
+   requiring an existing operator to grant it (FR-057, FR-058).
 
 ---
 
@@ -601,7 +611,12 @@ their presented (not real) hostname.
   administrative access must not depend on functionality that is out of
   scope for the initial release. Administrator credentials stored in the
   Server Configuration MUST be protected the same way as FR-024 requires
-  for the account module (not plain text; industry-standard hashing).
+  for the account module (not plain text; industry-standard hashing). A
+  successful grant MUST also set the `operator` user mode (`+o`, FR-044)
+  on that session in the same act — a client observing that session's
+  user modes (via its own `MODE` query, FR-044, or another client's
+  `WHOIS`, FR-037) MUST see it reflected immediately, not only through
+  administrator-only commands becoming usable.
 - **FR-035**: The capability-negotiation mechanism itself (FR-006, FR-007,
   FR-008 — a client's ability to request the capability list and negotiate
   a subset) MUST always be available and MUST NOT be an optional extension
@@ -621,7 +636,13 @@ their presented (not real) hostname.
   presented hostname, and real name — about a target nickname, or about
   themselves if no target is given. Like channel moderation (FR-036) and
   capability negotiation (FR-035), this is core protocol behavior and
-  MUST NOT be an optional extension subject to FR-011 toggling.
+  MUST NOT be an optional extension subject to FR-011 toggling. If the
+  target currently holds the `operator` user mode (`+o`, FR-044), the
+  lookup MUST additionally indicate that — unlike the hostname
+  resolution FR-038 defines, this indication is visible to *any* querying
+  client, not gated by administrator privilege or self-lookup, matching
+  standard IRC's `WHOIS` behavior (an operator's status is public
+  information; their real hostname is not).
 - **FR-038**: The hostname/IP value FR-037's lookup returns for the target
   MUST be resolved as follows, evaluated in order:
   1. If the querying client **is** the target (a self-lookup), the server
@@ -690,15 +711,40 @@ their presented (not real) hostname.
   point MUST be defined in terms of "which action does this flag gate,"
   not hardcoded to the one action (sending) this release's two built-in
   flags happen to gate.
-- **FR-044**: The server MUST NOT implement any user-level mode in this
-  release, and has no user-level equivalent of an "operator" concept to
-  gate one — a user-level mode command MUST receive the same standard
-  "not supported" handling any other unimplemented-but-recognized
-  command receives (see Assumptions), not be silently accepted, ignored,
-  or treated as a channel mode command. When a user-level mode is
-  introduced, whether by a future core release or an optional extension,
-  it MUST use the same open, extension-friendly mechanism FR-043
-  establishes for channel modes, not a separate, incompatible one.
+- **FR-044**: The server MUST implement a user-level mode mechanism,
+  using the same open, extension-friendly design FR-043 establishes for
+  channel modes — a named, non-closed set of flags, each defined by
+  either core or an optional server extension, so a future flag is an
+  extension addition, not a core-codebase change. This release
+  core-defines exactly one user-mode flag: `operator` (`o`), which
+  MUST be set on a session the moment it is granted administrator
+  privilege (FR-034) and MUST be clearable by that session on itself at
+  any time, revoking administrator privilege as the same act — the flag
+  and the privilege are one fact, not two independently-tracked pieces
+  of state that could drift apart. Unlike channel modes, this release's
+  user-mode mechanism is deliberately narrower in three ways, since
+  nothing beyond `operator` motivates the fuller shape yet: (1) a
+  session MAY only ever query or change its *own* user modes, never
+  another session's — an attempt to target a different nickname MUST be
+  rejected with a clear, specific error, the same posture FR-058 already
+  takes for `SAMODE`; (2) `operator` MAY only be *set* by the
+  FR-034 grant itself, never directly by a client's own mode command — a
+  non-privileged session attempting to set it directly MUST be rejected
+  with the same privilege error FR-033's other administrator-only
+  actions use, since setting it is exactly equivalent to self-granting
+  administrator privilege; (3) an already-satisfied set (already an
+  operator, setting `+o` again) or an already-absent clear (not an
+  operator, clearing `-o`) MUST be treated as a harmless no-op, not an
+  error. A user-mode command naming a flag neither core nor any
+  currently-enabled extension defines MUST be rejected with a clear,
+  specific error distinct from FR-043's channel-mode equivalent — same
+  posture (reject an undefined flag explicitly), different numeral
+  (they are different commands). This mechanism's flag catalog is what
+  the Registration Completion Burst's user-mode letter list (FR-051)
+  reads from — no longer an always-empty list now that `operator`
+  exists. `RPL_ISUPPORT` (FR-055) advertises no equivalent token for
+  user modes, matching real IRC convention — only `004`'s letter list
+  covers them.
 - **FR-045**: The server MUST allow a channel operator to grant a "voice"
   privilege to a specific member, and to later revoke it, the same way
   standard IRC does — restricted to operators, the same as every other
@@ -713,10 +759,13 @@ their presented (not real) hostname.
   status to another member, and to revoke operator status (including
   their own), the same way voice is granted and revoked (FR-045) —
   restricted to operators, the same as every other moderation action
-  (FR-013, FR-014). This is in addition to, not a replacement for,
-  first-join-gets-operator (FR-013) as how a channel's very first
-  operator is established: it's how operator status subsequently spreads
-  to other members. A non-existent target, or one who isn't currently a
+  (FR-013, FR-014) — with one exception: an administrator granting
+  themselves operator status via the dedicated self-op command (FR-058)
+  does not need to already hold operator status, by design. This is in
+  addition to, not a replacement for, first-join-gets-operator (FR-013)
+  as how a channel's very first operator is established: it's how
+  operator status subsequently spreads to other members. A non-existent
+  target, or one who isn't currently a
   member of the channel, MUST be rejected with a clear error rather than
   silently granting a privilege to no one.
 - **FR-047**: The server MUST allow a channel operator to mark a channel
@@ -737,15 +786,16 @@ their presented (not real) hostname.
   require distinguishing a softer "listed but obscured" variant some
   historical IRC networks gave private channels.
 - **FR-048**: A channel name MUST conform to a defined grammar: a leading
-  `#` followed by 1 to 49 additional characters, excluding space, comma,
-  and control characters (50 characters total, maximum) — the same rigor
-  already applied to nickname format (FR-002's uniqueness rule is a
-  separate, independent check from this one, mirroring how nickname
-  format and nickname uniqueness are independent checks). A `JOIN`
-  attempt naming a channel that violates this grammar MUST be rejected
-  with a clear, specific error distinct from the "nickname in use"-style
-  error FR-002 defines, not silently accepted as a new channel's
-  identity.
+  `#` followed by additional characters, excluding space, comma, and
+  control characters, up to the server's configured maximum channel name
+  length (FR-056; 50 characters total, including the leading `#`, by
+  default) — the same rigor already applied to nickname format (FR-002's
+  uniqueness rule is a separate, independent check from this one,
+  mirroring how nickname format and nickname uniqueness are independent
+  checks). A `JOIN` attempt naming a channel that violates this grammar
+  MUST be rejected with a clear, specific error distinct from the
+  "nickname in use"-style error FR-002 defines, not silently accepted as
+  a new channel's identity.
 - **FR-049**: The server MUST enforce a maximum protocol line length of
   512 bytes (including the trailing CR-LF) for a message's command and
   parameters, plus up to 4096 additional bytes for the message-tags
@@ -823,16 +873,78 @@ their presented (not real) hostname.
   the casemapping in effect (FR-052); which channel-name prefix
   character(s) are recognized (FR-048); the maximum nickname length
   (contracts/irc-protocol-commands.md "Connection Registration
-  Grammar"); the maximum channel name length (FR-048); the
-  currently-recognized channel-mode letters, in the standard
-  grouped-by-parameter-behavior form (FR-043); the member-status prefix
-  characters for operator and voice (FR-045/FR-046); and that the server
-  enforces UTF-8 for message text (FR-054), using the standard
-  `UTF8ONLY` token. A future server extension contributing an additional
-  channel-mode flag (FR-043) MUST be reflected here the same way it is
-  already reflected in `004`'s mode-letter list (FR-051) — one source of
-  truth for which channel-mode flags are currently recognized, not two
-  independently-maintained lists that could drift apart.
+  Grammar"); the maximum channel name length (FR-048); the maximum
+  channel topic length (FR-056); the currently-recognized channel-mode
+  letters, in the standard grouped-by-parameter-behavior form (FR-043);
+  the member-status prefix characters for operator and voice
+  (FR-045/FR-046); and that the server enforces UTF-8 for message text
+  (FR-054), using the standard `UTF8ONLY` token. A future server
+  extension contributing an additional channel-mode flag (FR-043) MUST
+  be reflected here the same way it is already reflected in `004`'s
+  mode-letter list (FR-051) — one source of truth for which channel-mode
+  flags are currently recognized, not two independently-maintained lists
+  that could drift apart.
+- **FR-056**: The server MUST allow an administrator to configure the
+  maximum length of a nickname, a channel name, and a channel topic
+  independently, each defaulting to this specification's baseline value
+  when not explicitly configured (nickname: 9 characters, FR-002's
+  grammar; channel name: 50 characters including the leading `#`,
+  FR-048; topic: 390 characters, a widely-used real-world IRC default —
+  see Assumptions). Each configured value MUST be a positive integer and
+  MUST NOT exceed 400 characters, rejected at load time with the same
+  specific, actionable error any other invalid configuration value gets
+  (FR-012) if violated — the 400-character ceiling keeps every field
+  comfortably within FR-049's 512-byte base line budget once command
+  framing (command name, target, sigils, CR-LF) is accounted for,
+  regardless of which field is involved. A configured value MUST be
+  enforced everywhere the corresponding baseline currently is — nickname
+  and channel name length are already part of FR-002's/FR-048's grammar
+  checks (`432`/`476`) and simply become parameterized by this
+  configuration rather than a fixed constant — and MUST be reflected in
+  the `RPL_ISUPPORT` advertisement (FR-055) so a client never has to
+  discover the actual enforced limit by trial and error. A channel
+  topic-change attempt (FR-040) exceeding the configured topic length is
+  a new enforcement case with no prior length check of its own: the
+  server MUST reject it with the same `417 ERR_INPUTTOOLONG` error
+  FR-049 already uses for an oversized protocol line — the same class of
+  "input exceeds a configured length limit" failure — not silently
+  truncate it to fit.
+- **FR-057**: The server MUST provide a dedicated in-band command,
+  restricted to administrator privilege (FR-033), through which an
+  administrator joins any channel by name — creating it if it doesn't
+  exist (FR-003) or joining an existing one — bypassing every
+  currently-active channel-mode flag that gates `JOIN` (FR-043's `gates`
+  mechanism), the same class of restriction a future invite-only-style
+  extension would enforce against an ordinary client's `JOIN`. This is a
+  distinct, explicit command from ordinary `JOIN`, not a privilege
+  bypass silently applied to `JOIN` itself — an administrator's regular
+  `JOIN` remains subject to the same gates as anyone else's, so bypass
+  only happens when deliberately invoked. It does not bypass the
+  nickname/channel-name grammar (FR-002/FR-048) or UTF-8 validity
+  (FR-054) — a malformed channel name is rejected the normal way — and
+  it does not itself grant operator status (FR-058 is the separate
+  mechanism for that). No channel-mode flag defined this release
+  actually gates `JOIN` (FR-043's `gates` mechanism has no such flag
+  yet), so this command has no observable bypass effect yet, the same
+  "mechanism exists now, no flag exercises it yet" posture FR-043
+  itself already establishes — but it MUST be wired to the same
+  `JOIN`-gate check point ordinary `JOIN` uses, so a future
+  JOIN-gating extension is bypassed by administrators automatically,
+  without further changes to this command.
+- **FR-058**: The server MUST provide a dedicated in-band command,
+  restricted to administrator privilege (FR-033) and to a sender who is
+  currently a member of the target channel, through which an
+  administrator grants or revokes channel-operator status on
+  themselves specifically — regardless of whether they already hold
+  it, and regardless of whether the channel already has one or more
+  existing operators (the exception FR-046 itself names). This command
+  MUST be scoped to the sender's own membership only — it MUST NOT
+  accept or apply to a different target nickname; granting operator
+  status to someone else remains exclusively FR-046's mechanism,
+  restricted to existing operators. A sender who isn't currently a
+  member of the target channel MUST be rejected with the standard
+  "not on channel" error rather than being implicitly joined — FR-057's
+  force-join command is the separate, explicit step for that.
 
 ### Key Entities
 
@@ -979,19 +1091,29 @@ their presented (not real) hostname.
   minimal set — only tokens this specification already has a concrete,
   decided answer for. Tokens some real networks advertise but this
   release has no defined limit or behavior for (e.g., a per-client
-  channel-join limit, an explicit topic-length cap distinct from
-  FR-049's general line-length budget, a network name distinct from
-  FR-050's server name, multi-target `PRIVMSG`) are omitted rather than
-  advertised with an invented value — an absent token is the standard,
-  correct way to say "unspecified," not a gap to fill with a guess.
+  channel-join limit, a network name distinct from FR-050's server name,
+  multi-target `PRIVMSG`) are omitted rather than advertised with an
+  invented value — an absent token is the standard, correct way to say
+  "unspecified," not a gap to fill with a guess.
+- FR-056's topic-length default (390 characters) is not an RFC value —
+  RFC 2812 defines no topic length at all — but a widely-used real-world
+  IRC default (several deployed networks converge on it), chosen over
+  inventing an arbitrary number of this specification's own. The shared
+  400-character ceiling on all three configurable lengths (nickname,
+  channel name, topic) exists purely to keep configuration mistakes from
+  producing a value that can never fit a valid protocol line under
+  FR-049's 512-byte budget — it is a safety bound, not a target value
+  administrators are expected to configure up to.
 - Channel modes beyond moderated-mode and members-only (FR-013/FR-043),
-  and user modes entirely (FR-044), are recognized at the wire-protocol
-  level — a future client library can still parse them from any server —
-  but their behavior is deferred past this release, the same treatment
-  already given to `AUTHENTICATE`/SASL (Story 3) and `NickServ`/`ChanServ`-
-  style commands. This is a scope boundary, not an oversight: FR-013's
-  two implemented flags are what channel moderation (Story 5) actually
-  needs, and nothing in this release depends on any other mode existing.
+  and user modes beyond `operator` (FR-044), are recognized at the
+  wire-protocol level — a future client library can still parse them
+  from any server — but their behavior is deferred past this release,
+  the same treatment already given to `AUTHENTICATE`/SASL (Story 3) and
+  `NickServ`/`ChanServ`-style commands. This is a scope boundary, not an
+  oversight: FR-013's two implemented channel flags and FR-044's one
+  implemented user flag are what this release's actual stories need
+  (Story 5's moderation; administrator visibility, this change), and
+  nothing in this release depends on any other mode existing.
   Unlike those other deferrals, though, FR-043/FR-044 also commit to *how*
   a later mode gets added: via an optional server extension contributing
   it (research.md "Channel/user mode extensibility"), not a core-codebase

@@ -30,6 +30,22 @@ library would require extracting it later anyway, and nothing would stop
 server-specific concerns from creeping into the parsing code in the
 meantime).
 
+**Consequence for FR-056's configurable length limits**: `Hostmask`'s
+nickname grammar and `ChannelName`'s grammar (both `jircd-protocol`) MUST
+NOT read `ServerConfiguration` directly — that would violate this
+boundary, since `ServerConfiguration` is a `jircd-core` concept and the
+dependency never goes protocol-ward. Instead, both validators take the
+maximum length as a caller-supplied parameter (e.g., `Hostmask.isValidNickname(String,
+int)`, `ChannelName.isValid(String, int)`); `jircd-core`'s
+`NickCommandHandler`/`JoinCommandHandler` read the actual configured
+value from `ServerConfiguration` and pass it in on every call. The
+*shape* grammar (leading letter/`#`, allowed character set) stays a pure,
+config-independent `jircd-protocol` fact; only the numeric ceiling is
+externalized — a future client library depending on `jircd-protocol`
+still gets a fully self-contained grammar check, just parameterized
+instead of hardcoded, and still has no reason to know `ServerConfiguration`
+exists.
+
 ## Wire-protocol command & numeric completeness
 
 **Decision**: `jircd-protocol`'s `Command` and `NumericReply` catalogs
@@ -139,11 +155,13 @@ registration, `UserCommandHandler` sends a fixed burst using both:
 `001 RPL_WELCOME`, `002 RPL_YOURHOST` (`serverName` + `serverVersion`),
 `003 RPL_CREATED` (this process's start time — not a fixed software
 release date), `004 RPL_MYINFO` (`serverName`, `serverVersion`, and the
-currently-recognized user-mode and channel-mode letters, read from the
-same server-scoped `ChannelMode` catalog snapshot `005`'s `CHANMODES`
-also reads, research.md "ISUPPORT / RPL_ISUPPORT" — an empty user-mode
-list this release, per FR-044), `005 RPL_ISUPPORT` (research.md
-"ISUPPORT / RPL_ISUPPORT"), then `422 ERR_NOMOTD` to close the burst.
+currently-recognized channel-mode letters, read from the same
+server-scoped `ChannelMode` catalog snapshot `005`'s `CHANMODES` also
+reads, research.md "ISUPPORT / RPL_ISUPPORT", plus the currently-
+recognized user-mode letters, read from the `UserMode` catalog
+(research.md "User mode: `operator`" — `o` this release, FR-044)),
+`005 RPL_ISUPPORT` (research.md "ISUPPORT / RPL_ISUPPORT"), then
+`422 ERR_NOMOTD` to close the burst.
 
 **Rationale**: This closes two real gaps at once, not one. First, the
 narrower one: the "Connection Registration" contract had referenced "the
@@ -258,17 +276,24 @@ feature-and-limit advertisements — not RFC 2812's original `RPL_BOUNCE`
 ("try this other server") meaning, which is effectively unused in
 practice across the deployed IRC ecosystem. This release's token set
 (data-model.md `SupportedFeatures`) is fixed and minimal:
-`CASEMAPPING=rfc1459` (FR-052), `CHANTYPES=#` (FR-048), `NICKLEN=9`,
-`CHANNELLEN=50` (FR-048), `MODES=1`, `CHANMODES=,,,mnps` (from the
-`ChannelMode` catalog, FR-043), `PREFIX=(ov)@+` (FR-045/FR-046), and
-`UTF8ONLY` (FR-054) — every token restates a value this project already
-committed to elsewhere, none is a new, independently-configurable
-setting. `SupportedFeatures` itself is server-scoped, not per-session:
-the fixed tokens are constants, and `CHANMODES`/`PREFIX` — the only
-tokens derived from state that can change at all — are recomputed when
-`ExtensionRegistry`'s state changes (an extension enable/disable),
-not on every new registration; every session's burst reads the same,
-already-current shared value.
+`CASEMAPPING=rfc1459` (FR-052), `CHANTYPES=#` (FR-048), `NICKLEN`,
+`CHANNELLEN`, `TOPICLEN` (FR-056 — 9/50/390 by default, but each
+administrator-configurable via `ServerConfiguration`, not fixed
+constants the way `CASEMAPPING`/`CHANTYPES` are), `MODES=1`,
+`CHANMODES=,,,mnps` (from the `ChannelMode` catalog, FR-043),
+`PREFIX=(ov)@+` (FR-045/FR-046), and `UTF8ONLY` (FR-054) — every token
+restates a value this project already committed to elsewhere, none is a
+new, independently-configurable setting *this decision itself*
+introduces (FR-056 introduces the configurability; this decision only
+consumes it). `SupportedFeatures` itself is server-scoped, not
+per-session: the truly fixed tokens (`CASEMAPPING`, `CHANTYPES`,
+`MODES`, `UTF8ONLY`) are constants; `CHANMODES`/`PREFIX` are recomputed
+when `ExtensionRegistry`'s state changes (an extension enable/disable);
+and `NICKLEN`/`CHANNELLEN`/`TOPICLEN` are recomputed whenever
+`ServerConfiguration` is (re)loaded — startup, and any successful
+`SIGHUP`/`REHASH` reload thereafter (contracts/server-configuration.md
+"Live reload") — never on every new registration in any case; every
+session's burst reads the same, already-current shared value.
 
 **Rationale**: This resolves a deferral this project made explicit
 earlier and deliberately left open rather than silently dropped
@@ -298,16 +323,19 @@ well-defined transition point to recompute from instead.
 
 **Alternatives considered**:
 - *Advertise a larger, more "complete" token set (e.g., `TARGMAX`,
-  `TOPICLEN`, `CHANLIMIT`, `NETWORK`) to look more feature-complete*:
-  rejected — this project has no concrete, decided value for any of
-  these (no per-client channel limit is enforced, no topic-length cap
-  exists separate from the general line-length budget, no "network name"
-  concept distinct from `serverName` exists). Advertising a token with
-  an invented value would be worse than omitting it — an absent
-  `ISUPPORT` token already has a well-understood meaning ("unspecified"),
-  matching this project's established discipline of not inventing
-  limits it doesn't actually enforce (the same reasoning `serverVersion`
-  and the max-connections deferral already used).
+  `CHANLIMIT`, `NETWORK`) to look more feature-complete*: rejected — this
+  project has no concrete, decided value for any of these (no per-client
+  channel limit is enforced, no "network name" concept distinct from
+  `serverName` exists). Advertising a token with an invented value would
+  be worse than omitting it — an absent `ISUPPORT` token already has a
+  well-understood meaning ("unspecified"), matching this project's
+  established discipline of not inventing limits it doesn't actually
+  enforce (the same reasoning `serverVersion` and the max-connections
+  deferral already used). `TOPICLEN` was originally omitted under this
+  same reasoning — no topic-length cap existed separate from the general
+  line-length budget — until FR-056 gave the project a concrete, enforced
+  answer, at which point omitting it would itself have become the
+  inconsistent choice.
 - *Recompute `CHANMODES`/`PREFIX` fresh on every registration, reading
   the `ChannelMode` catalog live at that moment (the original shape this
   decision was first written with)*: reconsidered and rejected — not
@@ -327,6 +355,84 @@ well-defined transition point to recompute from instead.
   registration burst positionally (a minority, but real) expect that
   order; nothing is gained by deviating from the near-universal
   convention.
+
+## Configurable protocol length limits (FR-056)
+
+**Decision**: Three previously-fixed values become
+administrator-configurable `ServerConfiguration` fields, each with a
+default matching this specification's existing baseline: nickname
+maximum length (9, previously hardcoded in the "Connection Registration
+Grammar" nickname production), channel name maximum length (50,
+including the leading `#`, previously hardcoded in FR-048/"Channel Name
+Grammar"), and channel topic maximum length (390, newly introduced —
+this project never enforced one before, research.md "ISUPPORT /
+RPL_ISUPPORT"). All three share one validation rule at config load time:
+a positive integer, at most 400 — a shared safety ceiling, not a
+per-field tuned value, chosen so no combination of configured lengths
+can produce a value that structurally cannot fit within FR-049's
+512-byte base protocol line once command framing (command name, target
+parameter, sigils, CR-LF) is subtracted, regardless of which field is
+involved or how the other two are configured. Enforcement: nickname and
+channel name length violations continue to use their existing grammar
+rejections (`432`/`476`) — only the length *value* they check against
+becomes configuration-derived instead of a compiled-in constant, the
+check itself is unchanged. A topic exceeding the configured length is
+new: no rejection path existed for it before, so it reuses `417
+ERR_INPUTTOOLONG` (FR-049's numeric for "input exceeds a configured size
+limit") rather than introducing a new numeric or silently truncating.
+All three values are advertised via `RPL_ISUPPORT` (`NICKLEN`,
+`CHANNELLEN`, `TOPICLEN`, research.md "ISUPPORT / RPL_ISUPPORT") so a
+client never has to discover the actually-enforced value by trial and
+error, and `SupportedFeatures` recomputes those three tokens whenever
+`ServerConfiguration` is (re)loaded — the same "recompute only at the
+point that actually changes it" discipline already applied to
+`CHANMODES`/`PREFIX` on extension-state changes.
+
+**Rationale**: Every other identity- and capacity-shaping value in this
+project is already administrator-configurable through
+`ServerConfiguration` (listener ports, rate limits, the server name
+itself, FR-050) with a sensible RFC/convention-matching default when
+unset; nickname and channel-name length were the two remaining
+protocol-shape constants still compiled in rather than following that
+same pattern, and topic length had never been given a limit at all
+despite being exactly the kind of unbounded-user-input field FR-049's
+line-length reasoning already argues should never go unbounded. Reusing
+`417` for topic overlength keeps this consistent with the project's
+established numeric-reuse discipline (`417`/`476` reused rather than
+inventing new numerics, research.md "Wire-protocol command & numeric
+completeness") and with the explicit "reject, don't silently mangle"
+posture FR-049 and FR-054 already committed to for other length/validity
+failures — the alternative (silent truncation, the treatment this
+project *does* use for `USER`'s overlong `<user>` parameter) is only
+appropriate where RFC 2812 defines no rejection numeral at all; `417`
+already exists and already means exactly this failure class, so
+truncating here would be inconsistent, not simpler.
+
+**Alternatives considered**:
+- *Leave nickname/channel-name length as fixed constants, only make
+  topic length configurable (the minimal read of "topic length should
+  be configurable")*: rejected — the moment topic length becomes
+  administrator-tunable, leaving the other two protocol-shape lengths
+  hardcoded is an arbitrary inconsistency an administrator has no way to
+  anticipate ("why can I configure one length limit but not the other
+  two?"), not a deliberately scoped decision.
+- *Give each field its own independent upper bound tuned to its typical
+  real-world range (e.g., nickname ≤ 30, channel name ≤ 64, topic ≤
+  300) instead of one shared 400-character ceiling*: rejected as
+  needless precision — the ceiling exists only to catch a
+  configuration mistake before it produces an unusable server, not to
+  encode a "recommended maximum" per field; a single, easy-to-state
+  number that comfortably fits all three is simpler to specify, test,
+  and explain than three separately-justified numbers that all exist
+  for the same reason.
+- *Silently truncate an overlong topic to the configured limit instead
+  of rejecting it (mirroring `USER`'s `<user>` truncation)*: rejected —
+  `<user>` truncation is a fallback used only because RFC 2812 defines
+  no rejection numeral for that specific case; `417 ERR_INPUTTOOLONG`
+  already exists and already covers exactly this failure class (FR-049),
+  so silently mangling the topic instead of using it would reintroduce
+  the "guess what happened" problem FR-049 and FR-054 were written to
+  eliminate.
 
 ## Networking model
 
@@ -742,6 +848,120 @@ extended here to channel visibility.
   unambiguously requires) is simpler, defensible, and easy to relax later
   if a concrete reason to distinguish them ever shows up.
 
+## User mode: `operator` (FR-034/FR-044)
+
+**Decision**: `UserMode` (data-model.md) is a new Value Object, deliberately
+a much smaller sibling of `ChannelMode` rather than a reuse of the same
+type — it has `id`, a wire `flag` character, and `definedBy` (`CORE` or a
+`ServerExtension`), but no `kind` and no `gates`: every user mode this
+release's design actually needs to represent is a plain boolean with
+exactly one, fixed rule for who may set it, so those two `ChannelMode`
+fields would be pure unused surface if copied over. Core contributes
+exactly one entry: `operator` (`o`). `ClientSession` gains a
+`userModes: Set<UserMode>` field, but `operator`'s membership in it is
+never independently toggled — it is set and cleared as a direct
+side-effect of `ClientSession.administratorPrivilege` changing, in both
+directions:
+- `OPER` succeeding (FR-034, `OperCommandHandler`) sets both
+  `administratorPrivilege = true` and adds `operator` to `userModes` in
+  the same operation.
+- A session clearing `operator` on itself via `MODE <self> -o` clears
+  both `userModes` and `administratorPrivilege` — not just the visible
+  flag. A user mode that could show "not an operator" while
+  `administratorPrivilege` was still silently `true` (or vice versa)
+  would be a real, security-relevant lie to any observer trying to
+  reason about who currently holds administrative power (including the
+  session's own client displaying its own modes) — this project's
+  established "don't let two representations of one fact drift apart"
+  discipline (data-model.md `SupportedFeatures`'s `CHANMODES`/`004`
+  consistency guarantee is the same discipline, applied to a different
+  pair of facts).
+
+`MODE`'s user-targeted form is scoped narrowly: `MODE <nickname>` with no
+mode string is a query (`221 RPL_UMODEIS`); `MODE <nickname>
+<+/->o` is the only settable form this release defines. A target other
+than the sender's own current nickname is rejected outright
+(`502 ERR_USERSDONTMATCH`, RFC 2812's own numeral for exactly this) —
+this release has no "set another user's modes" capability, mirroring the
+same self-only scope decision FR-058's `SAMODE` already made, for the
+same reason (nothing has asked for a broader one, and a broader one is a
+strict widening that can be added later without redesigning this one).
+Setting `+o` directly (not via `OPER`) from a non-privileged session is
+rejected with `481 ERR_NOPRIVILEGES` — the same numeral every other
+administrator-only action already uses, since self-granting `+o` this
+way would be indistinguishable from self-granting administrator
+privilege, which is exactly what FR-034 exists to gate. An unrecognized
+flag letter is rejected with `501 ERR_UMODEUNKNOWNFLAG` — the RFC's own
+user-mode equivalent of `472 ERR_UNKNOWNMODE`, reused for the same
+reason `472` was: an exact-fit existing numeral, not a project-specific
+invention. `WHOIS` (FR-037) additionally surfaces `operator` status via
+`313 RPL_WHOISOPERATOR` when the target holds it — visible to any
+querying client, not gated by administrator privilege or self-lookup,
+since operator status is public information on real IRC networks (unlike
+the real-hostname resolution FR-038 defines, which is exactly the kind
+of information that IS gated).
+
+**Rationale**: This is the direct implementation of the requirement that
+motivated it — "when an administrator is authenticated, `+o` should be
+added to user modes" — but it also finally gives FR-044's
+long-standing extension-mechanism promise (research.md, above:
+"When a user-level mode is introduced... it MUST use the same open,
+extension-friendly mechanism FR-043 establishes") its first real
+consumer, the same way `voice`/`operator` gave the `MEMBER`-kind
+`ChannelMode` shape its first real validation. Deriving `userModes`
+from `administratorPrivilege` rather than treating them as two
+independently-settable pieces of state avoids inventing a new
+source-of-truth question this project doesn't need: `administratorPrivilege`
+already exists, is already checked by `EXTENSION`/`WHOHOST`/`REHASH`/
+`SAJOIN`/`SAMODE`, and adding a second, separately-toggleable flag that
+merely *usually* agrees with it would be a latent inconsistency bug
+waiting to happen, not a feature. Allowing self-revocation via `-o`
+(and having it actually revoke the privilege, not just hide the flag)
+mirrors the self-revocation allowance FR-046 already grants for
+channel-operator status (`MODE -o <self>`) and IRC convention generally
+— an operator can always step back down from their own privilege without
+needing anyone else's permission, symmetric with never needing anyone
+else's permission to be granted it via `OPER` either.
+
+**Alternatives considered**:
+- *Give `UserMode` the same `kind`/`gates` shape as `ChannelMode`, for
+  structural symmetry*: rejected — `gates` exists to decouple "which
+  command does this flag restrict" because `ChannelMode` flags restrict
+  several different channel-scoped commands (`SEND`, `JOIN`, `DISCOVER`).
+  No `UserMode` this release restricts anything except itself (whether
+  `+o` may be set) — there is no second command for `operator` to gate.
+  Adding the field now, unused, would be exactly the "guessing the right
+  shape without a concrete consumer" mistake this project has
+  deliberately avoided elsewhere (e.g., `VALUE`/`LIST`-kind `ChannelMode`
+  storage, above) — if a future user-mode flag genuinely needs to gate
+  something, `gates` can be added to `UserMode` then, informed by what
+  that flag actually needs, not guessed now.
+- *Track `operator` status only as `userModes` membership, retire
+  `ClientSession.administratorPrivilege` as a separate field*: rejected
+  — `administratorPrivilege` predates this decision and is already the
+  name every other FR (FR-033, FR-057, FR-058) and a substantial part of
+  `jircd-server-extensions/admin` is written in terms of; renaming the
+  concept purely for this change would be churn across already-settled
+  requirements for no behavioral benefit — keeping `administratorPrivilege`
+  as the single source of truth and `userModes` as its protocol-visible
+  reflection achieves the same "one fact, not two" guarantee without the
+  rename.
+- *Let an administrator's `MODE <self> +o` re-assertion (already an
+  operator) be rejected as redundant, mirroring how an unrecognized flag
+  is rejected*: rejected — an unrecognized flag is a genuine error (the
+  flag doesn't exist); re-asserting a flag that's already set is a
+  harmless idempotent no-op, the standard IRC convention for redundant
+  mode changes, and erroring on it would make scripted/automated admin
+  tooling need to first query current state before every `+o` just to
+  avoid a spurious rejection.
+- *Silently ignore a non-privileged client's direct `+o` attempt, no
+  error* (mirroring how some real ircds handle it): rejected — this
+  project's established posture throughout is "reject explicitly, don't
+  silently ignore or no-op" for anything that isn't already a harmless
+  idempotent case (FR-049's line-length, FR-054's UTF-8, FR-056's topic
+  length all reject rather than silently drop); `481` already exists and
+  already means exactly this failure class.
+
 ## Deterministic testing under concurrency
 
 **Decision**: Success criteria expressed as wall-clock budgets (SC-002's 1s
@@ -896,6 +1116,75 @@ weaker/faster algorithm (e.g., plain SHA-256) on the reasoning that it's
 disclosure, e.g., via backup leak or misconfigured permissions) is the same
 threat FR-024 is already written to defend against; there's no principled
 reason to weaken it for this one credential type.
+
+## Administrator channel override: SAJOIN/SAMODE (FR-057/FR-058)
+
+**Decision**: Two new administrator-only in-band commands, following the
+same "restricted to administrator privilege" pattern as `OPER`/`EXTENSION`/
+`WHOHOST`/`REHASH` (contracts/irc-protocol-commands.md "Administration"):
+
+- `SAJOIN <channel>` — the administrator's session joins `channel`
+  through the *same* create-or-join path ordinary `JOIN` uses
+  (`ChannelRegistry`, FR-003; first-join-gets-operator, FR-013, applies
+  identically if the channel doesn't yet exist), except the `JOIN`-gate
+  check point (FR-043's `gates` mechanism, data-model.md `Channel`
+  validation rules) is skipped entirely for this command. Grammar
+  (FR-002/FR-048) and UTF-8 validity (FR-054) checks are NOT skipped — a
+  malformed channel name is rejected the same way for `SAJOIN` as for
+  `JOIN`.
+- `SAMODE <channel> <+o|-o>` — grants or revokes operator status on the
+  sender's own membership in `channel`, bypassing FR-046's "sender must
+  already be a channel operator" precondition. Requires the sender to
+  already be a member (via `JOIN` or `SAJOIN`) — `SAMODE` does not join.
+  No target parameter: self only, by design (see Alternatives).
+
+Both are wired into `jircd-server-extensions/admin`, the same module
+`OPER`/`EXTENSION`/`WHOHOST`/`REHASH` already live in — this is squarely
+"administrator/operational concerns specific to running this service,"
+plan.md's own description of that bounded context, not a new one.
+
+**Rationale**: Real deployed IRC networks distinguish an administrator's
+*ordinary* client commands from their *privileged override* commands
+precisely so a bypass is a deliberate, auditable act rather than a
+silent side effect of routine use — an administrator investigating
+something by typing an everyday `JOIN` should not unknowingly end up
+bypassing a restriction they didn't intend to bypass. `SAJOIN`/`SAMODE`
+are the well-known real-world names for exactly this pattern (this
+project already reuses well-known real-world names over inventing new
+ones where one exists — the same discipline `417`/`432`/`476`'s numeral
+choices already follow). Restricting `SAMODE` to self-targeting only
+(no arbitrary-nickname, no arbitrary-modestring form) matches the actual
+requirement — "an administrator can op themselves" — without opening a
+much larger surface (arbitrary mode overrides against arbitrary targets)
+nothing has asked for and this project's own "no speculative generality"
+guidance would flag.
+
+**Alternatives considered**:
+- *Make administrator bypass silent and automatic on ordinary `JOIN`/
+  `MODE` instead of new commands* (mirroring how FR-047's discovery
+  bypass on `TOPIC`/`NAMES`/`LIST` already works transparently):
+  rejected for this specific pair — discovery (seeing that a channel
+  exists) is a passive, low-consequence action where transparent bypass
+  is harmless; forcing entry into a gated channel or seizing operator
+  status are active, consequential actions where an explicit, distinct
+  command is the safer and more auditable design, and matches the
+  established real-world convention for exactly this case.
+- *A general `SAMODE <channel> <modestring> [<target>]` accepting any
+  mode change against any target, admin-privilege-gated* (the fuller
+  real-world `SAMODE` shape on some networks): rejected as scope beyond
+  what was asked — this release has no request for administrators to
+  override bans, revoke *other* members' operator status, or set
+  arbitrary channel modes on someone else's behalf; a self-op-only
+  command is the minimal shape that satisfies the actual requirement,
+  and a fuller `SAMODE` can be added later without redesigning this one
+  (it would be a strict widening, not a breaking change).
+- *Have `SAJOIN` also auto-grant operator status*, folding FR-057 and
+  FR-058 into one command: rejected — the two are independently useful
+  (an administrator investigating a channel via `SAJOIN` may deliberately
+  want to observe without becoming an operator and changing the
+  channel's visible member list semantics), and keeping them separate
+  mirrors how real networks keep force-join and force-op as distinct
+  commands, not a combined one.
 
 ## Cloak extension boundary (FR-031)
 

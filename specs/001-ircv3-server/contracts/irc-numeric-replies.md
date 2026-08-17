@@ -49,26 +49,30 @@ during that window.
 | `331` | `RPL_NOTOPIC` | `TOPIC` query on a channel with no topic set | FR-040 |
 | `332` | `RPL_TOPIC` | `TOPIC` query on a channel with a topic set | FR-040 |
 | `311` | `RPL_WHOISUSER` | Successful `WHOIS` | FR-037, FR-038 |
+| `313` | `RPL_WHOISOPERATOR` | `WHOIS` for a target currently holding the `operator` user mode — visible to any querying client, not gated by administrator privilege or self-lookup (FR-037, FR-044) | FR-037, FR-044 |
 | `318` | `RPL_ENDOFWHOIS` | End of a `WHOIS` reply | FR-037 |
+| `221` | `RPL_UMODEIS` | `MODE <nickname>` self-query with no mode string (FR-044) | FR-044 |
 | `353` | `RPL_NAMREPLY` | `JOIN`, `NAMES` — nicknames prefixed `@` (operator) or `+` (voiced, non-operator) per irc-protocol-commands.md "Channel Operations" | FR-003, FR-041, FR-045, FR-046 |
 | `366` | `RPL_ENDOFNAMES` | `JOIN`, `NAMES` | FR-003, FR-041 |
 | `381` | `RPL_YOUREOPER` | Successful `OPER` | FR-034 |
 | `382` | `RPL_REHASHING` | Successful `REHASH` | FR-011, FR-012 (research.md "Configuration reload mechanism") |
 | `401` | `ERR_NOSUCHNICK` | `WHOIS` for a nickname that isn't connected | FR-037 |
 | `403` | `ERR_NOSUCHCHANNEL` | `TOPIC`/`NAMES` for a channel that doesn't exist, or that is private/secret and the requester is neither a member nor an administrator (identical response either way, FR-047) | FR-047 |
-| `417` | `ERR_INPUTTOOLONG` | A line exceeding the 512-byte base limit or the 4096-byte `message-tags` allowance (FR-049) — not part of RFC 1459/2812 (there is no numeric defined in that gap, 416-420), but a widely-adopted de facto standard purpose-built for exactly this case, the same way this project already treats IRCv3's `CAP` numerics as belonging alongside the RFC set | FR-049 |
+| `417` | `ERR_INPUTTOOLONG` | A line exceeding the 512-byte base limit or the 4096-byte `message-tags` allowance (FR-049), or a `TOPIC`-set attempt exceeding the configured `topicMaxLength` (FR-056) — not part of RFC 1459/2812 (there is no numeric defined in that gap, 416-420), but a widely-adopted de facto standard purpose-built for exactly this case, the same way this project already treats IRCv3's `CAP` numerics as belonging alongside the RFC set | FR-049, FR-056 |
 | `421` | `ERR_UNKNOWNCOMMAND` | Malformed/unrecognized command, a wire-protocol-recognized command with no handler in this release, or a human-readable-content parameter (`PRIVMSG`/`NOTICE` body, topic, realname, channel name) containing invalid UTF-8 (FR-054) | FR-015, FR-054 |
 | `431` | `ERR_NONICKNAMEGIVEN` | `NICK` with no argument | FR-001 (input validation) |
 | `432` | `ERR_ERRONEUSNICKNAME` | `NICK` violating the nickname grammar (invalid leading/body characters or over 9 characters) | irc-protocol-commands.md "Connection Registration Grammar" |
 | `433` | `ERR_NICKNAMEINUSE` | `NICK` naming an already-claimed nickname | FR-002 |
 | `441` | `ERR_USERNOTINCHANNEL` | `MODE +v`/`-v` or `+o`/`-o <nickname>` naming a nickname that isn't a current member of the target channel | FR-045, FR-046 |
-| `442` | `ERR_NOTONCHANNEL` | `PART`/`KICK`/`MODE` on a channel the sender hasn't joined; `PRIVMSG`/`NOTICE` to a channel with `members-only` active that the sender hasn't joined (FR-004, FR-013/FR-043 — membership is not required for `PRIVMSG`/`NOTICE` otherwise) | FR-003, FR-004, FR-014 |
-| `476` | `ERR_BADCHANMASK` | `JOIN` naming a channel that violates the Channel Name Grammar (irc-protocol-commands.md "Channel Operations") | FR-048 |
+| `442` | `ERR_NOTONCHANNEL` | `PART`/`KICK`/`MODE` on a channel the sender hasn't joined; `PRIVMSG`/`NOTICE` to a channel with `members-only` active that the sender hasn't joined (FR-004, FR-013/FR-043 — membership is not required for `PRIVMSG`/`NOTICE` otherwise); `SAMODE` from an administrator who isn't currently a member of the target channel (FR-058) | FR-003, FR-004, FR-014, FR-058 |
+| `476` | `ERR_BADCHANMASK` | `JOIN` or `SAJOIN` naming a channel that violates the Channel Name Grammar (irc-protocol-commands.md "Channel Operations") — `SAJOIN` bypasses `JOIN`-gating flags, not the name grammar itself (FR-057) | FR-048, FR-057 |
 | `461` | `ERR_NEEDMOREPARAMS` | Command missing required parameters | FR-015 |
 | `464` | `ERR_PASSWDMISMATCH` | Failed `OPER` (also logged as a security event, FR-019) | FR-034 |
 | `472` | `ERR_UNKNOWNMODE` | `MODE` given a flag the core moderation command set doesn't define | FR-015, FR-036 (core input validation — `MODE` is never extension-gated) |
-| `481` | `ERR_NOPRIVILEGES` | `EXTENSION`/`WHOHOST`/`REHASH` (or any admin command) attempted without administrator privilege | FR-033 |
+| `481` | `ERR_NOPRIVILEGES` | `EXTENSION`/`WHOHOST`/`REHASH`/`SAJOIN`/`SAMODE` (or any admin command) attempted without administrator privilege; a non-privileged session's own `MODE <self> +o` (FR-033, FR-044) | FR-033, FR-044, FR-057, FR-058 |
 | `482` | `ERR_CHANOPRIVSNEEDED` | `KICK`/`MODE` attempted by a non-operator | FR-014 |
+| `501` | `ERR_UMODEUNKNOWNFLAG` | `MODE <nickname>` given a flag letter no currently-recognized `UserMode` defines (FR-044) | FR-044 |
+| `502` | `ERR_USERSDONTMATCH` | `MODE <nickname>` (query or set) naming a nickname other than the sender's own current one — self-only in this release (FR-044) | FR-044 |
 | `CAP * LS` | (IRCv3, not a numeric) | `CAP LS` | FR-006 |
 | `CAP * ACK` / `CAP * NAK` | (IRCv3) | `CAP REQ` | FR-007 |
 
@@ -86,7 +90,7 @@ trigger them is "Recognized only" per irc-protocol-commands.md).
 | `001` | `RPL_WELCOME` *(Used)* | `211` | `RPL_STATSLINKINFO` | `321` | `RPL_LISTSTART` |
 | `002` | `RPL_YOURHOST` *(Used)* | `212` | `RPL_STATSCOMMANDS` | `322` | `RPL_LIST` *(Used)* |
 | `003` | `RPL_CREATED` *(Used)* | `219` | `RPL_ENDOFSTATS` | `323` | `RPL_LISTEND` *(Used)* |
-| `004` | `RPL_MYINFO` *(Used)* | `221` | `RPL_UMODEIS` | `324` | `RPL_CHANNELMODEIS` |
+| `004` | `RPL_MYINFO` *(Used)* | `221` | `RPL_UMODEIS` *(Used)* | `324` | `RPL_CHANNELMODEIS` |
 | `005` | `RPL_BOUNCE` *(Used, as `RPL_ISUPPORT`)* | `234` | `RPL_SERVLIST` | `325` | `RPL_UNIQOPIS` |
 | `200` | `RPL_TRACELINK` | `235` | `RPL_SERVLISTEND` | `331` | `RPL_NOTOPIC` *(Used)* |
 | `201` | `RPL_TRACECONNECTING` | `242` | `RPL_STATSUPTIME` | `332` | `RPL_TOPIC` *(Used)* |
@@ -106,7 +110,7 @@ trigger them is "Recognized only" per irc-protocol-commands.md).
 | `302` | `RPL_USERHOST` | `303` | `RPL_ISON` | `368` | `RPL_ENDOFBANLIST` |
 | `305` | `RPL_UNAWAY` | `306` | `RPL_NOWAWAY` | `369` | `RPL_ENDOFWHOWAS` |
 | `311` | `RPL_WHOISUSER` *(Used)* | `312` | `RPL_WHOISSERVER` | `371` | `RPL_INFO` |
-| `313` | `RPL_WHOISOPERATOR` | `314` | `RPL_WHOWASUSER` | `372` | `RPL_MOTD` |
+| `313` | `RPL_WHOISOPERATOR` *(Used)* | `314` | `RPL_WHOWASUSER` | `372` | `RPL_MOTD` |
 | `315` | `RPL_ENDOFWHO` | `317` | `RPL_WHOISIDLE` | `374` | `RPL_ENDOFINFO` |
 | `318` | `RPL_ENDOFWHOIS` *(Used)* | `319` | `RPL_WHOISCHANNELS` | `375` | `RPL_MOTDSTART` |
 | `376` | `RPL_ENDOFMOTD` | `381` | `RPL_YOUREOPER` *(Used)* | `382` | `RPL_REHASHING` *(Used)* |
@@ -135,7 +139,7 @@ trigger them is "Recognized only" per irc-protocol-commands.md).
 | `476` | `ERR_BADCHANMASK` *(Used)* | `477` | `ERR_NOCHANMODES` | `478` | `ERR_BANLISTFULL` |
 | `481` | `ERR_NOPRIVILEGES` *(Used)* | `482` | `ERR_CHANOPRIVSNEEDED` *(Used)* | `483` | `ERR_CANTKILLSERVER` |
 | `484` | `ERR_RESTRICTED` | `485` | `ERR_UNIQOPPRIVSNEEDED` | `491` | `ERR_NOOPERHOST` |
-| `501` | `ERR_UMODEUNKNOWNFLAG` | `502` | `ERR_USERSDONTMATCH` | | |
+| `501` | `ERR_UMODEUNKNOWNFLAG` *(Used)* | `502` | `ERR_USERSDONTMATCH` *(Used)* | | |
 
 **Contract notes**:
 - Every error reply's trailing `:<text>` parameter MUST name the specific

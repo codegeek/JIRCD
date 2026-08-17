@@ -120,7 +120,18 @@ schema in `contracts/server-configuration.md`.
 2. Send `OPER root-admin <configured-password>`.
    - **Expected**: `381 RPL_YOUREOPER`. Retry with a wrong password first
      to confirm `464 ERR_PASSWDMISMATCH` (and check it was logged, FR-019).
-3. Now privileged, send `EXTENSION DISABLE message-tags`.
+     Then send `MODE <your-nick>` (no mode string) and confirm
+     `221 RPL_UMODEIS :+o` — validates FR-044's OPER-grants-`+o` link.
+     From a *different*, non-privileged client, send `WHOIS <your-nick>`
+     and confirm `313 RPL_WHOISOPERATOR` appears — operator status is
+     visible to any client, not just administrators (FR-037). Then send
+     `MODE <your-nick> -o` and confirm a subsequent admin command (e.g.
+     `EXTENSION`) from that same session is rejected with
+     `481 ERR_NOPRIVILEGES` — self-revocation actually revokes the
+     privilege, not just the display flag.
+3. Send `OPER root-admin <configured-password>` again to restore
+   privilege, since Step 2's self-revocation just removed it. Now
+   privileged, send `EXTENSION DISABLE message-tags`.
    - **Expected**: same observable effect as Story 4 Step 2 — validates the
      "path equivalence" contract note in `contracts/server-configuration.md`,
      with no config file edit involved. Attempting `EXTENSION DISABLE
@@ -144,6 +155,30 @@ schema in `contracts/server-configuration.md`.
      directly to this session (unlike Story 4 Step 4's log-only error,
      since there's an active IRC session to reply to here), and the
      server continues running on its previous, still-valid configuration.
+7. As a non-privileged client, send `SAJOIN #staff-only`.
+   - **Expected**: `481 ERR_NOPRIVILEGES` — `SAJOIN` is admin-only, same
+     as every other command in this section (FR-057).
+8. As the privileged session, send `SAJOIN #staff-only`.
+   - **Expected**: joins the channel via the normal `JOIN`/`353`/`366`
+     replies — validates FR-057. (No currently-defined channel mode
+     actually gates `JOIN` this release, so this step only confirms the
+     command works identically to `JOIN` when there's nothing to bypass
+     yet — the bypass itself has no observable effect until a future
+     JOIN-gating extension exists.)
+9. Have two ordinary clients join `#busy`, letting the first become its
+   operator (FR-013); have the privileged session `JOIN #busy` normally
+   (now a member, but not an operator), then send `SAMODE #busy +o`.
+   - **Expected**: the privileged session is granted operator status
+     immediately, without any action from `#busy`'s existing operator —
+     validates FR-058 and Story 6 Acceptance Scenario 5. Sending
+     `SAMODE #busy +o` from the *non-privileged* first operator MUST
+     still fail with `481 ERR_NOPRIVILEGES` — `SAMODE` is not a new way
+     for a regular operator to do anything they couldn't already do via
+     `MODE`.
+10. As the privileged session, send `SAMODE #nonmember-channel +o` for a
+    channel it has not joined.
+    - **Expected**: `442 ERR_NOTONCHANNEL` — `SAMODE` does not implicitly
+      join; `SAJOIN` (Step 8) is the separate step for that.
 
 ## Story 7 — Look Up Information About a User
 

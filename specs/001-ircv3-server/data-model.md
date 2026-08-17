@@ -29,7 +29,8 @@ guarded by this aggregate.
 | `rateLimitBucket` | token bucket state | Per-connection (FR-016); see research.md "Rate limiting". |
 | `ident` | string | Derived from the `USER` command's username field at registration (FR-030); not independently verified (see spec.md Assumptions re: RFC 1413). |
 | `realHostname` | string | The connection's actual hostname/IP; always populated regardless of cloaking; source of truth for FR-032 (`WHOHOST`) and FR-038's self-lookup/administrator `WHOIS` cases. Never sent to a non-administrator client looking up a *different* client — see `UserIdentity.presentedForm` for the *display* value that case uses instead. |
-| `administratorPrivilege` | boolean | Granted via FR-034's in-band credential command; authorizes FR-032 administrative commands. Independent of `channelMemberships`/operator status. |
+| `administratorPrivilege` | boolean | Granted via FR-034's in-band credential command; authorizes FR-032 administrative commands. Independent of `channelMemberships`/operator status. Kept in lockstep with `userModes`'s `operator` entry below — never an independent third source of truth (research.md "User mode: `operator`"). |
+| `userModes` | set of `UserMode` (below) | FR-044. This release's only member is `operator` (`o`), added the instant `administratorPrivilege` becomes `true` and removed the instant it becomes `false` — never independently toggled; see `UserMode` below and Validation rules. |
 | `lastLivenessAt` | instant | Updated whenever this connection is known to be alive — traffic received from it, or a `PONG` answering the server's own `PING`. Read by this session's `LivenessMonitor` (research.md "Connection keep-alive") to decide when to probe and when to time out (FR-039). |
 
 **Validation rules**:
@@ -42,17 +43,18 @@ guarded by this aggregate.
   see research.md "Cloak extension boundary" for why the real value's
   source of truth lives on `ClientSession` itself, not in the cloak
   extension.
-- `administratorPrivilege` MUST only be settable via FR-034's credential
-  verification, never inferred from channel-operator status or any other
-  field.
+- `administratorPrivilege` MUST only be *granted* (`false` → `true`) via
+  FR-034's credential verification, never inferred from channel-operator
+  status or any other field. It MAY be *revoked* (`true` → `false`) by
+  the session's own `MODE <self> -o` (FR-044), which is the only other
+  path allowed to change it — and doing so MUST also remove `operator`
+  from `userModes` in the same act, never leaving the two out of sync
+  (research.md "User mode: `operator`").
 - `outboundQueue` reaching capacity (a member too slow to keep up with
   fan-out) MUST transition that session to `CLOSING` and run the same
   FR-017 cleanup as any other connection loss — a sender MUST NOT block
   waiting for a slow recipient's queue to drain (research.md "Message
   fan-out concurrency model").
-- `ClientSession` deliberately has no user-mode field — FR-044 scopes
-  user modes out of this release entirely, so there is nothing for one to
-  represent yet.
 - A `LivenessMonitor`-detected timeout (no traffic and no `PONG` within
   the configured window since `lastLivenessAt`) MUST transition that
   session to `CLOSING` and run the same FR-017 cleanup as any other
@@ -134,7 +136,7 @@ enforced at channel-creation time, not left to callers).
 | `operators` | set of `ClientSession` references (subset of `members`) | Who may perform moderation actions (FR-013, FR-014). |
 | `voiced` | set of `ClientSession` references (subset of `members`, independent of `operators`) | Who, in addition to `operators`, may send while `MODERATED` is active (FR-045). Granted/revoked only by an operator via `MODE +v`/`-v <nickname>` (FR-013, FR-045) — unlike `operators`, nothing grants this at JOIN time; a channel MAY have any number of voiced members, none of whom need to be operators. |
 | `activeModes` | set of `ChannelMode` (below) | Which recognized *channel-scoped* mode flags are currently set on this channel. `MEMBERS_ONLY` and `MODERATED` (FR-013) are the only two flags any code defines in this release, but the type is an open set, not a closed enum — see `ChannelMode` below for why (FR-043, research.md "Channel/user mode extensibility"). The two flags are independent: a channel MAY have neither, either, or both set at once (matches standard IRC's per-flag `MODE` semantics — this replaces an earlier, incorrect single-mutually-exclusive-state design). Set/cleared only by an operator via `MODE` (FR-013, FR-014). `voice` (FR-045) is a *`MEMBER`-scoped* `ChannelMode` (see `ChannelMode.kind` below) — its state lives in `voiced` above, not here, the same way `operator` status lives in `operators` rather than `activeModes`. |
-| `topic` | string, 0..1 | Absent (no topic set) by default. Visible to any client via `TOPIC` regardless of membership (FR-041's discovery framing applies here too); settable only by an `operator` (FR-040). Distinct from `activeModes` — viewing/setting the topic is not a "who may send a `PRIVMSG`" concern. MUST be valid UTF-8 (FR-054) — a `TOPIC`-set attempt with an invalid byte sequence is rejected as malformed (FR-015), leaving the previous topic (or absence of one) unchanged. |
+| `topic` | string, 0..1 | Absent (no topic set) by default. Visible to any client via `TOPIC` regardless of membership (FR-041's discovery framing applies here too); settable only by an `operator` (FR-040). Distinct from `activeModes` — viewing/setting the topic is not a "who may send a `PRIVMSG`" concern. MUST be valid UTF-8 (FR-054) — a `TOPIC`-set attempt with an invalid byte sequence is rejected as malformed (FR-015), leaving the previous topic (or absence of one) unchanged. MUST NOT exceed `ServerConfiguration.topicMaxLength` (FR-056, default `390`) — a `TOPIC`-set attempt exceeding it is rejected with `417 ERR_INPUTTOOLONG`, leaving the previous topic unchanged, the same "reject, don't apply partially" treatment as the UTF-8 check. |
 
 **Validation rules**:
 - `name` uniqueness is enforced the same way as nickname uniqueness (single
@@ -162,6 +164,16 @@ enforced at channel-creation time, not left to callers).
   non-operator's attempt MUST be rejected with the same `482
   ERR_CHANOPRIVSNEEDED` error FR-014's other operator-gated actions use,
   not a new error of its own.
+- Two administrator-only exceptions exist to the rules above, each its
+  own dedicated command rather than a silent bypass on `JOIN`/the
+  `operators`-membership rule (FR-057/FR-058, research.md "Administrator
+  channel override"): `SAJOIN` performs the same create-or-join `JOIN`
+  does but skips the `JOIN`-gate check point entirely; `SAMODE` adds the
+  sender to `operators` (or removes them) without requiring the sender
+  to already be in `operators` first, self-targeting only. Neither
+  exception applies to ordinary `JOIN` or to FR-046's operator-granting
+  `MODE` path — an administrator using those normally is checked
+  exactly like anyone else.
 - Any command whose semantics a `ChannelMode` can gate (currently `SEND`
   — `PRIVMSG`/`NOTICE` — `JOIN`, and `DISCOVER` — `TOPIC`-viewing,
   `NAMES`, `LIST` — `ChannelMode.gates` above) MUST reject the attempt
@@ -185,7 +197,11 @@ enforced at channel-creation time, not left to callers).
     (see the Full Channel Mode Catalog's `Gates` column,
     contracts/irc-protocol-commands.md), so this check point exists but
     is always a no-op in this release — every `JOIN` succeeds subject
-    only to FR-003's channel-creation/join behavior. A future
+    only to FR-003's channel-creation/join behavior. `SAJOIN` (FR-057)
+    is wired to this exact check point and skips it unconditionally,
+    regardless of whether it's currently a no-op — so a future
+    `JOIN`-gating flag is bypassed by `SAJOIN` automatically, with no
+    change to `SAJOIN` itself required when that flag is added. A future
     `JOIN`-gating flag (extension-contributed or core) does not require
     changing `JoinCommandHandler`'s shape to add, only registering a
     `ChannelMode` with `gates: {JOIN}` and the logic behind it — which,
@@ -298,14 +314,61 @@ the same role `Capability` plays for `CAP` (data-model.md "Capability").
   this data model deliberately does not attempt to pre-design without a
   concrete consumer driving the actual requirements.
 
+## UserMode — *Value Object, Session & Messaging*
+
+One recognized user-mode flag *definition* — the `ClientSession`-scoped
+counterpart to `ChannelMode` above, not a reuse of that type (research.md
+"User mode: `operator`" explains why: no `UserMode` this release needs a
+`kind` or a `gates` field, since every flag here is a plain boolean with
+one fixed setting rule, not several shapes gating several different
+commands the way `ChannelMode` does).
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | Stable, human-readable identifier (e.g. `operator`), the same role `ChannelMode.id` plays. Unique among every currently-recognized `UserMode` — a separate namespace from `ChannelMode.id`; nothing prevents a `ChannelMode` and a `UserMode` sharing an `id` or, as `operator` does, a `flag`, since a `MODE` command's target (a channel name vs. a nickname) already disambiguates which catalog applies. |
+| `flag` | character | The wire-protocol mode letter (`o` for `operator`). Unique among every currently-recognized `UserMode` — again, independently of `ChannelMode`'s own `flag` uniqueness; `o` is legitimately reused across both catalogs, the way real IRC servers do. |
+| `definedBy` | `CORE` or an `Extension` id | `operator` is `CORE`-defined, always recognized. An extension-defined flag would only be recognized while that extension is `ENABLED`, mirroring `ChannelMode.definedBy`. |
+
+**Validation rules**:
+- This release populates exactly one `UserMode`: `id: operator, flag: o,
+  definedBy: CORE`. Its membership in a `ClientSession.userModes` set is
+  never independently settable — it tracks `ClientSession.administratorPrivilege`
+  exactly, added the instant that field becomes `true` (FR-034's `OPER`
+  grant) and removed the instant it becomes `false` (including a
+  session's own `MODE <self> -o`, which MUST clear
+  `administratorPrivilege` too, not merely the flag — research.md "User
+  mode: `operator`").
+- `MODE <nickname> ...` (query or set) targeting a nickname other than
+  the sender's own current one MUST be rejected outright
+  (`502 ERR_USERSDONTMATCH`) — this release has no mechanism for a
+  session to query or change a *different* session's user modes, not
+  even for an administrator (mirrors `SAMODE`'s self-only scope,
+  FR-058).
+- A non-privileged session's own `MODE <self> +o` MUST be rejected
+  (`481 ERR_NOPRIVILEGES`) — setting `operator` this way is equivalent to
+  self-granting administrator privilege, which only FR-034's credential
+  path may do. A session that already holds `administratorPrivilege`
+  issuing `MODE <self> +o` again, or a session that does not hold it
+  issuing `MODE <self> -o`, MUST be treated as a harmless no-op (already
+  in the requested state), not an error.
+- `MODE <self>` with no mode string is a query, answered with
+  `221 RPL_UMODEIS` listing currently-set `userModes` — never an error,
+  regardless of whether the set is empty.
+- A mode letter naming no currently-recognized `UserMode` MUST be
+  rejected with `501 ERR_UMODEUNKNOWNFLAG` — the user-mode counterpart to
+  `ChannelMode`'s `472 ERR_UNKNOWNMODE` rejection, a different numeral
+  because they are different commands (`MODE <nickname>` vs.
+  `MODE <channel>`).
+
 ## SupportedFeatures — *Value Object, Server Extensibility (computed, server-scoped)*
 
 The `RPL_ISUPPORT` token set (FR-055) sent as part of every session's
 Registration Completion Burst (FR-051) — not a stored entity, and
 **not** computed per session. Every token is either a fixed constant or
-derived from server-wide state (the `ChannelMode` catalog); nothing here
-depends on anything about the particular session receiving it, so one
-instance is shared by all of them, the same way `ServerConfiguration`
+derived from server-wide state (the `ChannelMode` catalog, or
+`ServerConfiguration`'s configurable length limits, FR-056); nothing
+here depends on anything about the particular session receiving it, so
+one instance is shared by all of them, the same way `ServerConfiguration`
 itself is one shared instance, not something recomputed per connection.
 This is a different relationship to its source state than
 `UserIdentity.presentedForm` has to *its* — `presentedForm` genuinely
@@ -320,8 +383,9 @@ convenient one.
 |---|---|
 | `CASEMAPPING` | Fixed: `rfc1459` (FR-052, research.md "IRC casemapping") |
 | `CHANTYPES` | Fixed: `#` (`ChannelName`'s grammar, FR-048 — this server has one channel-name prefix) |
-| `NICKLEN` | Fixed: `9` (`Hostmask`'s nickname grammar, contracts/irc-protocol-commands.md "Connection Registration Grammar") |
-| `CHANNELLEN` | Fixed: `50` (`ChannelName`'s grammar, FR-048) |
+| `NICKLEN` | `ServerConfiguration.nicknameMaxLength` (FR-056; default `9`), recomputed whenever `ServerConfiguration` is (re)loaded — not a fixed constant |
+| `CHANNELLEN` | `ServerConfiguration.channelNameMaxLength` (FR-056; default `50`), same recomputation trigger as `NICKLEN` |
+| `TOPICLEN` | `ServerConfiguration.topicMaxLength` (FR-056; default `390`), same recomputation trigger as `NICKLEN` — newly introduced alongside `NICKLEN`/`CHANNELLEN` (research.md "Configurable protocol length limits"); no equivalent existed before FR-056 |
 | `MODES` | Fixed: `1` — this release's `MODE` command handler accepts exactly one flag (and, for `MEMBER`-kind flags, one target) per invocation; not a value distinct from that behavior, a direct statement of it |
 | `CHANMODES` | Recomputed from the `ChannelMode` catalog whenever `ExtensionRegistry`'s state changes (FR-011/FR-012 — an `EXTENSION` command or config reload enabling/disabling a mode-contributing extension), not on every registration: every currently-recognized (core plus enabled-extension) flag, grouped into ISUPPORT's four parameter-behavior categories (`A,B,C,D`) by `kind` — `BOOLEAN` flags populate `D` (no parameter ever); `VALUE`/`LIST` flags would populate `B`/`C`/`A` respectively, but none exist this release (`ChannelMode` validation rules), so those three groups are empty and this recomputation is a no-op in practice (no extension changes it this release) |
 | `PREFIX` | Same recomputation trigger as `CHANMODES`, from the `MEMBER`-kind `ChannelMode` entries and their established prefix characters: `(ov)@+` this release (`operator`→`@`, `voice`→`+`, FR-045/FR-046, contracts/irc-protocol-commands.md "Channel Operations" `@`/`+` convention) — ordered highest-privilege first, the same order `353 RPL_NAMREPLY` already prefixes with |
@@ -332,11 +396,17 @@ non-empty) MUST list exactly the same flags `004 RPL_MYINFO`'s
 channel-mode-letter list already does (FR-051) — both read the same
 `ChannelMode` catalog, recomputed on the same `ExtensionRegistry` state
 transitions, so they cannot disagree by construction, not by convention
-two independent code paths have to remember to keep in sync. A new
-session's registration burst MUST read the current, already-computed
-`SupportedFeatures` value, never trigger its own recomputation — sending
-`005` to 1,000 concurrently-registering clients (SC-003) MUST NOT mean
-1,000 redundant walks of the same, unchanged `ChannelMode` catalog.
+two independent code paths have to remember to keep in sync. Similarly,
+`NICKLEN`/`CHANNELLEN`/`TOPICLEN` MUST always equal the value actually
+enforced by `NickCommandHandler`/`JoinCommandHandler`/`TopicCommandHandler`
+at that moment (FR-056) — both read the same `ServerConfiguration`
+fields, recomputed on the same load/reload transition, so these too
+cannot disagree by construction. A new session's registration burst MUST
+read the current, already-computed `SupportedFeatures` value, never
+trigger its own recomputation — sending `005` to 1,000
+concurrently-registering clients (SC-003) MUST NOT mean 1,000 redundant
+walks of the same, unchanged `ChannelMode` catalog or re-reads of the
+same, unchanged `ServerConfiguration` fields.
 
 ## Capability — *Value Object, Capability Negotiation*
 
@@ -402,6 +472,7 @@ extension-provided behavior (FR-020).
 | `providedCapability` | `Capability` name, 0..1 | Present only for `CapabilityExtension`; absent for `ServerExtension` (e.g., cloak, admin). |
 | `extensionPoint` | string, 0..1 | Set only for extensions that supply a value core code consumes rather than just adding a capability (e.g., `cloak` claims `hostname-display`). `null` for extensions with no such claim. |
 | `contributedChannelModes` | set of `ChannelMode`, 0..* | `ServerExtension`-only (research.md "Channel/user mode extensibility"). Empty for every extension in this release — no extension contributes a mode yet — but the field exists now so a future one (e.g., a registered-channel flag) is an extension change, not a `Channel`/`ChannelMode` data-model change. Unlike `extensionPoint`, this isn't exclusive single-owner claim: multiple extensions may each contribute different flags, only conflicting if two claim the same `flag` character (`ChannelMode` validation rules). |
+| `contributedUserModes` | set of `UserMode`, 0..* | `ServerExtension`-only, the `UserMode` counterpart to `contributedChannelModes` (FR-044, research.md "User mode: `operator`"). Empty for every extension in this release — only `CORE`'s `operator` flag exists — but the field exists now so a future extension-contributed user-mode flag is an extension change, not a `ClientSession`/`UserMode` data-model change. Same non-exclusive-claim behavior as `contributedChannelModes`; conflicts only if two claim the same `flag` character within the `UserMode` namespace (independent of `ChannelMode`'s namespace, `UserMode` validation rules). |
 
 **Validation rules**: A transition to `DISABLED` or back to `ENABLED` MUST
 NOT require restarting the server process (FR-011) and MUST take effect for
@@ -436,10 +507,15 @@ extension state changes.
 | `administratorCredentials` | list of {username, hashedPassword} | Verified by FR-034's in-band privilege command; hashed per research.md "Administrator credential storage" — never stored or logged in plain text. |
 | `serverName` | string, 0..1 | FR-050. The source/prefix on every server-originated message (numeric replies, `RPL_WELCOME`, etc.) — the server-side counterpart to a client's `nickname!ident@hostname` (FR-030). Absent (not set by the administrator) is valid; `jircd-server` MUST then fall back to the deployment host's network hostname, appending a fixed synthetic suffix if that hostname itself has no `.` (research.md "Server identity"), never an empty prefix. MUST contain at least one `.` in either case — nicknames (FR-002's grammar) never can, so this is what keeps a server-originated prefix unambiguous from a client one when a message has no `!`/`@` component. |
 | `serverVersion` | string | FR-051. Not administrator-configurable — sourced at startup from a Gradle-generated `net/jircd/server/version.properties` classpath resource, itself fed by the root build's `project.version` (research.md "Server identity"), included in the registration-completion burst (`RPL_YOURHOST`/`RPL_MYINFO`) alongside `serverName`. |
+| `nicknameMaxLength` | positive integer, 0..1 | FR-056. Optional; defaults to `9` if unset. Enforced by `NickCommandHandler`'s grammar check (`432 ERR_ERRONEUSNICKNAME`) and advertised as `NICKLEN` (`SupportedFeatures`). MUST NOT exceed `400` (research.md "Configurable protocol length limits"). |
+| `channelNameMaxLength` | positive integer, 0..1 | FR-056. Optional; defaults to `50` if unset (includes the leading `#`). Enforced by `JoinCommandHandler`'s grammar check (`476 ERR_BADCHANMASK`) and advertised as `CHANNELLEN` (`SupportedFeatures`). MUST NOT exceed `400`. |
+| `topicMaxLength` | positive integer, 0..1 | FR-056. Optional; defaults to `390` if unset. Enforced by `TopicCommandHandler` on a `TOPIC`-set attempt (`417 ERR_INPUTTOOLONG`, not `421` — reuses FR-049's length-violation numeric) and advertised as `TOPICLEN` (`SupportedFeatures`). MUST NOT exceed `400`. |
 
 **Validation rules**: An invalid configuration (unknown extension id,
-conflicting listener ports, malformed rate-limit values) MUST be rejected
-with a specific, actionable error identifying the problem field (FR-012,
+conflicting listener ports, malformed rate-limit values, or a
+`nicknameMaxLength`/`channelNameMaxLength`/`topicMaxLength` that isn't a
+positive integer or exceeds `400`, FR-056) MUST be rejected with a
+specific, actionable error identifying the problem field (FR-012,
 SC-008) rather than falling back to a partially-applied state. An id MUST
 appear in the field matching its actual kind: a `CapabilityExtension` id
 listed in `serverExtensionStates`, or a `ServerExtension` id listed in
@@ -467,11 +543,17 @@ Channel        1---* ClientSession    (via operators, subset of members)
 Channel        1---* ClientSession    (via voiced, subset of members, independent of operators)
 Channel        *---* ChannelMode      (activeModes)
 ServerExtension 0---* ChannelMode     (optionally contributed; 0 in this release)
+ClientSession  *---* UserMode         (userModes; tracks administratorPrivilege
+                                        exactly, FR-044)
+ServerExtension 0---* UserMode        (optionally contributed; 0 in this release)
 ExtensionRegistry 1---1 SupportedFeatures (server-scoped, one shared instance;
-                                            recomputed on ExtensionRegistry state
-                                            changes, FR-055 — every ClientSession's
-                                            burst reads this same instance, never
-                                            computes its own)
+                                            CHANMODES/PREFIX recomputed on
+                                            ExtensionRegistry state changes, FR-055)
+ServerConfiguration 1---1 SupportedFeatures (NICKLEN/CHANNELLEN/TOPICLEN
+                                            recomputed on ServerConfiguration
+                                            load/reload, FR-056 — every
+                                            ClientSession's burst reads this same
+                                            shared instance, never computes its own)
 CapabilityExtension 1---1 Capability  (providedCapability)
 ClientSession  *---* Capability       (negotiatedCapabilities)
 ServerConfiguration 1---* CapabilityExtension (capabilityStates)

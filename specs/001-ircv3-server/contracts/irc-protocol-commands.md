@@ -96,13 +96,16 @@ What *was* missing, and does need its own definition, is the **content**
 grammar for the two identifiers registration produces — what characters
 and length are actually legal, independent of parameter count:
 
-- **Nickname** (RFC 2812 §2.3.1): `( letter / special ) *8( letter /
+- **Nickname** (RFC 2812 §2.3.1): `( letter / special ) *N( letter /
   digit / special / "-" )` — one leading letter or `special`
-  (`[`, `]`, `\`, `` ` ``, `_`, `^`, `{`, `|`, `}`), followed by up to 8
-  more letters/digits/`special`/`-` (9 characters total). A `NICK`
-  violating this is `432 ERR_ERRONEUSNICKNAME` (contracts/irc-numeric-replies.md);
-  this is the concrete definition the "Edge case: nickname format" note
-  there previously pointed at without ever stating.
+  (`[`, `]`, `\`, `` ` ``, `_`, `^`, `{`, `|`, `}`), followed by up to
+  `N` more letters/digits/`special`/`-`, where `N + 1` is the server's
+  configured maximum nickname length (`ServerConfiguration.nicknameMaxLength`,
+  FR-056; `9` characters total by default, matching RFC 2812's own
+  example length). A `NICK` violating this is `432 ERR_ERRONEUSNICKNAME`
+  (contracts/irc-numeric-replies.md); this is the concrete definition the
+  "Edge case: nickname format" note there previously pointed at without
+  ever stating.
 - **Username** (the `<user>` parameter of `USER`, RFC 2812 §2.3.1's
   `user` production): any octet except NUL, CR, LF, space, and `@` — no
   length limit specified by the RFC itself, but this server MUST apply
@@ -135,8 +138,8 @@ defined, the same class of gap the nickname/channel grammars closed for
 | `001 RPL_WELCOME` | Welcome confirmation, addressed to the newly registered nickname |
 | `002 RPL_YOURHOST` | `serverName` and `serverVersion` (`ServerConfiguration`, FR-050, data-model.md) |
 | `003 RPL_CREATED` | This running process's start time — not a fixed software release date |
-| `004 RPL_MYINFO` | `serverName`, `serverVersion`, the currently-recognized user-mode letters (empty this release, FR-044), and the currently-recognized channel-mode letters — read from the same server-scoped `ChannelMode` catalog snapshot `005`'s `CHANMODES` also reads (data-model.md `SupportedFeatures`), recomputed only when `ExtensionRegistry`'s state changes, not per registration, so this never drifts out of sync with what `MODE` actually recognizes or with what `005` advertises |
-| `005 RPL_ISUPPORT` (one or more lines) | `SupportedFeatures` (FR-055, data-model.md — server-scoped, not computed per session) — `CASEMAPPING=rfc1459`, `CHANTYPES=#`, `NICKLEN=9`, `CHANNELLEN=50`, `MODES=1`, `CHANMODES=,,,mnps` (from the same `ChannelMode` catalog snapshot `004` reads), `PREFIX=(ov)@+`, `UTF8ONLY`; split across additional `005` lines if the full token set wouldn't fit one line within FR-049's 512-byte limit (this release's fixed set always fits in one) |
+| `004 RPL_MYINFO` | `serverName`, `serverVersion`, the currently-recognized user-mode letters (`o` this release, FR-044, data-model.md `UserMode`), and the currently-recognized channel-mode letters — read from the same server-scoped `ChannelMode` catalog snapshot `005`'s `CHANMODES` also reads (data-model.md `SupportedFeatures`), recomputed only when `ExtensionRegistry`'s state changes, not per registration, so this never drifts out of sync with what `MODE` actually recognizes or with what `005` advertises |
+| `005 RPL_ISUPPORT` (one or more lines) | `SupportedFeatures` (FR-055, data-model.md — server-scoped, not computed per session) — `CASEMAPPING=rfc1459`, `CHANTYPES=#`, `NICKLEN`, `CHANNELLEN`, `TOPICLEN` (FR-056 — `9`/`50`/`390` by default, but each `ServerConfiguration`-configurable, not fixed constants), `MODES=1`, `CHANMODES=,,,mnps` (from the same `ChannelMode` catalog snapshot `004` reads), `PREFIX=(ov)@+`, `UTF8ONLY`; split across additional `005` lines if the full token set wouldn't fit one line within FR-049's 512-byte limit (this release's default token set always fits in one) |
 | `422 ERR_NOMOTD` | Closes the burst — this release implements no message-of-the-day content (`MOTD` itself remains "Recognized only," Full Command Catalog below); `422` gives clients a defined completion signal instead of an indefinite wait for one |
 
 **Contract notes**:
@@ -149,10 +152,13 @@ defined, the same class of gap the nickname/channel grammars closed for
 - `005`'s token set (FR-055) is deliberately minimal: every token
   restates a value this specification already committed to elsewhere
   (casemapping, grammar limits, mode prefixes, UTF-8 enforcement), none
-  is a new setting. Tokens some real networks send but this release has
-  no concrete answer for (`TOPICLEN`, `CHANLIMIT`, `NETWORK`, `TARGMAX`)
-  are omitted rather than sent with an invented value — omission is the
-  standard, correct way to say "unspecified."
+  is a new setting introduced by `005` itself. Tokens some real networks
+  send but this release has no concrete answer for (`CHANLIMIT`,
+  `NETWORK`, `TARGMAX`) are omitted rather than sent with an invented
+  value — omission is the standard, correct way to say "unspecified."
+  `TOPICLEN` is no longer in that omitted set: FR-056 gave this project
+  a concrete, enforced answer for topic length, so it is now sent like
+  `NICKLEN`/`CHANNELLEN`.
 - Any numeric reply sent while a session has not yet claimed a nickname
   — most notably `431`/`432`/`433`, all reachable during `NICK`
   negotiation before registration completes — MUST address that reply
@@ -187,7 +193,7 @@ defined, the same class of gap the nickname/channel grammars closed for
 | `NOTICE <target> :<text>` | C→S | Same as `PRIVMSG` | Same delivery semantics as `PRIVMSG`, but MUST NOT trigger automated replies | Delivered like `PRIVMSG` |
 | `QUIT [:reason]` | C→S | Any time | Disconnects; removes all channel memberships (FR-017) | `QUIT` echoed to all affected channels |
 | `TOPIC <channel>` | C→S | `REGISTERED` session; no membership required for a non-private/secret channel, or for a member/administrator of one (FR-040/FR-041's discovery framing, subject to FR-047) | Returns `channel`'s current topic | `332 RPL_TOPIC` if a topic is set, `331 RPL_NOTOPIC` if not; `403 ERR_NOSUCHCHANNEL` if `channel` doesn't exist, or is private/secret and the requester is neither a member nor an administrator (FR-047 — same response either way) |
-| `TOPIC <channel> :<topic>` | C→S | `REGISTERED` session; sender is a channel operator (FR-013); `<topic>` MUST be valid UTF-8 (FR-054) | Sets/changes `channel`'s topic (FR-040) | `TOPIC` echoed to all members on success; `482 ERR_CHANOPRIVSNEEDED` if sender isn't an operator; `421 ERR_UNKNOWNCOMMAND`-style malformed-message rejection (FR-015) if `<topic>` isn't valid UTF-8 |
+| `TOPIC <channel> :<topic>` | C→S | `REGISTERED` session; sender is a channel operator (FR-013); `<topic>` MUST be valid UTF-8 (FR-054) and MUST NOT exceed `ServerConfiguration.topicMaxLength` (FR-056) | Sets/changes `channel`'s topic (FR-040) | `TOPIC` echoed to all members on success; `482 ERR_CHANOPRIVSNEEDED` if sender isn't an operator; `421 ERR_UNKNOWNCOMMAND`-style malformed-message rejection (FR-015) if `<topic>` isn't valid UTF-8; `417 ERR_INPUTTOOLONG` if `<topic>` exceeds the configured maximum length (FR-056, FR-049's numeric reused) |
 | `NAMES <channel>` | C→S | `REGISTERED` session; no membership required for a non-private/secret channel, or for a member/administrator of one (FR-041, subject to FR-047) | Returns `channel`'s current membership list, the same on-demand query `JOIN` already triggers automatically | `353 RPL_NAMREPLY` + `366 RPL_ENDOFNAMES`; `461 ERR_NEEDMOREPARAMS` if `channel` is omitted; `403 ERR_NOSUCHCHANNEL` under the identical private/secret condition `TOPIC` uses (FR-047) |
 | `LIST` | C→S | `REGISTERED` session | Returns every currently active channel (FR-042), except a private/secret one the requester isn't a member of and isn't an administrator for (FR-047) — silently omitted, not flagged as skipped | One `322 RPL_LIST` per (visible) channel, then `323 RPL_LISTEND` |
 
@@ -202,9 +208,11 @@ was previously missing and needed its own definition (FR-048).
 - **Channel name** (RFC 2812 §1.3, standard-type channels only —
   `#`-prefixed; the `&`/`+`/`!` channel-type prefixes RFC 2811 also
   defines are out of scope, this server has one channel namespace):
-  a leading `#`, followed by 1 to 49 additional characters excluding
-  space, comma, and control characters (50 characters total, maximum). A
-  `JOIN` naming a channel that violates this is `476 ERR_BADCHANMASK`
+  a leading `#`, followed by additional characters excluding space,
+  comma, and control characters, up to the server's configured maximum
+  channel name length (`ServerConfiguration.channelNameMaxLength`,
+  FR-056; `50` characters total, including the leading `#`, by default).
+  A `JOIN` naming a channel that violates this is `476 ERR_BADCHANMASK`
   (contracts/irc-numeric-replies.md) — RFC 2812's existing numeric for
   "the channel name/mask given is invalid," reused rather than inventing
   a new one, the same way `432 ERR_ERRONEUSNICKNAME` was reused (not
@@ -252,7 +260,7 @@ was previously missing and needed its own definition (FR-048).
 
 | Command | Direction | Preconditions | Effect | Replies |
 |---|---|---|---|---|
-| `WHOIS [target]` | C→S | `REGISTERED` session | Looks up `target` (the sender's own session if omitted) and returns its nickname, ident, hostname, and real name (FR-037). The returned hostname follows FR-038's three-tier resolution: real value for a self-lookup or an administrator, otherwise the same presented value the target's message hostmask already shows to this sender (FR-030/031) | `311 RPL_WHOISUSER` then `318 RPL_ENDOFWHOIS` on success; `401 ERR_NOSUCHNICK` if `target` isn't connected |
+| `WHOIS [target]` | C→S | `REGISTERED` session | Looks up `target` (the sender's own session if omitted) and returns its nickname, ident, hostname, and real name (FR-037). The returned hostname follows FR-038's three-tier resolution: real value for a self-lookup or an administrator, otherwise the same presented value the target's message hostmask already shows to this sender (FR-030/031). If `target` currently holds the `operator` user mode, an operator-status line is included — visible to any querying client, not gated like the hostname resolution (FR-037, FR-044) | `311 RPL_WHOISUSER`, then `313 RPL_WHOISOPERATOR` if `target` holds `operator`, then `318 RPL_ENDOFWHOIS` on success; `401 ERR_NOSUCHNICK` if `target` isn't connected |
 
 **Contract notes**:
 - `WHOIS` is core protocol behavior (FR-037), like moderation (FR-036) and
@@ -308,10 +316,44 @@ was previously missing and needed its own definition (FR-048).
   ban-mask) are a narrower promise: cataloged below, but `Channel`'s
   shape can't hold one yet, so adding one is a bigger change than adding
   another `BOOLEAN` flag would be.
-- User-level `MODE` is entirely unimplemented (FR-044), not partially
-  implemented like channel `MODE` — this server has no user-mode concept
-  at all yet, deliberately, not as an oversight. When one is added, it
-  MUST use the same extension-contribution mechanism as channel `MODE`.
+- User-level `MODE` is implemented for exactly one flag this release
+  (`operator`, `o`) — see "User Mode" below — using the same
+  extension-contribution mechanism as channel `MODE` (FR-044), narrower
+  in scope than channel `MODE` in the ways that section describes.
+
+### User Mode
+
+| Command | Direction | Preconditions | Effect | Replies |
+|---|---|---|---|---|
+| `MODE <nickname>` | C→S | `REGISTERED` session; `<nickname>` is the sender's own current nickname | Returns the sender's currently-set user modes | `221 RPL_UMODEIS`; `502 ERR_USERSDONTMATCH` if `<nickname>` isn't the sender's own |
+| `MODE <nickname> +o` | C→S | `REGISTERED` session; `<nickname>` is the sender's own current nickname | No-op if the sender already holds `operator`; otherwise rejected — `+o` can only be acquired via `OPER` (FR-034), never set directly (FR-044) | `481 ERR_NOPRIVILEGES` if the sender does not already hold `operator`; `502 ERR_USERSDONTMATCH` if `<nickname>` isn't the sender's own |
+| `MODE <nickname> -o` | C→S | `REGISTERED` session; `<nickname>` is the sender's own current nickname | Clears `operator` from the sender's user modes and clears `ClientSession.administratorPrivilege` in the same act (FR-044) — a full revocation, not just a display change. No-op if the sender doesn't currently hold it | `MODE` confirmation echoed to the sender; `502 ERR_USERSDONTMATCH` if `<nickname>` isn't the sender's own |
+
+**Contract notes**:
+- User `MODE` is self-only in this release: a `<nickname>` other than
+  the sender's own current nickname is always `502 ERR_USERSDONTMATCH`,
+  for query or set alike — mirroring `SAMODE`'s self-only scope
+  (FR-058) — regardless of the sender's privilege level. There is no
+  administrator override for looking up or changing a *different*
+  session's user modes.
+- A mode letter other than `o` is `501 ERR_UMODEUNKNOWNFLAG` — the
+  user-mode counterpart to channel `MODE`'s `472 ERR_UNKNOWNMODE`.
+- `+o`/`-o` here is a narrower surface than it looks: the only way to
+  transition from not holding `operator` to holding it is `OPER`
+  (FR-034) succeeding, never `MODE` — `MODE <self> +o` can only ever
+  confirm a state the sender already has (a no-op) or fail (`481`). Only
+  `-o` can actually change state, and only in the revoking direction.
+- `WHOIS`'s `313 RPL_WHOISOPERATOR` ("User Queries" above) is the
+  *other* place `operator` status surfaces — visible to any client, not
+  just the operator's own session, unlike `221 RPL_UMODEIS` which is
+  self-only per the self-only restriction above.
+- `MODE` is one wire command with two independent targets and two
+  independent handlers, not two commands that happen to share a name:
+  the server determines which applies by inspecting whether `<target>`
+  matches the channel-name prefix (`CHANTYPES`, `#`, FR-048) — a
+  channel-shaped target routes to channel `MODE` ("Moderation" above), a
+  nickname-shaped target routes to this section. A client never has to
+  disambiguate explicitly; the target itself already does.
 
 ### Administration (Story 6)
 
@@ -321,17 +363,29 @@ was previously missing and needed its own definition (FR-048).
 | `EXTENSION <ENABLE\|DISABLE> <extension-id>` | C→S | Sender holds administrator privilege | Toggles the named `CapabilityExtension` or `ServerExtension`'s state, in effect immediately for all clients (FR-011, FR-032) | Confirmation notice on success; `481 ERR_NOPRIVILEGES` if sender lacks administrator privilege (FR-033); `421 ERR_UNKNOWNCOMMAND`-style error naming the extension id if it doesn't exist |
 | `WHOHOST <nickname>` | C→S | Sender holds administrator privilege | Returns the target's real, unobfuscated hostname/IP regardless of any active cloaking (FR-031, FR-032) | Notice containing the real hostname on success; `481 ERR_NOPRIVILEGES` if unauthorized; standard "no such nickname" error if the target isn't connected |
 | `REHASH` | C→S | Sender holds administrator privilege | Manually re-reads and re-validates the Server Configuration file and reconciles it against live state — the in-band equivalent of a `SIGHUP` (research.md "Configuration reload mechanism", contracts/server-configuration.md "Live reload") | `382 RPL_REHASHING` on success; on validation failure, the same specific, actionable error startup validation would report (FR-012, SC-008), and the previously-active configuration remains untouched; `481 ERR_NOPRIVILEGES` if unauthorized |
+| `SAJOIN <channel>` | C→S | Sender holds administrator privilege | Joins the sender's own session to `channel` via the same create-or-join path as `JOIN` (FR-003), but skips the `JOIN`-gate check point (FR-043's `gates` mechanism) entirely — bypassing a restriction (e.g., a future invite-only extension) that would block an ordinary `JOIN` (FR-057, research.md "Administrator channel override") | Same success replies as `JOIN` (`JOIN` echoed to all members; `353`/`366` to the joiner); `481 ERR_NOPRIVILEGES` if sender lacks administrator privilege; `476 ERR_BADCHANMASK` if `channel` violates the Channel Name Grammar (grammar is NOT bypassed) |
+| `SAMODE <channel> <+o\|-o>` | C→S | Sender holds administrator privilege; sender is currently a member of `channel` | Adds (`+o`) or removes (`-o`) the sender's own nickname from `channel`'s `operators`, bypassing FR-046's "sender must already be an operator" precondition — self-targeting only (FR-058, research.md "Administrator channel override") | `MODE` change echoed to all members on success, the same as an operator-granted `MODE +o`/`-o`; `481 ERR_NOPRIVILEGES` if sender lacks administrator privilege; `442 ERR_NOTONCHANNEL` if sender isn't currently a member |
 
 **Contract notes**:
 - `OPER` privilege is server-wide and independent of any channel-operator
   status (FR-033) — holding it does not grant channel-operator privileges
   in channels the administrator hasn't joined, and vice versa.
-- These four commands are the FR-032 minimum; additional administrative
-  commands MAY be added by future extensions without changing this
-  contract.
-- Command names (`EXTENSION`, `WHOHOST`, `REHASH`) are illustrative for
-  this plan; the tasks phase may finalize different verbs as long as the
-  preconditions/effects/replies contract above holds.
+- These six commands are the FR-032/FR-057/FR-058 minimum; additional
+  administrative commands MAY be added by future extensions without
+  changing this contract.
+- Command names (`EXTENSION`, `WHOHOST`, `REHASH`, `SAJOIN`, `SAMODE`)
+  are illustrative for this plan; the tasks phase may finalize different
+  verbs as long as the preconditions/effects/replies contract above
+  holds.
+- `SAJOIN`/`SAMODE` are deliberately separate, explicit commands, not a
+  silent privilege bypass folded into ordinary `JOIN`/`MODE` — an
+  administrator's own regular `JOIN`/`MODE` is checked exactly like any
+  other client's (research.md "Administrator channel override" —
+  Alternatives considered). `SAMODE` grants/revokes operator status on
+  the sender only; it is not a general mode-override command and MUST
+  NOT accept a different target nickname or an arbitrary mode string —
+  granting operator status to someone *else* remains exclusively
+  FR-046's operator-to-operator mechanism.
 - `REHASH` and `EXTENSION` are not interchangeable: `REHASH` reloads the
   whole configuration file (extensions, rate limit, listeners,
   administrator credentials) and requires the file to be valid;
@@ -369,7 +423,7 @@ any given server to implement it.
 | `NICK` | 3.1.2 | **Implemented** — see "Connection Registration" above |
 | `USER` | 3.1.3 | **Implemented** — see "Connection Registration" above |
 | `OPER` | 3.1.4 | **Implemented**, but with this project's own privilege model, not RFC 2812's O-line concept — see "Administration" above |
-| `MODE` (user) | 3.1.5 | Recognized only — no user modes defined in this release, deliberately (FR-044; only channel `MODE`, see below) |
+| `MODE` (user) | 3.1.5 | **Implemented**, for exactly one flag (`operator`, `o`) — see "User Mode" above (FR-044) |
 | `SERVICE` | 3.1.6 | Recognized only — this server has no services-framework concept |
 | `QUIT` | 3.1.7 | **Implemented** — see "Connection Registration" above |
 | `SQUIT` | 3.1.8 | Recognized only — server-to-server command; this release has no server-to-server interface at all (FR-021) |
@@ -416,6 +470,8 @@ any given server to implement it.
 | `TAGMSG` | IRCv3 | Recognized only — no tag-only-message feature in this release, though `message-tags` (FR-025) itself is implemented for regular messages |
 | `EXTENSION` | This project | **Implemented** — see "Administration" above; not an RFC 1459/2812 command |
 | `WHOHOST` | This project | **Implemented** — see "Administration" above; not an RFC 1459/2812 command |
+| `SAJOIN` | Common IRCd convention | **Implemented** — see "Administration" above; not an RFC 1459/2812 command, but a well-known real-world administrator-override convention (research.md "Administrator channel override"), reused rather than inventing a project-specific name |
+| `SAMODE` | Common IRCd convention | **Implemented**, self-op-only form — see "Administration" above; not an RFC 1459/2812 command, and narrower than some real networks' general-target `SAMODE` (FR-058 scopes it to self-targeting only) |
 
 **Contract notes**:
 - A "Recognized only" command still parses without error at the
@@ -515,6 +571,39 @@ represent.
   release's `MODE` behavior honest (FR-043's `472` on anything else)
   while giving a future extension author a name to converge on instead of
   inventing `channel-key` vs. `chan-password` vs. `key` independently.
+
+## Full User Mode Catalog (`jircd-protocol` — Wire-Protocol Recognition)
+
+The `UserMode` counterpart to the Full Channel Mode Catalog above
+(data-model.md `UserMode`, research.md "User mode: `operator`") — same
+purpose (a canonical `id` for a future core release or `ServerExtension`
+to align with), same "Reserved means recognized but not enforced"
+convention, and the same namespace-independence note: a `flag` letter
+here MAY coincide with a `ChannelMode` flag (as `o` does) without
+conflict, since `MODE`'s target (a nickname vs. a channel name) already
+disambiguates which catalog applies.
+
+| Flag | RFC 2812 §3.1.5/§4.1 | `id` | Status |
+|---|---|---|---|
+| `o` | 3.1.5 | `operator` | **Implemented** (`CORE`, FR-034/FR-044) — see "User Mode" above; set only via `OPER` (FR-034), self-clearable via `MODE -o`, never directly settable via `MODE +o` |
+| `i` | 3.1.5 | `invisible` | Reserved — no invisibility/`WHO`-hiding behavior in this release; this server's `WHOIS`/`NAMES`/`LIST` behavior doesn't distinguish invisible from visible users at all yet |
+| `w` | 3.1.5 | `wallops` | Reserved — pairs with the wire-recognized-but-unimplemented `WALLOPS` command (Full Command Catalog above); no server-wide operator broadcast exists in this release |
+| `s` | 3.1.5 | `server-notices` | Reserved — no server-notice stream exists in this release; distinct from the `secret` *channel* mode, which also uses `s` in its own, independent namespace |
+| `O` | not in RFC 2812; classic IRC convention | `local-operator` | Reserved — this project has no "local vs. global operator" distinction (`administratorPrivilege` is a single, server-wide level, FR-033); cataloged for completeness since real clients may still send it |
+
+**Contract notes**:
+- Every flag above is `Status: Reserved` except `o`, the only one this
+  release implements or enforces.
+- Unlike the Full Channel Mode Catalog, no `kind`/`gates` columns appear
+  here — `UserMode` doesn't have them (research.md "User mode:
+  `operator`" — Alternatives considered explains why not: nothing this
+  release's single flag needs to gate a second command the way
+  `ChannelMode` flags gate `SEND`/`JOIN`/`DISCOVER`).
+- A client sending `MODE <self> +i`/`+w`/`+s`/`+O` (or any other
+  Reserved flag) receives `501 ERR_UMODEUNKNOWNFLAG`, the same as any
+  genuinely unrecognized letter — "Reserved" is a documentation
+  convention for this catalog, not a wire-visible distinction from
+  "unrecognized."
 
 ## Explicitly Out of Scope for This Plan
 
