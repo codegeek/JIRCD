@@ -149,6 +149,13 @@ defined, the same class of gap the nickname/channel grammars closed for
 - Only `message-tags`, `server-time`, and `echo-message` may appear in the
   `CAP LS` response for this release (FR-025); the SASL capability
   referenced in the spec is deferred with Story 3 and MUST NOT appear.
+- `message-tags` itself now contributes one tag unconditionally: `msgid`,
+  a server-generated unique identifier present on every message relayed
+  to a recipient that has negotiated `message-tags` at all, regardless
+  of whether `server-time` is also negotiated (FR-059, research.md
+  "Message identifiers"). Unlike `server-time`'s `time` tag, `msgid`
+  isn't gated by a second, separately-declinable capability — there is
+  no way to negotiate `message-tags` without also getting `msgid`.
 - `005`'s token set (FR-055) is deliberately minimal: every token
   restates a value this specification already committed to elsewhere
   (casemapping, grammar limits, mode prefixes, UTF-8 enforcement), none
@@ -189,7 +196,7 @@ defined, the same class of gap the nickname/channel grammars closed for
 |---|---|---|---|---|
 | `JOIN <channel>` | C→S | `REGISTERED` session; `channel` conforms to the Channel Name Grammar (below) | Creates the channel if absent (first joiner becomes operator, FR-013) or joins existing (FR-003) | `JOIN` echoed to all members; `353 RPL_NAMREPLY` + `366 RPL_ENDOFNAMES` to joiner; `476 ERR_BADCHANMASK` if `channel` violates the grammar |
 | `PART <channel> [:reason]` | C→S | Session is a member | Removes membership | `PART` echoed to all (former) members |
-| `PRIVMSG <target> :<text>` | C→S | `REGISTERED` session; for a channel target, membership is NOT required by default — only when that channel's `members-only` restriction is active (FR-004, FR-013/FR-043); for a nickname target, it must be any registered nickname; `<text>` MUST be valid UTF-8 (FR-054) | Delivers to all other channel members (FR-004) or the direct-message recipient (FR-005) | `PRIVMSG` delivered to recipients; `echo-message`-negotiated senders also receive their own message back; `442 ERR_NOTONCHANNEL` if `members-only` is active and the sender isn't a member (FR-013/FR-043); `421 ERR_UNKNOWNCOMMAND`-style malformed-message rejection (FR-015) if `<text>` isn't valid UTF-8 |
+| `PRIVMSG <target> :<text>` | C→S | `REGISTERED` session; for a channel target, membership is NOT required by default — only when that channel's `members-only` restriction is active (FR-004, FR-013/FR-043); for a nickname target, it must be any registered nickname; `<text>` MUST be valid UTF-8 (FR-054) | Delivers to all other channel members (FR-004) or the direct-message recipient (FR-005), assigning one server-generated `msgid` shared by every recipient with `message-tags` negotiated (FR-059) | `PRIVMSG` delivered to recipients; `echo-message`-negotiated senders also receive their own message back (with the same `msgid` as everyone else, letting them correlate it with what they sent); `442 ERR_NOTONCHANNEL` if `members-only` is active and the sender isn't a member (FR-013/FR-043); `421 ERR_UNKNOWNCOMMAND`-style malformed-message rejection (FR-015) if `<text>` isn't valid UTF-8 |
 | `NOTICE <target> :<text>` | C→S | Same as `PRIVMSG` | Same delivery semantics as `PRIVMSG`, but MUST NOT trigger automated replies | Delivered like `PRIVMSG` |
 | `QUIT [:reason]` | C→S | Any time | Disconnects; removes all channel memberships (FR-017) | `QUIT` echoed to all affected channels |
 | `TOPIC <channel>` | C→S | `REGISTERED` session; no membership required for a non-private/secret channel, or for a member/administrator of one (FR-040/FR-041's discovery framing, subject to FR-047) | Returns `channel`'s current topic | `332 RPL_TOPIC` if a topic is set, `331 RPL_NOTOPIC` if not; `403 ERR_NOSUCHCHANNEL` if `channel` doesn't exist, or is private/secret and the requester is neither a member nor an administrator (FR-047 — same response either way) |

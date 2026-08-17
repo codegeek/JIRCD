@@ -282,7 +282,7 @@
   a missing one) if not. Explicitly excludes nicknames and the `USER`
   command's `<user>` parameter, which already have their own
   ASCII-oriented grammars. Synced across data-model.md (`realname`,
-  `PendingDelivery.body`, `Channel.topic`/`name`), contracts/ (new
+  `OutboundMessage.body`, `Channel.topic`/`name`), contracts/ (new
   `Utf8Validator` referenced alongside `Hostmask`/`ChannelName`; channel
   names reuse `476` since a UTF-8 failure and a grammar failure are the
   same "not a legal channel name" case from the client's perspective;

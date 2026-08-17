@@ -21,7 +21,7 @@ guarded by this aggregate.
 |---|---|---|
 | `connectionId` | opaque identifier | Internal correlation key; never sent on the wire. |
 | `channel` (I/O) | `SocketChannel` | The underlying connection (plaintext or TLS-wrapped, FR-018). |
-| `outboundQueue` | bounded queue of `PendingDelivery` (below) | The *only* path by which any other session delivers a message to this one (FR-004 fan-out); drained exclusively by this session's own writer thread, per research.md "Message fan-out concurrency model". Never written to directly from another session's thread. Queue elements are **not** pre-formatted wire lines — this session's own writer thread does that at drain time, using this session's own `negotiatedCapabilities` (see `PendingDelivery`). |
+| `outboundQueue` | bounded queue of `OutboundMessage` (below) | The *only* path by which any other session delivers a message to this one (FR-004 fan-out); drained exclusively by this session's own writer thread, per research.md "Message fan-out concurrency model". Never written to directly from another session's thread. Queue elements are **not** pre-formatted wire lines — this session's own writer thread does that at drain time, using this session's own `negotiatedCapabilities` (see `OutboundMessage`). |
 | `registrationState` | enum: `CONNECTING`, `REGISTERED`, `CLOSING` | A session must reach `REGISTERED` (nickname + user info accepted, FR-001) before most commands are valid. |
 | `nickname` | string, 0..1 | Present once registration succeeds; unique across all sessions (FR-002), compared case-insensitively per FR-052's casemapping (research.md "IRC casemapping"), not stored/compared in a normalized form — the original casing a client registered with is preserved and shown to others, only the *comparison* folds case; MUST also conform to the nickname grammar (contracts/irc-protocol-commands.md "Connection Registration Grammar") — uniqueness and format are independent checks (`433` vs. `432`). |
 | `negotiatedCapabilities` | set of `Capability` names | Populated via CAP negotiation (FR-006, FR-007); empty for clients that never negotiate (FR-008). |
@@ -87,7 +87,7 @@ currently holds it).
 *(Deferred, not modeled here: linking a `UserIdentity` to a persistent
 `Account` — see spec.md's Account entity, FR-023/FR-024/FR-026/FR-027.)*
 
-## PendingDelivery — *Value Object, Session & Messaging*
+## OutboundMessage — *Value Object, Session & Messaging*
 
 The element type of `ClientSession.outboundQueue` (research.md "Message
 fan-out concurrency model"). Represents one message on its way to one
@@ -102,22 +102,28 @@ a channel a `PRIVMSG` was sent to).
 | `senderPresentedForm` | string | The sender's `UserIdentity.presentedForm` at send time — resolved by live-checking the current `cloak` `ServerExtension` state at that moment (FR-031), never cached. Computed once by the sender's thread, not per recipient, since cloaking is a uniform display transform applied identically to every viewer — unlike a negotiated capability, no recipient-specific input ever factors into this value (see Validation rules below). |
 | `command` | string | e.g., `PRIVMSG`, `NOTICE`, `JOIN`, `KICK` — which wire command this delivery represents. |
 | `target` | string | Channel name or nickname the original command targeted. |
-| `body` | string, 0..1 | The message text, where applicable (absent for e.g. a bare `JOIN`/`PART` notification). MUST be valid UTF-8 (FR-054) — a `PRIVMSG`/`NOTICE` carrying an invalid byte sequence is rejected as malformed (FR-015) before a `PendingDelivery` is ever constructed for it, so this field never holds one. |
+| `body` | string, 0..1 | The message text, where applicable (absent for e.g. a bare `JOIN`/`PART` notification). MUST be valid UTF-8 (FR-054) — a `PRIVMSG`/`NOTICE` carrying an invalid byte sequence is rejected as malformed (FR-015) before an `OutboundMessage` is ever constructed for it, so this field never holds one. |
 | `sentAt` | instant | Captured once, by the sender's thread, at the moment of sending — the value the `server-time` capability's `time` tag reflects for every recipient (not each recipient's own drain time). |
+| `messageId` | `UUID` | FR-059. Generated once, by the sender's thread, at construction — every `OutboundMessage` gets one, regardless of `command`. The value the `message-tags` capability's `msgid` tag reflects for every recipient that has negotiated `message-tags` at all (research.md "Message identifiers"); never sent to a recipient that hasn't. |
 
-**Validation rules**: `PendingDelivery` MUST NOT contain a `message-tags`
-prefix, a `time` tag, or any other capability-dependent decoration —
-those are computed by each recipient's own writer thread at drain time
-(research.md "Message fan-out concurrency model"), by re-checking that
-recipient's `ClientSession.negotiatedCapabilities` against the live state
-of the corresponding `CapabilityExtension` (`Capability` validation rules,
-above). A `PendingDelivery` is capability-agnostic by construction — that
-is what makes sharing one instance across recipients with different
-negotiated capabilities safe and correct. Symmetrically, `senderPresentedForm`
+**Validation rules**: `OutboundMessage` MUST NOT contain a `message-tags`
+prefix, a `time` tag, a `msgid` tag, or any other capability-dependent
+decoration — those are computed by each recipient's own writer thread at
+drain time (research.md "Message fan-out concurrency model"), by
+re-checking that recipient's `ClientSession.negotiatedCapabilities`
+against the live state of the corresponding `CapabilityExtension`
+(`Capability` validation rules, above). `messageId` itself is NOT
+capability-dependent — it's generated unconditionally for every
+`OutboundMessage`, the same as `sentAt` — only whether it's *rendered as
+a tag* depends on the recipient's negotiated capabilities; the id's
+existence and value never do. An `OutboundMessage` is capability-agnostic
+by construction — that is what makes sharing one instance across
+recipients with different negotiated capabilities safe and correct.
+Symmetrically, `senderPresentedForm`
 MUST be resolved solely from the live `cloak` `ServerExtension` state at the
 sender thread's send time — never from a cached hostname value, and never
 influenced by any individual recipient's state (capabilities or otherwise).
-That is what makes baking it once into a shared immutable `PendingDelivery`
+That is what makes baking it once into a shared immutable `OutboundMessage`
 correct rather than merely convenient: server-extension state is uniform
 across every recipient, so resolving it once is equivalent to resolving it
 per recipient, which is exactly the property capability state lacks.
@@ -561,6 +567,6 @@ ServerConfiguration 1---* ServerExtension     (serverExtensionStates)
 ServerConfiguration 1---* administratorCredentials (FR-034)
 ClientSession   1---1 realHostname    (always on core; FR-030/031's display
                                         value is computed, not a separate entity)
-ClientSession   1---* PendingDelivery (outboundQueue; one shared instance may
+ClientSession   1---* OutboundMessage (outboundQueue; one shared instance may
                                         appear in many recipients' queues at once)
 ```

@@ -497,8 +497,8 @@ information needed for each stage:
    negotiated `message-tags`+`server-time`) and Bob (who negotiated
    nothing) to receive different wire-level renderings of the *same*
    channel message, drawn from the *same* queued object: the per-recipient
-   decoration (tag prefix, `time` tag) happens independently in each
-   recipient's own thread, not once on the sender's.
+   decoration (tag prefix, `time` tag, `msgid` tag) happens independently
+   in each recipient's own thread, not once on the sender's.
 
 `echo-message` is a different kind of decision made at a different point:
 whether the sender's *own* session belongs in the recipient set at all is
@@ -538,6 +538,74 @@ already established for write-safety.
   callback/pipeline complexity "Networking model" above rejected, for a
   problem the per-session-queue-plus-writer approach solves at
   ~1,000-connection scale without it.
+
+## Message identifiers (`msgid`, FR-059)
+
+**Decision**: `OutboundMessage` (data-model.md) gains a `messageId`
+field — a server-generated `java.util.UUID`, assigned once by the
+sender's thread at stage 1 of the fan-out pipeline above, the identical
+"computed once, shared by every recipient" treatment `sentAt` already
+gets. It is exposed as the `msgid` tag by the *same* `message-tags`
+`CapabilityExtension` tag-decoration hook that already exists (research.md
+"Message fan-out concurrency model" — the hook `SessionWriter` calls
+per-recipient at drain time), not a new hook and not a new capability:
+`message-tags` itself now contributes one unconditional tag
+(`msgid`, present whenever the recipient has negotiated `message-tags`
+at all) alongside the recipient-conditional ones `server-time`
+(`time`) contributes only when *also* negotiated. `messageId` is
+assigned to every `OutboundMessage`, regardless of which wire command it
+represents (`PRIVMSG`, `NOTICE`, `JOIN`, `KICK`, etc.) — the field
+already exists on every instance of this type, so giving every instance
+an id is the uniform, non-arbitrary choice, rather than special-casing
+which commands get one.
+
+**Rationale**: `msgid` is IRCv3's own standard tag name for exactly this
+purpose (an opaque, server-generated, per-message unique identifier) —
+reusing it, rather than inventing a project-specific tag name, is the
+same "match the well-known real-world convention" discipline this
+project has applied to numerics (`417`, `432`, `476`) and admin commands
+(`SAJOIN`/`SAMODE`) alike. The IRCv3 `message-tags` specification itself
+describes `msgid` as something a `message-tags`-supporting server may
+include without it being its own separate capability — no real IRCv3
+network gates `msgid` behind a second capability negotiation, so
+treating it as anything other than "part of what `message-tags`
+provides" would be a project-specific deviation from the convention
+clients already expect, for no benefit. `UUID` specifically: a
+dependency-free JDK type (`java.util.UUID.randomUUID()`), no new
+library needed, and its 122 bits of randomness make a collision within
+any realistic connection count (SC-003's ~1,000 concurrent clients) a
+non-concern — this project doesn't need a coordinated/sequential id
+scheme (which would require shared mutable state across sender threads,
+reintroducing exactly the kind of cross-thread coordination the
+fan-out model above was designed to avoid) when a random one is
+already collision-safe at this scale.
+
+**Alternatives considered**:
+- *A separate, independently-negotiable capability for `msgid` (e.g., a
+  project-specific `message-ids` capability)*: rejected — this is
+  exactly the treatment `server-time` gets, and `server-time` earns it
+  because a client might genuinely want tag framing without wanting
+  timestamps (or vice versa: a bouncer might want `time` without other
+  tag content). No comparable case exists for `msgid` — it's cheap to
+  compute, small on the wire, and every realistic `message-tags` client
+  benefits from having it (delivery confirmation via `echo-message`,
+  future edit/reaction correlation) — inventing a second capability
+  negotiation step for something with no plausible reason to decline
+  would be complexity with no corresponding client-facing benefit.
+- *A monotonically-increasing sequence number instead of a random UUID*:
+  rejected — generating one safely across every sender thread (many
+  different `ClientSession`s can be "the sender" concurrently) requires
+  either a single shared counter (a new point of cross-thread
+  contention this project has otherwise deliberately avoided, research.md
+  "Networking model") or a per-shard/per-session scheme complex enough
+  to need its own design, for a uniqueness guarantee a random `UUID`
+  already provides for free.
+- *Derive the id from message content (e.g., a hash of sender + body +
+  timestamp)*: rejected — content-derived ids collide on legitimate
+  duplicate messages (the same client sending the same text to the same
+  target twice in the same millisecond is not a hypothetical), and
+  FR-059 explicitly requires the id be independent of content for
+  exactly this reason.
 
 ## Extension system (runtime hot-toggle)
 

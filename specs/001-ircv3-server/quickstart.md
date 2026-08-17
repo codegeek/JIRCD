@@ -67,7 +67,14 @@ schema in `contracts/server-configuration.md`.
    - **Expected**: this connection receives its own message echoed back
      with a `server-time` tag (`echo-message` + `server-time` negotiated,
      FR-007), while a second, plain (non-negotiating) connection in the
-     same channel receives the message without tags (FR-008).
+     same channel receives the message without tags (FR-008). Note the
+     `msgid` value on the echoed message.
+4. From a *third* connection that negotiated only `message-tags` (`CAP
+   REQ :message-tags`, no `server-time`, no `echo-message`), join
+   `#lobby` and observe the `PRIVMSG #lobby :hi` sent in Step 3 arrive
+   with a `msgid` tag but no `time` tag — `msgid` isn't gated behind
+   `server-time` (FR-059). Send a second `PRIVMSG #lobby :hi again` from
+   Step 2's connection and confirm its `msgid` differs from Step 3's.
 
 ## Story 4 — Tailor the Server with Optional Extensions
 
