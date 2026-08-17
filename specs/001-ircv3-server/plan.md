@@ -139,6 +139,25 @@ plan critique — not just the original Phase 0/1 draft:
   not present in the original Constitution Check pass at all. Both are
   now accounted for under Testing Standards and Performance Requirements
   above.
+- The **`OPER` brute-force lockout** (FR-034, added after a
+  `/speckit-clarify` pass) extends the `OPER` bullet above: consecutive
+  credential failures are counted per-connection and the session is
+  disconnected past an administrator-configurable threshold. This is
+  covered by the same FR-019 security-event logging every failed
+  attempt already gets, and introduces no new dependency or unreviewed
+  surface — just additional state on `ClientSession` — so it doesn't
+  change the Code Quality or Testing Standards assessment above, only
+  extends it.
+- **FR-066's connection-admission extension point** (added after a
+  `/speckit-specify` pass) is a Development Workflow "no speculative
+  generality" case worth recording explicitly: rather than introducing a
+  new extension mechanism for a G-line-style capability that isn't being
+  built this release, it reuses `ExtensionRegistry`'s existing
+  `extensionPoint` ownership-claim mechanism (research.md
+  "Connection-admission extension point") — the same one `cloak` already
+  uses for `hostname-display` — so the only new surface is one call-out
+  site in `ConnectionHandler`, not a parallel system. No Code Quality or
+  Complexity Tracking concern follows from it.
 
 Gate remains PASS.
 
