@@ -280,9 +280,10 @@ practice across the deployed IRC ecosystem. This release's token set
 `CHANNELLEN`, `TOPICLEN` (FR-056 — 9/50/390 by default, but each
 administrator-configurable via `ServerConfiguration`, not fixed
 constants the way `CASEMAPPING`/`CHANTYPES` are), `MODES` (FR-064 — `6`
-by default, likewise configurable), `CHANMODES=b,,,mnps` (from the
+by default, likewise configurable), `CHANMODES=b,,,imnps` (from the
 `ChannelMode` catalog, FR-043; `b` populates the list-type `A` group,
-FR-062), `PREFIX=(ov)@+` (FR-045/FR-046), and `UTF8ONLY` (FR-054) —
+FR-062; `i` populates the boolean `D` group, FR-065), `PREFIX=(ov)@+`
+(FR-045/FR-046), and `UTF8ONLY` (FR-054) —
 every token
 restates a value this project already committed to elsewhere, none is a
 new, independently-configurable setting *this decision itself*
@@ -837,18 +838,28 @@ code calls generically" pattern `CapabilityExtension` already uses (a
 capability extension exposes a formatting hook `SessionWriter` calls per
 recipient; it doesn't get hardcoded into `SessionWriter` itself). Two
 findings fell out of applying it:
-- Most future `JOIN`-gating `BOOLEAN` flags — invite-only included —
-  would not require `Channel`'s shape to grow at all. The gate hook
-  receives the acting session and channel; an extension is free to keep
-  its own bookkeeping (e.g., an invited-nicknames record) entirely inside
-  itself, the same way `cloak` keeps its own hostname-obfuscation logic
-  without `ClientSession` needing an extension-specific field for it.
-- A `ServerExtension` implementing something like invite-only would also
-  typically want to register its own paired command (e.g., claiming the
-  already-recognized-but-unimplemented `INVITE`) — already solved,
-  unaffected by this change: `admin` and `cloak` already register their
-  own command handlers into `jircd-core`'s dispatch table when enabled
-  (research.md "Extension system"), so no new mechanism is needed there.
+- Most future `JOIN`-gating `BOOLEAN` flags would not require
+  `Channel`'s shape to grow at all — the gate hook receives the acting
+  session and channel, and whoever defines the flag is free to keep its
+  own bookkeeping alongside it. `invite-only` (FR-065, "Channel
+  invitations" below) turned out to be the concrete case that exercised
+  this: its bookkeeping (`Channel.invited`) did need a small, purpose-
+  built `Channel` field of its own, the same way `ban-mask`'s did — the
+  promise held (no `JoinCommandHandler` change was needed), it just
+  didn't turn out to be *entirely* free of any data-model addition,
+  the way a flag needing no bookkeeping at all (e.g., a hypothetical
+  registered-channel flag that only consults external account state)
+  still would be.
+- An extension registering its own command alongside a contributed
+  mode flag (e.g., claiming an until-then-recognized-but-unimplemented
+  command) was already solved before any concrete case needed it:
+  `admin` and `cloak` already register their own command handlers into
+  `jircd-core`'s dispatch table when enabled (research.md "Extension
+  system"), so no new mechanism was needed there — though `invite-only`
+  and `INVITE` (FR-065) ultimately shipped as `CORE`, not an extension
+  (see "Channel invitations" below), so this particular promise is
+  still validated only by `admin`/`cloak`'s existing extension-defined
+  commands, not by `INVITE` itself.
 
 What this fix does **not** claim to solve on its own: `p`/`s`
 (private/secret) restrict *visibility* — whether a channel appears in
@@ -916,10 +927,10 @@ operator/voice)"; `ban-mask`'s predicate is "does the actor's current
 identity match any entry in `Channel.bans`" — a different question,
 answered by the same mechanism, exactly validating
 FR-043's extensibility promise a second time (research.md above already
-validated it once, hypothetically, for a future `JOIN`-gating
-invite-only extension; `ban-mask` is the first flag to actually need
-both `SEND` and `JOIN` gating from *core* itself, not a hypothetical
-extension).
+validated it once, hypothetically, for a future `JOIN`-gating flag —
+`invite-only` (FR-065) later became that flag for real; `ban-mask` is
+the one that first needed both `SEND` and `JOIN` gating from *core*
+itself, ahead of any concrete `JOIN`-only case).
 
 Mask matching checks **both** of a target's identities independently —
 its presented form (`UserIdentity.presentedForm`, FR-030/FR-031) and its
@@ -1187,6 +1198,133 @@ a numbered error reply.
   flags of any kind a single command can physically carry, so a second,
   narrower cap on non-parameterized flags would just be an invented
   restriction nothing requires.
+
+## Channel invitations (FR-065)
+
+**Core vs. extension, revisited**: `invite-only` had already appeared
+twice in this specification before it was ever scoped for real — once
+as FR-043's worked example of a future `JOIN`-gating flag, once as the
+Extension Key Entity's example of a flag a `ServerExtension` would
+contribute. Both mentions were about validating the `gates` mechanism
+itself (research.md above, "Validating the extensibility promise
+against a future `JOIN`-gating flag"), and that validation still holds:
+nothing about the mechanism assumed `invite-only` specifically would
+end up extension-defined, only that *some* future `JOIN`-gating flag
+might be. Once `invite-only` moved from hypothetical example to an
+actual, in-scope feature, checking it against this project's own
+precedent settled the question the other way: every other
+currently-implemented channel-mode flag — `moderated`/`members-only`
+(FR-013), `private`/`secret` (FR-047), `voice`/`operator` (FR-045/
+FR-046), `ban-mask` (FR-062) — is `CORE`-defined, unconditional
+behavior; only `cloak` and `admin`, genuinely optional cross-cutting
+capabilities a deployment might reasonably run without, are modeled as
+`ServerExtension`s. `invite-only` and its paired `INVITE` command
+(RFC 2812 §4.2.3, §3.2.7) sit in the first category by the same
+reasoning that put `ban-mask` there: both are base-RFC channel
+moderation behavior a Story 5 deployment needs, not optional add-ons.
+Treating it as `CORE` costs nothing new architecturally — the `gates`
+mechanism doesn't care who defines a flag, only that a definition
+exists — so this is purely a placement decision, not a design
+constraint the mechanism forced.
+
+**Decision**: `Channel` gains one new field, `invited: Set<String>`
+(data-model.md), holding casefolded nicknames currently holding a
+usable invitation on that channel — the same "each `kind` gets its
+own purpose-built storage" pattern `bans`/`operators`/`voiced` already
+established, not a generic reusable invite-list mechanism (this
+project's standing "don't generalize until a second concrete consumer
+exists" discipline, research.md "`LIST`-kind flags in practice").
+`invite-only` (`i`) becomes an eighth `CORE`-defined `ChannelMode`:
+`BOOLEAN`-kind, `gates: {JOIN}`, set/cleared by an operator via `MODE
++i`/`-i` exactly like `moderated`/`members-only`/`private`/`secret`
+already are. Its `JOIN`-gate predicate: pass automatically if
+`invite-only` isn't currently active on the channel; otherwise pass
+only if the joiner's current (casefolded) nickname is in
+`Channel.invited` — evaluated as its own independent flag in the same
+generic "does the actor pass every currently-recognized flag whose
+`gates` includes `JOIN`" loop `ban-mask` already exercises
+(data-model.md `Channel` validation rules), never combined into one
+condition with `ban-mask`'s own predicate. This is what makes "an
+invitation bypasses `invite-only` but never a ban" fall out for free:
+nothing needs to special-case the interaction, since each gating flag
+is checked on its own and a `JOIN` only succeeds if *every* one of
+them passes. A successful `JOIN` removes the joining nickname from
+`Channel.invited` if present, whether or not `invite-only` was the
+reason a check against it ran — an invitation that outlived its
+purpose (e.g., the channel wasn't invite-only after all, or stopped
+being before the target joined) shouldn't linger as stale state either.
+`INVITE <nickname> <channel>` (RFC 2812 §3.2.7) is a new command,
+implemented in `jircd-core`, not `jircd-protocol` (the wire-level
+grammar was already recognized, per the Full Command Catalog): the
+sender MUST currently be a member of `<channel>` (`442
+ERR_NOTONCHANNEL` otherwise — this also naturally covers "the channel
+doesn't exist," the identical treatment `KICK`/`PART`/channel `MODE`
+already give that case); `<nickname>` MUST resolve to a currently
+connected client (`401 ERR_NOSUCHNICK`) that isn't already a member of
+`<channel>` (`443 ERR_USERONCHANNEL`); if `invite-only` is currently
+active, the sender MUST additionally be a channel operator (`482
+ERR_CHANOPRIVSNEEDED`) — otherwise any current member may invite,
+matching modern IRC client protocol documentation's own wording ("only
+members of the channel are allowed to invite other users... when the
+channel has invite-only mode set, only channel operators may issue
+`INVITE`"). On success: the target's casefolded nickname is added to
+`Channel.invited`; the sender receives `341 RPL_INVITING <nick>
+<channel>` — the modern-docs parameter order (`<client> <nick>
+<channel>`), not RFC 2812's own, older `<channel> <nick>` ordering,
+the same "modern IRC client protocol documentation wins over a frozen
+RFC's wording when the two disagree" precedent `ban-mask`'s dual-gating
+already established (research.md "`LIST`-kind flags in practice");
+the target receives an `INVITE` message from the sender. `SAJOIN`
+(FR-057) already bypasses every currently-recognized `JOIN`-gating
+flag unconditionally, so it required no change to add `invite-only` to
+what it bypasses — the same "wired to the generic gate check point
+once, extended automatically" outcome `ban-mask` already demonstrated.
+
+**Rationale**: No expiration timeout and no per-channel cap on
+`Channel.invited`'s size, unlike `Channel.bans`' fixed 100-entry limit
+— see spec.md Assumptions (FR-065) for why: an invitation is
+self-bounding, transient churn (consumed on the target's next `JOIN`
+or discarded wholesale on channel recreation), not accumulating,
+administrator-visible standing state the way a ban list is, and no
+RFC/de-facto numeral exists for "too many outstanding invitations" to
+invent a rejection around. An invitation is nickname-keyed, not
+identity-keyed — if its target changes nickname before joining, the
+invitation simply goes stale under the old name, exactly the same
+"captured at creation time, not tracked across a rename" treatment
+`BanEntry.setBy` already gives the operator who created *that* record;
+no special-case cleanup or transfer logic exists for either.
+
+**Alternatives considered**:
+- *Ship `invite-only`/`INVITE` as a new `ServerExtension`, matching the
+  two earlier "future extension" mentions exactly as written*:
+  considered and rejected once actually scoped — see "Core vs.
+  extension, revisited" above. Every other implemented channel-mode
+  flag is `CORE`; making this one the sole administrator-toggleable
+  exception among Story 5's moderation flags would be inconsistent
+  with no benefit, since nothing about `invite-only` is genuinely
+  optional the way `cloak`'s hostname obfuscation or `admin`'s
+  privileged command set are.
+- *Let a held invitation also bypass a matching ban entry*: rejected —
+  no version of the ban-mode specification (classic or modern)
+  describes `INVITE` as a ban override, and this project has
+  consistently avoided extending a flag's effect past what a real
+  specification actually says (research.md "`LIST`-kind flags in
+  practice" — the identical reasoning that rejected auto-`KICK`-on-ban).
+  An operator who wants both effects can remove the ban explicitly, a
+  separate, deliberate `MODE -b`, not an implicit side effect of
+  `INVITE`.
+- *Expire an invitation after a fixed timeout, or cap how many a
+  channel may hold outstanding*: rejected — see Rationale above; no
+  RFC/de-facto convention defines either, and this project's existing
+  flood/rate-limiting (FR-016) already bounds how quickly invitations
+  can be issued, the same general-purpose safeguard covering every
+  other high-frequency command here.
+- *Transfer or re-key an outstanding invitation when its target changes
+  nickname*: rejected as unnecessary machinery for a case this project
+  already accepts elsewhere (a stale `BanEntry.setBy` after the setting
+  operator renames) — an invitation going stale on rename is a minor,
+  self-correcting inconvenience (the inviter can simply invite the new
+  nickname), not a correctness problem worth new tracking logic for.
 
 ## User mode: `operator` (FR-034/FR-044)
 

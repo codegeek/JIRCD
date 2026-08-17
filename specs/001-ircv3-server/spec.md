@@ -241,6 +241,20 @@ confirm other channel members see the removal reflected.
    publicly-visible one), **Then** the member is muted the same as any
    other ban match — a ban is not evadable simply because a cloaking
    extension changes what other clients see (FR-062).
+9. **Given** an operator marks their channel invite-only, **When** a
+   client with no invitation on that channel attempts to `JOIN`,
+   **Then** the attempt is rejected; **When** the operator invites that
+   client by nickname and it then attempts to `JOIN` again, **Then** it
+   succeeds, and the same client's invitation no longer admits a
+   second, later `JOIN` after it parts. **Given** the channel is not
+   invite-only, **When** any current member (not only an operator)
+   invites another connected client, **Then** the invitation is
+   recorded and the inviting member receives confirmation, but nothing
+   about the target's ability to `JOIN` changes, since `invite-only`
+   isn't restricting it. **Given** a client holds a valid invitation to
+   a channel that also bans that same client, **When** it attempts to
+   `JOIN`, **Then** the attempt is still rejected — an invitation
+   overrides `invite-only` only, never an active ban (FR-062, FR-065).
 
 ---
 
@@ -746,11 +760,13 @@ their presented (not real) hostname.
   requirement does not promise a mechanism for yet — see Assumptions.
   Critically, the guarantee is not limited to flags that restrict sending
   a channel message: an on/off flag that instead restricts *joining* the
-  channel (e.g., a future invite-only extension) MUST be equally
-  addable without a core-codebase change — the mechanism's extension
-  point MUST be defined in terms of "which action does this flag gate,"
-  not hardcoded to the one action (sending) this release's two built-in
-  flags happen to gate.
+  channel (e.g., invite-only, FR-065) MUST be equally addable without a
+  core-codebase change — the mechanism's extension point MUST be
+  defined in terms of "which action does this flag gate," not
+  hardcoded to the one action (sending) this release's two built-in
+  flags happen to gate. FR-065's `invite-only` flag validated exactly
+  this promise: it gates `JOIN`, not `SEND`, and required no change to
+  this mechanism's shape to add.
 - **FR-044**: The server MUST implement a user-level mode mechanism,
   using the same open, extension-friendly design FR-043 establishes for
   channel modes — a named, non-closed set of flags, each defined by
@@ -962,23 +978,21 @@ their presented (not real) hostname.
   administrator joins any channel by name — creating it if it doesn't
   exist (FR-003) or joining an existing one — bypassing every
   currently-active channel-mode flag that gates `JOIN` (FR-043's `gates`
-  mechanism), the same class of restriction a future invite-only-style
-  extension would enforce against an ordinary client's `JOIN`. This is a
-  distinct, explicit command from ordinary `JOIN`, not a privilege
-  bypass silently applied to `JOIN` itself — an administrator's regular
-  `JOIN` remains subject to the same gates as anyone else's, so bypass
-  only happens when deliberately invoked. It does not bypass the
-  nickname/channel-name grammar (FR-002/FR-048) or UTF-8 validity
-  (FR-054) — a malformed channel name is rejected the normal way — and
-  it does not itself grant operator status (FR-058 is the separate
-  mechanism for that). No channel-mode flag defined this release
-  actually gates `JOIN` (FR-043's `gates` mechanism has no such flag
-  yet), so this command has no observable bypass effect yet, the same
-  "mechanism exists now, no flag exercises it yet" posture FR-043
-  itself already establishes — but it MUST be wired to the same
-  `JOIN`-gate check point ordinary `JOIN` uses, so a future
-  JOIN-gating extension is bypassed by administrators automatically,
-  without further changes to this command.
+  mechanism). This is a distinct, explicit command from ordinary
+  `JOIN`, not a privilege bypass silently applied to `JOIN` itself — an
+  administrator's regular `JOIN` remains subject to the same gates as
+  anyone else's, so bypass only happens when deliberately invoked. It
+  does not bypass the nickname/channel-name grammar (FR-002/FR-048) or
+  UTF-8 validity (FR-054) — a malformed channel name is rejected the
+  normal way — and it does not itself grant operator status (FR-058 is
+  the separate mechanism for that). Two currently-recognized flags
+  actually gate `JOIN` and are therefore bypassed by this command: the
+  ban list (FR-062) and `invite-only` (FR-065) — this command was wired
+  to the same generic `JOIN`-gate check point ordinary `JOIN` uses
+  before either flag existed, so both bypasses required no change to
+  this command when their flags were added, the same "mechanism exists
+  now, extended later without revisiting this command" posture FR-043
+  itself establishes for the gate mechanism as a whole.
 - **FR-058**: The server MUST provide a dedicated in-band command,
   restricted to administrator privilege (FR-033) and to a sender who is
   currently a member of the target channel, through which an
@@ -1137,6 +1151,39 @@ their presented (not real) hostname.
   channel members for a mode change MUST reflect only the flags
   actually applied, never the full originally-requested set when the
   two differ.
+- **FR-065**: The server MUST implement channel invitations as core,
+  always-present behavior (FR-036) — the same tier as every other
+  currently-implemented channel-mode flag (FR-013, FR-045/FR-046,
+  FR-047, FR-062), not an optional extension. This is one feature with
+  two parts, matching RFC 2812 §3.2.7's `INVITE` command and §4.2.3's
+  `invite-only` channel-mode flag as a paired mechanism, not two
+  independent ones: (1) any current member of a channel MUST be able
+  to invite another connected client to it by nickname, recording the
+  invitation against the target's nickname; if `invite-only` is
+  currently active on that channel, only a channel operator MAY issue
+  the invitation — an ordinary member's attempt MUST be rejected with
+  the same operator-required error FR-014's other operator-gated
+  actions use. Naming a client already a member of the channel, or a
+  nickname that isn't currently connected, MUST each be rejected with
+  its own distinct, specific error rather than silently accepted or
+  merged into one generic failure. (2) An operator MUST be able to set
+  or clear `invite-only` on their channel, the same restricted-to-
+  operators posture FR-013's other flags already use; while active, an
+  otherwise-eligible `JOIN` MUST be rejected unless the joiner
+  currently holds a matching invitation on that channel — evaluated as
+  an independent condition alongside every other currently-recognized
+  `JOIN`-gating flag (FR-043), including FR-062's ban list: holding a
+  valid invitation bypasses only the `invite-only` restriction, never
+  a ban targeting the same client. A recorded invitation MUST be
+  consumed (no longer usable for a future `JOIN`) the moment its
+  target successfully joins that channel, regardless of whether
+  `invite-only` was the reason the join needed one; it MUST also be
+  cleared, along with every other per-channel state, when the channel
+  is recreated from zero members (FR-003). The server places no other
+  automatic expiration on a recorded invitation, and does not track or
+  transfer it if its target later changes nickname before joining — an
+  invitation is a nickname-keyed record, the same treatment FR-062's
+  ban entries already give the operator identity that created them.
 
 ### Key Entities
 
@@ -1176,12 +1223,19 @@ their presented (not real) hostname.
   offered) determined by which extensions are currently enabled.
 - **Extension**: An independently enableable/disableable unit of optional
   server functionality (e.g., an individual capability, a command set, or
-  an additional channel/user-mode flag, FR-043/FR-044) configured by the
-  administrator. Core protocol behavior — channel moderation's two
-  built-in mode flags (FR-036) and the capability-negotiation mechanism
+  a channel/user-mode flag an extension chooses to contribute, FR-043/
+  FR-044) configured by the administrator. Core protocol behavior —
+  every currently-implemented channel-mode flag (FR-013, FR-045/FR-046,
+  FR-047, FR-062, FR-065) and the capability-negotiation mechanism
   itself (FR-035) — is never modeled as an Extension; it is always
-  present. An *additional* mode flag beyond those two, once one exists,
-  would be — the mechanism, not the two built-in flags, is what's core.
+  present, the same tier as any other core command (FR-036). The
+  mechanism, not any particular flag, is what determines core-vs-
+  extension status: FR-043's extension point exists so a flag *can* be
+  contributed by an optional extension, not so every new flag *must*
+  be — a flag a release's actual stories need (as `invite-only`,
+  FR-065, turned out to be) is added as core the same way `ban-mask`
+  (FR-062) was, without that decision being forced by the mechanism
+  itself.
 - **Server Configuration**: The administrator-controlled settings
   determining which extensions are active and how core and optional
   behavior is tuned — including the server's own name (FR-050), used as
@@ -1390,3 +1444,42 @@ their presented (not real) hostname.
   made elsewhere (research.md "Wire-protocol command & numeric
   completeness"). The truncated `MODE` echo itself — reflecting only
   what was actually applied — is the feedback a client receives instead.
+- FR-065 (channel invitations) reverses a placement this specification
+  had committed to twice before it was ever built: `invite-only` was
+  originally used, in two separate places (FR-043's example and the
+  Extension Key Entity's description), as the worked example of a
+  future flag a `ServerExtension` would contribute, the same tier as
+  `cloak`/`admin`. Once actually scoped, that placement didn't survive
+  contact with this specification's own precedent: every other
+  currently-implemented channel-mode flag — `moderated`/`members-only`
+  (FR-013), `private`/`secret` (FR-047), `voice`/`operator` (FR-045/
+  FR-046), `ban-mask` (FR-062) — is core, unconditional behavior, never
+  gated by an administrator's extension toggle; only genuinely optional,
+  cross-cutting capabilities (`cloak`'s hostname obfuscation, `admin`'s
+  privileged command set) are modeled as extensions. `invite-only` and
+  its paired `INVITE` command fit the first category, not the second —
+  RFC 2812 defines both in its base command/mode sections (§3.2.7,
+  §4.2.3), the same tier `KICK` (§3.2.8) already occupies as core, not
+  an add-on a deployment might reasonably run without. The two earlier
+  "future extension" mentions were about validating that the `gates`
+  mechanism itself could support a `JOIN`-gating flag without a core
+  code change — a claim about the *mechanism*, which still holds
+  regardless of whether the specific flag exercising it turns out to
+  be core- or extension-defined.
+- FR-065's invitation records deliberately carry no expiration timeout
+  and no cap on how many a channel may accumulate, unlike FR-062's
+  ban list (bounded at 100 entries, `478 ERR_BANLISTFULL`). A ban list
+  needed an explicit cap because RFC 1459/2812 already defines a
+  fitting numeral family for list-limit rejections and unbounded growth
+  there is administrator-visible, standing state; an invitation is
+  consumed on the target's next successful `JOIN` (or discarded
+  wholesale when the channel is recreated from zero members), so its
+  worst case is transient, self-bounding churn rather than accumulation
+  — and no RFC/de-facto numeral exists for "too many outstanding
+  invitations" to reject with in the first place. Inventing a cap and
+  a numeral for it here would repeat the exact mistake this
+  specification has deliberately avoided everywhere else (FR-064's
+  Assumptions entry above); ordinary flood/rate-limiting (FR-016)
+  already bounds how quickly one member can issue invitations, the same
+  general-purpose safeguard that already covers every other
+  high-frequency command in this specification.

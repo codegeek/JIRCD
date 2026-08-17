@@ -179,6 +179,35 @@ schema in `contracts/server-configuration.md`.
       validating FR-064's silent-truncation behavior at the configured
       `maxModesPerCommand` limit and the `MODES` token in `005
       RPL_ISUPPORT` advertising `2`.
+11. As the operator of `#lobby`, send `MODE #lobby +i`, then have a
+    client with no invitation (dave) attempt `JOIN #lobby`.
+    - **Expected**: `473 ERR_INVITEONLYCHAN`; dave is not admitted.
+    As the operator, send `INVITE dave #lobby`.
+    - **Expected**: `341 RPL_INVITING dave #lobby` to the operator;
+      dave receives an `INVITE` message from the operator. Dave then
+      sends `JOIN #lobby` again.
+    - **Expected**: the join succeeds normally (`353`/`366` to dave,
+      `JOIN` echoed to existing members) — validates FR-065's
+      invite-only gate and Story 5 Acceptance Scenario 9. Dave then
+      `PART`s and attempts `JOIN #lobby` a third time.
+    - **Expected**: `473 ERR_INVITEONLYCHAN` again — the invitation
+      was consumed by the earlier successful join and does not admit a
+      second one.
+    As a non-operator member (alice, already in `#lobby`), attempt
+    `INVITE dave #lobby` while `+i` is still active.
+    - **Expected**: `482 ERR_CHANOPRIVSNEEDED` — inviting to an
+      invite-only channel requires operator status.
+    The operator then sends `MODE #lobby -i`, and alice sends
+    `INVITE dave #lobby` again.
+    - **Expected**: succeeds (`341` to alice) — any current member may
+      invite once the channel is no longer invite-only, per FR-065.
+    Finally, with `#lobby` still not invite-only and dave already
+    banned (`MODE #lobby +b dave!*@*`), the operator sends
+    `INVITE dave #lobby` and dave attempts `JOIN #lobby`.
+    - **Expected**: the invitation is recorded and confirmed
+      normally, but dave's `JOIN` still fails with `474
+      ERR_BANNEDFROMCHAN` — an invitation bypasses `invite-only` only,
+      never an active ban (FR-062, FR-065).
 
 ## Story 6 — Administer the Server via IRC Commands
 

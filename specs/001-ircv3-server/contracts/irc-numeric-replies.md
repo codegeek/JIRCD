@@ -58,7 +58,8 @@ during that window.
 | `366` | `RPL_ENDOFNAMES` | `JOIN`, `NAMES` | FR-003, FR-041 |
 | `381` | `RPL_YOUREOPER` | Successful `OPER` | FR-034 |
 | `382` | `RPL_REHASHING` | Successful `REHASH` | FR-011, FR-012 (research.md "Configuration reload mechanism") |
-| `401` | `ERR_NOSUCHNICK` | `WHOIS` for a nickname that isn't connected | FR-037 |
+| `341` | `RPL_INVITING` | Successful `INVITE`, sent to the sender confirming the invitation was recorded (FR-065) | FR-065 |
+| `401` | `ERR_NOSUCHNICK` | `WHOIS` for a nickname that isn't connected; `INVITE` naming a nickname that isn't connected (FR-065) | FR-037, FR-065 |
 | `403` | `ERR_NOSUCHCHANNEL` | `TOPIC`/`NAMES`/`WHO` (channel-name form) for a channel that doesn't exist, or that is private/secret and the requester is neither a member nor an administrator (identical response either way, FR-047) | FR-047, FR-061 |
 | `417` | `ERR_INPUTTOOLONG` | A line exceeding the 512-byte base limit or the 4096-byte `message-tags` allowance (FR-049), or a `TOPIC`-set attempt exceeding the configured `topicMaxLength` (FR-056) — not part of RFC 1459/2812 (there is no numeric defined in that gap, 416-420), but a widely-adopted de facto standard purpose-built for exactly this case, the same way this project already treats IRCv3's `CAP` numerics as belonging alongside the RFC set | FR-049, FR-056 |
 | `421` | `ERR_UNKNOWNCOMMAND` | Malformed/unrecognized command, a wire-protocol-recognized command with no handler in this release, or a human-readable-content parameter (`PRIVMSG`/`NOTICE` body, topic, realname, channel name) containing invalid UTF-8 (FR-054) | FR-015, FR-054 |
@@ -66,9 +67,11 @@ during that window.
 | `432` | `ERR_ERRONEUSNICKNAME` | `NICK` violating the nickname grammar (invalid leading/body characters or over 9 characters) | irc-protocol-commands.md "Connection Registration Grammar" |
 | `433` | `ERR_NICKNAMEINUSE` | `NICK` naming an already-claimed nickname | FR-002 |
 | `441` | `ERR_USERNOTINCHANNEL` | `MODE +v`/`-v` or `+o`/`-o <nickname>` naming a nickname that isn't a current member of the target channel | FR-045, FR-046 |
-| `442` | `ERR_NOTONCHANNEL` | `PART`/`KICK`/`MODE` on a channel the sender hasn't joined; `PRIVMSG`/`NOTICE` to a channel with `members-only` active that the sender hasn't joined (FR-004, FR-013/FR-043 — membership is not required for `PRIVMSG`/`NOTICE` otherwise); `SAMODE` from an administrator who isn't currently a member of the target channel (FR-058) | FR-003, FR-004, FR-014, FR-058 |
+| `442` | `ERR_NOTONCHANNEL` | `PART`/`KICK`/`MODE` on a channel the sender hasn't joined; `PRIVMSG`/`NOTICE` to a channel with `members-only` active that the sender hasn't joined (FR-004, FR-013/FR-043 — membership is not required for `PRIVMSG`/`NOTICE` otherwise); `SAMODE` from an administrator who isn't currently a member of the target channel (FR-058); `INVITE` from a sender who isn't currently a member of the named channel — also covers that channel not existing at all (FR-065) | FR-003, FR-004, FR-014, FR-058, FR-065 |
+| `443` | `ERR_USERONCHANNEL` | `INVITE` naming a nickname that's already a member of the target channel (FR-065) | FR-065 |
 | `404` | `ERR_CANNOTSENDTOCHAN` | `PRIVMSG`/`NOTICE` to a channel blocked by `moderated` (sender not an operator/voiced) or by an active `ban-mask` match (sender muted in place, not removed) — distinct from `442`'s "not even a member" case (FR-013, FR-062) | FR-013, FR-062 |
 | `474` | `ERR_BANNEDFROMCHAN` | `JOIN` naming a channel the joiner's presented identity matches an active `ban-mask` entry on — `SAJOIN` bypasses this check entirely (FR-057, FR-062) | FR-062 |
+| `473` | `ERR_INVITEONLYCHAN` | `JOIN` naming a channel with `invite-only` active that the joiner holds no current invitation for — `SAJOIN` bypasses this check entirely (FR-057, FR-065) | FR-065 |
 | `367` | `RPL_BANLIST` | `MODE <channel> b`, one per currently-active ban mask (FR-062) | FR-062 |
 | `368` | `RPL_ENDOFBANLIST` | End of a `MODE <channel> b` reply, including a zero-ban one (FR-062) | FR-062 |
 | `478` | `ERR_BANLISTFULL` | `MODE <channel> +b <mask>` when the channel already has 100 active bans (FR-062) | FR-062 |
@@ -78,7 +81,7 @@ during that window.
 | `464` | `ERR_PASSWDMISMATCH` | Failed `OPER` (also logged as a security event, FR-019) | FR-034 |
 | `472` | `ERR_UNKNOWNMODE` | `MODE` given a flag the core moderation command set doesn't define | FR-015, FR-036 (core input validation — `MODE` is never extension-gated) |
 | `481` | `ERR_NOPRIVILEGES` | `EXTENSION`/`WHOHOST`/`REHASH`/`SAJOIN`/`SAMODE` (or any admin command) attempted without administrator privilege; a non-privileged session's own `MODE <self> +o` (FR-033, FR-044) | FR-033, FR-044, FR-057, FR-058 |
-| `482` | `ERR_CHANOPRIVSNEEDED` | `KICK`/`MODE` attempted by a non-operator | FR-014 |
+| `482` | `ERR_CHANOPRIVSNEEDED` | `KICK`/`MODE` attempted by a non-operator; `INVITE` on an `invite-only` channel by a non-operator member (FR-065) | FR-014, FR-065 |
 | `501` | `ERR_UMODEUNKNOWNFLAG` | `MODE <nickname>` given a flag letter no currently-recognized `UserMode` defines (FR-044) | FR-044 |
 | `502` | `ERR_USERSDONTMATCH` | `MODE <nickname>` (query or set) naming a nickname other than the sender's own current one — self-only in this release (FR-044) | FR-044 |
 | `CAP * LS` | (IRCv3, not a numeric) | `CAP LS` | FR-006 |
@@ -102,7 +105,7 @@ trigger them is "Recognized only" per irc-protocol-commands.md).
 | `005` | `RPL_BOUNCE` *(Used, as `RPL_ISUPPORT`)* | `234` | `RPL_SERVLIST` | `325` | `RPL_UNIQOPIS` |
 | `200` | `RPL_TRACELINK` | `235` | `RPL_SERVLISTEND` | `331` | `RPL_NOTOPIC` *(Used)* |
 | `201` | `RPL_TRACECONNECTING` | `242` | `RPL_STATSUPTIME` | `332` | `RPL_TOPIC` *(Used)* |
-| `202` | `RPL_TRACEHANDSHAKE` | `243` | `RPL_STATSOLINE` | `341` | `RPL_INVITING` |
+| `202` | `RPL_TRACEHANDSHAKE` | `243` | `RPL_STATSOLINE` | `341` | `RPL_INVITING` *(Used)* |
 | `203` | `RPL_TRACEUNKNOWN` | `251` | `RPL_LUSERCLIENT` | `342` | `RPL_SUMMONING` |
 | `204` | `RPL_TRACEOPERATOR` | `252` | `RPL_LUSEROP` | `346` | `RPL_INVITELIST` |
 | `205` | `RPL_TRACEUSER` | `253` | `RPL_LUSERUNKNOWN` | `347` | `RPL_ENDOFINVITELIST` |
@@ -138,12 +141,12 @@ trigger them is "Recognized only" per irc-protocol-commands.md).
 | `424` | `ERR_FILEERROR` |
 | `431` | `ERR_NONICKNAMEGIVEN` *(Used)* | `432` | `ERR_ERRONEUSNICKNAME` *(Used)* | `433` | `ERR_NICKNAMEINUSE` *(Used)* |
 | `436` | `ERR_NICKCOLLISION` | `437` | `ERR_UNAVAILRESOURCE` | `441` | `ERR_USERNOTINCHANNEL` *(Used)* |
-| `442` | `ERR_NOTONCHANNEL` *(Used)* | `443` | `ERR_USERONCHANNEL` | `444` | `ERR_NOLOGIN` |
+| `442` | `ERR_NOTONCHANNEL` *(Used)* | `443` | `ERR_USERONCHANNEL` *(Used)* | `444` | `ERR_NOLOGIN` |
 | `445` | `ERR_SUMMONDISABLED` | `446` | `ERR_USERSDISABLED` | `451` | `ERR_NOTREGISTERED` |
 | `461` | `ERR_NEEDMOREPARAMS` *(Used)* | `462` | `ERR_ALREADYREGISTRED` *(Used)* | `463` | `ERR_NOPERMFORHOST` |
 | `464` | `ERR_PASSWDMISMATCH` *(Used)* | `465` | `ERR_YOUREBANNEDCREEP` | `466` | `ERR_YOUWILLBEBANNED` |
 | `467` | `ERR_KEYSET` | `471` | `ERR_CHANNELISFULL` | `472` | `ERR_UNKNOWNMODE` *(Used)* |
-| `473` | `ERR_INVITEONLYCHAN` | `474` | `ERR_BANNEDFROMCHAN` *(Used)* | `475` | `ERR_BADCHANNELKEY` |
+| `473` | `ERR_INVITEONLYCHAN` *(Used)* | `474` | `ERR_BANNEDFROMCHAN` *(Used)* | `475` | `ERR_BADCHANNELKEY` |
 | `476` | `ERR_BADCHANMASK` *(Used)* | `477` | `ERR_NOCHANMODES` | `478` | `ERR_BANLISTFULL` *(Used)* |
 | `481` | `ERR_NOPRIVILEGES` *(Used)* | `482` | `ERR_CHANOPRIVSNEEDED` *(Used)* | `483` | `ERR_CANTKILLSERVER` |
 | `484` | `ERR_RESTRICTED` | `485` | `ERR_UNIQOPPRIVSNEEDED` | `491` | `ERR_NOOPERHOST` |

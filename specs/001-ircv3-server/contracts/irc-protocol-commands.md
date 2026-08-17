@@ -150,7 +150,7 @@ defined, the same class of gap the nickname/channel grammars closed for
 | `002 RPL_YOURHOST` | `serverName` and `serverVersion` (`ServerConfiguration`, FR-050, data-model.md) |
 | `003 RPL_CREATED` | This running process's start time — not a fixed software release date |
 | `004 RPL_MYINFO` | `serverName`, `serverVersion`, the currently-recognized user-mode letters (`o` this release, FR-044, data-model.md `UserMode`), and the currently-recognized channel-mode letters — read from the same server-scoped `ChannelMode` catalog snapshot `005`'s `CHANMODES` also reads (data-model.md `SupportedFeatures`), recomputed only when `ExtensionRegistry`'s state changes, not per registration, so this never drifts out of sync with what `MODE` actually recognizes or with what `005` advertises |
-| `005 RPL_ISUPPORT` (one or more lines) | `SupportedFeatures` (FR-055, data-model.md — server-scoped, not computed per session) — `CASEMAPPING=rfc1459`, `CHANTYPES=#`, `NICKLEN`, `CHANNELLEN`, `TOPICLEN` (FR-056 — `9`/`50`/`390` by default, but each `ServerConfiguration`-configurable, not fixed constants), `MODES` (FR-064 — `6` by default, likewise configurable), `CHANMODES=b,,,mnps` (from the same `ChannelMode` catalog snapshot `004` reads — `b` in the list-type `A` group, FR-062), `PREFIX=(ov)@+`, `UTF8ONLY`; split across additional `005` lines if the full token set wouldn't fit one line within FR-049's 512-byte limit (this release's default token set always fits in one) |
+| `005 RPL_ISUPPORT` (one or more lines) | `SupportedFeatures` (FR-055, data-model.md — server-scoped, not computed per session) — `CASEMAPPING=rfc1459`, `CHANTYPES=#`, `NICKLEN`, `CHANNELLEN`, `TOPICLEN` (FR-056 — `9`/`50`/`390` by default, but each `ServerConfiguration`-configurable, not fixed constants), `MODES` (FR-064 — `6` by default, likewise configurable), `CHANMODES=b,,,imnps` (from the same `ChannelMode` catalog snapshot `004` reads — `b` in the list-type `A` group, FR-062; `i` in the boolean `D` group, FR-065), `PREFIX=(ov)@+`, `UTF8ONLY`; split across additional `005` lines if the full token set wouldn't fit one line within FR-049's 512-byte limit (this release's default token set always fits in one) |
 | `422 ERR_NOMOTD` | Closes the burst — this release implements no message-of-the-day content (`MOTD` itself remains "Recognized only," Full Command Catalog below); `422` gives clients a defined completion signal instead of an indefinite wait for one |
 
 **Contract notes**:
@@ -338,16 +338,19 @@ was previously missing and needed its own definition (FR-048).
 | `MODE <channel> b` | C→S | `REGISTERED` session; no operator/membership requirement — querying the ban list is not itself a moderation action | Returns every currently-active ban mask on `<channel>` (FR-062) | One `367 RPL_BANLIST` per active mask, then `368 RPL_ENDOFBANLIST` — zero bans is not an error, still closes with `368` |
 | `MODE <channel> +b <mask>` | C→S | Sender is a channel operator | Adds `<mask>` to the ban list, normalizing a partial mask by filling missing `user`/`host` segments with `*` (FR-062); no-op if the (normalized) mask is already present | `MODE` echoed to all members; `482 ERR_CHANOPRIVSNEEDED` if sender isn't an operator; `478 ERR_BANLISTFULL` if the channel already has 100 active bans |
 | `MODE <channel> -b <mask>` | C→S | Sender is a channel operator | Removes `<mask>` (after the same normalization) from the ban list; no-op if not present | `MODE` echoed to all members; `482 ERR_CHANOPRIVSNEEDED` if sender isn't an operator |
+| `MODE <channel> <+/->i` | C→S | Sender is a channel operator | Sets/clears `invite-only` (`i`) (FR-065) — while active, an ordinary `JOIN` requires a currently-held, matching invitation ("Channel Operations" above, `Channel.invited`) | `MODE` echoed to all members; `482 ERR_CHANOPRIVSNEEDED` if unauthorized; `472 ERR_UNKNOWNMODE` for any other flag letter |
+| `INVITE <nickname> <channel>` | C→S | `REGISTERED` session; sender is a current member of `<channel>`; `<nickname>` is a currently-connected client not already a member of `<channel>`; if `invite-only` is currently active on `<channel>`, sender must additionally be an operator (FR-065) | Records an invitation for `<nickname>` on `<channel>` (`Channel.invited`), letting that client's next `JOIN` of `<channel>` satisfy `invite-only`'s gate regardless of who issues it — consumed the moment that `JOIN` succeeds | `341 RPL_INVITING <nick> <channel>` to the sender; an `INVITE` message relayed to `<nickname>`; `442 ERR_NOTONCHANNEL` if the sender isn't a member of `<channel>` (also covers `<channel>` not existing); `401 ERR_NOSUCHNICK` if `<nickname>` isn't connected; `443 ERR_USERONCHANNEL` if `<nickname>` is already a member; `482 ERR_CHANOPRIVSNEEDED` if `invite-only` is active and the sender isn't an operator |
 
 **Contract notes**:
-- This release's channel `MODE` implements four `BOOLEAN`-kind flags —
-  the two FR-013 defines (`moderated`, `members-only`), plus `private`/
-  `secret` (FR-047) — directly, unconditionally (never gated by an
-  `Extension`, FR-036), plus the two `MEMBER`-kind flags FR-045/FR-046
-  define (`voice`, `operator`), plus one `LIST`-kind flag, `ban-mask`
-  (FR-062). Every other standard channel mode ("Full Channel Mode
-  Catalog" below — invite-only, channel-key, user-limit, topic-lock)
-  remains out of scope for this release's behavior (FR-043).
+- This release's channel `MODE` implements five `BOOLEAN`-kind flags —
+  the two FR-013 defines (`moderated`, `members-only`), `private`/
+  `secret` (FR-047), and `invite-only` (FR-065) — directly,
+  unconditionally (never gated by an `Extension`, FR-036), plus the two
+  `MEMBER`-kind flags FR-045/FR-046 define (`voice`, `operator`), plus
+  one `LIST`-kind flag, `ban-mask` (FR-062). Every other standard
+  channel mode ("Full Channel Mode Catalog" below — channel-key,
+  user-limit, topic-lock) remains out of scope for this release's
+  behavior (FR-043).
 - **Every row above may be combined into a single `MODE` command**
   (FR-064): `MODE #chan +ov-b nick1 nick2 mask1` sets `+o` on `nick1`,
   `+v` on `nick2`, and removes `mask1` from the ban list, all in one
@@ -387,6 +390,28 @@ was previously missing and needed its own definition (FR-048).
   the same opaque signal any ban already produces; FR-032's restriction
   on *viewing* real hostnames/IPs is unrelated to and unaffected by
   this.
+- `invite-only` (`i`, FR-065) is the second flag this release gates
+  `JOIN` with, checked entirely independently of `ban-mask`'s own
+  `JOIN`-gate predicate (data-model.md `Channel` validation rules): a
+  `JOIN` only succeeds if both currently-recognized `JOIN`-gating flags
+  pass, so a client's `INVITE`-granted invitation (below) never
+  overrides an active ban targeting the same client — it only ever
+  satisfies `invite-only`'s own check, never a substitute for removing
+  the ban. `SAJOIN` (FR-057) bypasses `invite-only` the same
+  unconditional way it bypasses `ban-mask`.
+- `INVITE <nickname> <channel>` — any current member of `<channel>`
+  may issue one; only when `invite-only` is currently active does the
+  sender additionally need to be an operator, matching modern IRC
+  client protocol documentation's own wording (not RFC 2812's
+  narrower, operator-only-always reading). Issuing an invitation on a
+  channel that isn't (or isn't yet) invite-only still succeeds and is
+  still recorded — it has no observable effect unless `invite-only` is
+  active by the time the target attempts to `JOIN`. `341 RPL_INVITING`
+  uses modern IRC client protocol documentation's `<client> <nick>
+  <channel>` parameter order, not RFC 2812's own, older `<channel>
+  <nick>` ordering — the same "modern documentation wins where it
+  disagrees with a frozen RFC" precedent `ban-mask`'s dual-gating
+  already established (research.md "Channel invitations").
 - `operator` status has two independent paths to acquiring it in this
   release: first-join-gets-operator (FR-013, how a channel's very first
   operator is established) and `MODE +o` from an existing operator
@@ -404,10 +429,16 @@ was previously missing and needed its own definition (FR-048).
   server extension contributing additional `BOOLEAN` flags later
   (research.md "Channel/user mode extensibility", data-model.md
   `ChannelMode`) without a core protocol change — no extension does so in
-  this release. `VALUE`/`LIST`-kind flags (channel-key, user-limit,
-  ban-mask) are a narrower promise: cataloged below, but `Channel`'s
-  shape can't hold one yet, so adding one is a bigger change than adding
-  another `BOOLEAN` flag would be.
+  this release; every `BOOLEAN` flag implemented so far, `invite-only`
+  included, turned out to be `CORE`-defined instead (research.md
+  "Channel invitations" — "Core vs. extension, revisited"). `VALUE`-kind
+  flags (channel-key, user-limit) remain a narrower promise: cataloged
+  below, but `Channel`'s shape can't hold one yet, so adding one is a
+  bigger change than adding another `BOOLEAN` flag would be — `ban-mask`
+  (FR-062) already crossed that bar for `LIST`-kind flags specifically,
+  with its own purpose-built `Channel.bans` storage; `invite-only`
+  (FR-065) needed the identical treatment for its own `Channel.invited`
+  bookkeeping, despite being `BOOLEAN`-kind itself.
 - User-level `MODE` is implemented for exactly two flags this release
   (`operator`/`o`, `invisible`/`i`, FR-044/FR-061) — see "User Mode"
   below — using the same extension-contribution mechanism as channel
@@ -471,7 +502,7 @@ was previously missing and needed its own definition (FR-048).
 | `EXTENSION <ENABLE\|DISABLE> <extension-id>` | C→S | Sender holds administrator privilege | Toggles the named `CapabilityExtension` or `ServerExtension`'s state, in effect immediately for all clients (FR-011, FR-032) | Confirmation notice on success; `481 ERR_NOPRIVILEGES` if sender lacks administrator privilege (FR-033); `421 ERR_UNKNOWNCOMMAND`-style error naming the extension id if it doesn't exist |
 | `WHOHOST <nickname>` | C→S | Sender holds administrator privilege | Returns the target's real, unobfuscated hostname/IP regardless of any active cloaking (FR-031, FR-032) | Notice containing the real hostname on success; `481 ERR_NOPRIVILEGES` if unauthorized; standard "no such nickname" error if the target isn't connected |
 | `REHASH` | C→S | Sender holds administrator privilege | Manually re-reads and re-validates the Server Configuration file and reconciles it against live state — the in-band equivalent of a `SIGHUP` (research.md "Configuration reload mechanism", contracts/server-configuration.md "Live reload") | `382 RPL_REHASHING` on success; on validation failure, the same specific, actionable error startup validation would report (FR-012, SC-008), and the previously-active configuration remains untouched; `481 ERR_NOPRIVILEGES` if unauthorized |
-| `SAJOIN <channel>` | C→S | Sender holds administrator privilege | Joins the sender's own session to `channel` via the same create-or-join path as `JOIN` (FR-003), but skips the `JOIN`-gate check point (FR-043's `gates` mechanism) entirely — bypassing a restriction (e.g., a future invite-only extension) that would block an ordinary `JOIN` (FR-057, research.md "Administrator channel override") | Same success replies as `JOIN` (`JOIN` echoed to all members; `353`/`366` to the joiner); `481 ERR_NOPRIVILEGES` if sender lacks administrator privilege; `476 ERR_BADCHANMASK` if `channel` violates the Channel Name Grammar (grammar is NOT bypassed) |
+| `SAJOIN <channel>` | C→S | Sender holds administrator privilege | Joins the sender's own session to `channel` via the same create-or-join path as `JOIN` (FR-003), but skips the `JOIN`-gate check point (FR-043's `gates` mechanism) entirely — bypassing both currently-defined `JOIN`-gating flags, `ban-mask` (FR-062) and `invite-only` (FR-065), the same way it would bypass any future one (FR-057, research.md "Administrator channel override") | Same success replies as `JOIN` (`JOIN` echoed to all members; `353`/`366` to the joiner); `481 ERR_NOPRIVILEGES` if sender lacks administrator privilege; `476 ERR_BADCHANMASK` if `channel` violates the Channel Name Grammar (grammar is NOT bypassed) |
 | `SAMODE <channel> <+o\|-o>` | C→S | Sender holds administrator privilege; sender is currently a member of `channel` | Adds (`+o`) or removes (`-o`) the sender's own nickname from `channel`'s `operators`, bypassing FR-046's "sender must already be an operator" precondition — self-targeting only (FR-058, research.md "Administrator channel override") | `MODE` change echoed to all members on success, the same as an operator-granted `MODE +o`/`-o`; `481 ERR_NOPRIVILEGES` if sender lacks administrator privilege; `442 ERR_NOTONCHANNEL` if sender isn't currently a member |
 
 **Contract notes**:
@@ -545,7 +576,7 @@ any given server to implement it.
 | `TOPIC` | 3.2.4 | **Implemented** — see "Channel Operations" above |
 | `NAMES` | 3.2.5 | **Implemented** — see "Channel Operations" above (requires a channel argument; a bare, argument-less global `NAMES` is not implemented) |
 | `LIST` | 3.2.6 | **Implemented** — see "Channel Operations" above |
-| `INVITE` | 3.2.7 | Recognized only — no invite-only channel concept in this release; paired with the `invite-only` (`i`) flag in the Full Channel Mode Catalog below, which is why both remain Reserved/Recognized-only together, not independently |
+| `INVITE` | 3.2.7 | **Implemented** — see "Moderation" above (FR-065); paired with the `invite-only` (`i`) flag in the Full Channel Mode Catalog below, the same way both were previously Reserved/Recognized-only together |
 | `KICK` | 3.2.8 | **Implemented** — see "Moderation" above |
 | `PRIVMSG` | 3.3.1 | **Implemented** — see "Channel Operations" above |
 | `NOTICE` | 3.3.2 | **Implemented** — see "Channel Operations" above |
@@ -623,7 +654,7 @@ represent.
 | `m` | 4.2.6 | `moderated` | `BOOLEAN` | `SEND` | **Implemented** (`CORE`, FR-013) |
 | `p` | 4.2.1 | `private` | `BOOLEAN` | `DISCOVER` | **Implemented** (`CORE`, FR-047) — see "Moderation" above; treated identically to `secret` in this release (mutually exclusive with it, data-model.md `Channel` validation rules), not the softer "listed but obscured" variant some historical networks gave `private` alone |
 | `s` | 4.2.2 | `secret` | `BOOLEAN` | `DISCOVER` | **Implemented** (`CORE`, FR-047) — see "Moderation" above |
-| `i` | 4.2.3 | `invite-only` | `BOOLEAN` | `JOIN` | Reserved — structurally representable today (a `BOOLEAN` flag gating `JOIN`, data-model.md `Channel` validation rules), but not implemented: no extension defines it, and its accompanying `INVITE` command (below) is itself still Recognized-only |
+| `i` | 4.2.3 | `invite-only` | `BOOLEAN` | `JOIN` | **Implemented** (`CORE`, FR-065) — see "Moderation" above; state lives in `Channel.activeModes` like every other `BOOLEAN` flag, with its own dedicated bookkeeping field, `Channel.invited` (data-model.md), for which nicknames currently hold a usable invitation — paired with the `INVITE` command (above), matching RFC 2812 §3.2.7/§4.2.3's own treatment of the two as one feature |
 | `t` | 4.2.4 | `topic-lock` | `BOOLEAN` | — | Reserved — this release's topic-setting restriction (FR-040) is core and unconditionally operator-only, not toggleable the way real `+t` is, and isn't `ChannelMode`-driven at all; see note below |
 | `l` | 4.2.7 | `user-limit` | `VALUE` | `JOIN` | Reserved — not representable by `Channel.activeModes` in this release (data-model.md `ChannelMode` validation rules) |
 | `k` | 4.2.9 | `channel-key` | `VALUE` | `JOIN` | Reserved — same limitation as `user-limit` |
