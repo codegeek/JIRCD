@@ -27,7 +27,7 @@ guarded by this aggregate.
 | `negotiatedCapabilities` | set of `Capability` names | Populated via CAP negotiation (FR-006, FR-007); empty for clients that never negotiate (FR-008). |
 | `channelMemberships` | set of `Channel` references | Channels this session has joined; drives cleanup on disconnect (FR-017). |
 | `rateLimitBucket` | token bucket state | Per-connection (FR-016); see research.md "Rate limiting". |
-| `ident` | string | Derived from the `USER` command's username field at registration (FR-030); not independently verified (see spec.md Assumptions re: RFC 1413). |
+| `ident` | string, 0..1 | Absent until this session's `USER` command is processed (FR-001), then derived from its username field (FR-030); not independently verified (see spec.md Assumptions re: RFC 1413). Its presence is also the source-of-truth signal for "this session has already processed a `USER` command" (FR-001's one-shot restriction, `UserCommandHandler` precondition) — no separate boolean field duplicates that fact. |
 | `realHostname` | string | The connection's actual hostname/IP; always populated regardless of cloaking; source of truth for FR-032 (`WHOHOST`) and FR-038's self-lookup/administrator `WHOIS` cases. Never sent to a non-administrator client looking up a *different* client — see `UserIdentity.presentedForm` for the *display* value that case uses instead. |
 | `administratorPrivilege` | boolean | Granted via FR-034's in-band credential command; authorizes FR-032 administrative commands. Independent of `channelMemberships`/operator status. Kept in lockstep with `userModes`'s `operator` entry below — never an independent third source of truth (research.md "User mode: `operator`"). |
 | `userModes` | set of `UserMode` (below) | FR-044. This release's only member is `operator` (`o`), added the instant `administratorPrivilege` becomes `true` and removed the instant it becomes `false` — never independently toggled; see `UserMode` below and Validation rules. |
@@ -39,6 +39,14 @@ guarded by this aggregate.
   the same nickname even under concurrent registration attempts.
 - A session in `CONNECTING` state MUST reject channel/messaging commands
   that require `REGISTERED` (FR-001).
+- `USER` MUST be rejected (`462 ERR_ALREADYREGISTRED`,
+  contracts/irc-protocol-commands.md "Registration completion
+  sequencing") if `ident` is already set — regardless of whether this
+  session has reached `REGISTERED` yet, since `ident` is set the moment
+  the *first* `USER` is processed, before the other registration
+  conditions (`NICK`, `CAP END`) necessarily hold (FR-001). A rejected
+  `USER` MUST NOT alter `ident`/`UserIdentity.realname` or re-trigger the
+  Registration Completion Burst.
 - `realHostname` MUST NOT be overwritten or cleared by a cloak extension —
   see research.md "Cloak extension boundary" for why the real value's
   source of truth lives on `ClientSession` itself, not in the cloak
@@ -102,7 +110,7 @@ a channel a `PRIVMSG` was sent to).
 | `senderPresentedForm` | string | The sender's `UserIdentity.presentedForm` at send time — resolved by live-checking the current `cloak` `ServerExtension` state at that moment (FR-031), never cached. Computed once by the sender's thread, not per recipient, since cloaking is a uniform display transform applied identically to every viewer — unlike a negotiated capability, no recipient-specific input ever factors into this value (see Validation rules below). |
 | `command` | string | e.g., `PRIVMSG`, `NOTICE`, `JOIN`, `KICK` — which wire command this delivery represents. |
 | `target` | string | Channel name or nickname the original command targeted. |
-| `body` | string, 0..1 | The message text, where applicable (absent for e.g. a bare `JOIN`/`PART` notification). MUST be valid UTF-8 (FR-054) — a `PRIVMSG`/`NOTICE` carrying an invalid byte sequence is rejected as malformed (FR-015) before an `OutboundMessage` is ever constructed for it, so this field never holds one. |
+| `body` | string, 0..1 | The message text, where applicable — a `PRIVMSG`/`NOTICE` body, a `PART` reason if one was given (absent if not — `PART`'s reason stays genuinely optional, unlike `QUIT`'s), or a `QUIT` reason, always present for `QUIT` since FR-060 requires a default when the client didn't supply one (absent for a bare `JOIN` notification, which carries no text at all). MUST be valid UTF-8 (FR-054, which now also covers `QUIT`/`PART` reasons) — an invalid byte sequence in a client-supplied value is rejected as malformed (FR-015) before an `OutboundMessage` is ever constructed for it, so this field never holds one; a server-supplied default reason is, by construction, always valid UTF-8. |
 | `sentAt` | instant | Captured once, by the sender's thread, at the moment of sending — the value the `server-time` capability's `time` tag reflects for every recipient (not each recipient's own drain time). |
 | `messageId` | `UUID` | FR-059. Generated once, by the sender's thread, at construction — every `OutboundMessage` gets one, regardless of `command`. The value the `message-tags` capability's `msgid` tag reflects for every recipient that has negotiated `message-tags` at all (research.md "Message identifiers"); never sent to a recipient that hasn't. |
 

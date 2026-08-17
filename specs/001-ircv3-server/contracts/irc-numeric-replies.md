@@ -67,6 +67,7 @@ during that window.
 | `442` | `ERR_NOTONCHANNEL` | `PART`/`KICK`/`MODE` on a channel the sender hasn't joined; `PRIVMSG`/`NOTICE` to a channel with `members-only` active that the sender hasn't joined (FR-004, FR-013/FR-043 — membership is not required for `PRIVMSG`/`NOTICE` otherwise); `SAMODE` from an administrator who isn't currently a member of the target channel (FR-058) | FR-003, FR-004, FR-014, FR-058 |
 | `476` | `ERR_BADCHANMASK` | `JOIN` or `SAJOIN` naming a channel that violates the Channel Name Grammar (irc-protocol-commands.md "Channel Operations") — `SAJOIN` bypasses `JOIN`-gating flags, not the name grammar itself (FR-057) | FR-048, FR-057 |
 | `461` | `ERR_NEEDMOREPARAMS` | Command missing required parameters | FR-015 |
+| `462` | `ERR_ALREADYREGISTRED` | `USER` from a session that has already processed one, before or after reaching `REGISTERED` (FR-001) | FR-001 |
 | `464` | `ERR_PASSWDMISMATCH` | Failed `OPER` (also logged as a security event, FR-019) | FR-034 |
 | `472` | `ERR_UNKNOWNMODE` | `MODE` given a flag the core moderation command set doesn't define | FR-015, FR-036 (core input validation — `MODE` is never extension-gated) |
 | `481` | `ERR_NOPRIVILEGES` | `EXTENSION`/`WHOHOST`/`REHASH`/`SAJOIN`/`SAMODE` (or any admin command) attempted without administrator privilege; a non-privileged session's own `MODE <self> +o` (FR-033, FR-044) | FR-033, FR-044, FR-057, FR-058 |
@@ -132,7 +133,7 @@ trigger them is "Recognized only" per irc-protocol-commands.md).
 | `436` | `ERR_NICKCOLLISION` | `437` | `ERR_UNAVAILRESOURCE` | `441` | `ERR_USERNOTINCHANNEL` *(Used)* |
 | `442` | `ERR_NOTONCHANNEL` *(Used)* | `443` | `ERR_USERONCHANNEL` | `444` | `ERR_NOLOGIN` |
 | `445` | `ERR_SUMMONDISABLED` | `446` | `ERR_USERSDISABLED` | `451` | `ERR_NOTREGISTERED` |
-| `461` | `ERR_NEEDMOREPARAMS` *(Used)* | `462` | `ERR_ALREADYREGISTRED` | `463` | `ERR_NOPERMFORHOST` |
+| `461` | `ERR_NEEDMOREPARAMS` *(Used)* | `462` | `ERR_ALREADYREGISTRED` *(Used)* | `463` | `ERR_NOPERMFORHOST` |
 | `464` | `ERR_PASSWDMISMATCH` *(Used)* | `465` | `ERR_YOUREBANNEDCREEP` | `466` | `ERR_YOUWILLBEBANNED` |
 | `467` | `ERR_KEYSET` | `471` | `ERR_CHANNELISFULL` | `472` | `ERR_UNKNOWNMODE` *(Used)* |
 | `473` | `ERR_INVITEONLYCHAN` | `474` | `ERR_BANNEDFROMCHAN` | `475` | `ERR_BADCHANNELKEY` |

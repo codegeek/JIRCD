@@ -76,7 +76,7 @@ hostmask prefix — not any client's identity.
 | `CAP REQ :<caps>` | C→S | After `CAP LS` | Server enables requested capabilities it supports, declines the rest | `CAP * ACK`/`CAP * NAK` |
 | `CAP END` | C→S | After negotiation | Ends negotiation; registration may complete | (none; unblocks registration) |
 | `NICK <nickname>` | C→S | Session not yet holding a nickname, or changing an existing one | Atomically claims the nickname (FR-002) | `433 ERR_NICKNAMEINUSE` on conflict; silent success otherwise (reflected via subsequent replies) |
-| `USER <user> <mode> <unused> :<realname>` | C→S | Nickname claimed; `<realname>` MUST be valid UTF-8 (FR-054) | Completes registration (FR-001) | Registration Completion Burst (below); `421 ERR_UNKNOWNCOMMAND`-style malformed-message rejection (FR-015) if `<realname>` isn't valid UTF-8 |
+| `USER <user> <mode> <unused> :<realname>` | C→S | Nickname claimed; this session has not already processed a `USER` command, whether or not it has reached `REGISTERED` yet (FR-001 — registration-only, strictly one-shot); `<realname>` MUST be valid UTF-8 (FR-054) | Completes registration (FR-001) | Registration Completion Burst (below); `462 ERR_ALREADYREGISTRED` if this session has already processed a `USER` command, checked before the UTF-8 validity check below; `421 ERR_UNKNOWNCOMMAND`-style malformed-message rejection (FR-015) if `<realname>` isn't valid UTF-8 |
 
 #### Connection Registration Grammar
 
@@ -124,7 +124,18 @@ succeeded) *and* has sent `USER`, *and* — if it sent `CAP LS` at all — has
 also sent `CAP END`. `NICK` and `USER` MAY arrive in either order; `CAP`
 negotiation, if used, MAY be interleaved with either. The Registration
 Completion Burst below fires the moment all applicable conditions are
-satisfied, regardless of which arrived last.
+satisfied, regardless of which arrived last. `USER` itself, however, is
+strictly one-shot per connection: it MUST NOT succeed a second time on
+the same session, whether the repeat arrives before `REGISTERED` (e.g.
+`USER` sent twice while still waiting on `NICK` or `CAP END`) or, far
+more commonly, after (FR-001) — `462 ERR_ALREADYREGISTRED` either way,
+the same "already processed a `USER`" check regardless of which side of
+`REGISTERED` the repeat falls on (data-model.md `ClientSession.ident`).
+`NICK` has no such restriction and remains freely re-sendable after
+registration to change nickname (FR-002) — this asymmetry is
+deliberate: `NICK` names an ongoing, changeable identity, `USER`
+supplies one-time registration data with no "change" semantics defined
+for it at all.
 
 #### Registration Completion Burst
 
@@ -189,16 +200,22 @@ defined, the same class of gap the nickname/channel grammars closed for
   at any time (even before registration completes) and MUST receive an
   immediate `PONG`, independently of whatever keep-alive probing the
   server itself is doing on that connection.
+- A keep-alive-triggered disconnect notification carries a
+  server-generated reason distinct from `QUIT`'s own default (FR-060,
+  research.md "Voluntary disconnect and quit reasons") — both funnel
+  through the identical FR-017 cleanup path, but a channel's remaining
+  members can still distinguish "this member quit" from "this member
+  timed out" in their own client's disconnect log.
 
 ### Channel Operations
 
 | Command | Direction | Preconditions | Effect | Replies |
 |---|---|---|---|---|
 | `JOIN <channel>` | C→S | `REGISTERED` session; `channel` conforms to the Channel Name Grammar (below) | Creates the channel if absent (first joiner becomes operator, FR-013) or joins existing (FR-003) | `JOIN` echoed to all members; `353 RPL_NAMREPLY` + `366 RPL_ENDOFNAMES` to joiner; `476 ERR_BADCHANMASK` if `channel` violates the grammar |
-| `PART <channel> [:reason]` | C→S | Session is a member | Removes membership | `PART` echoed to all (former) members |
+| `PART <channel> [:reason]` | C→S | Session is a member; `<reason>`, if given, MUST be valid UTF-8 (FR-054) | Removes membership | `PART` echoed to all (former) members, with `<reason>` if one was given, absent otherwise (unlike `QUIT`, no default is synthesized); `421 ERR_UNKNOWNCOMMAND`-style malformed-message rejection (FR-015) if a given `<reason>` isn't valid UTF-8 |
 | `PRIVMSG <target> :<text>` | C→S | `REGISTERED` session; for a channel target, membership is NOT required by default — only when that channel's `members-only` restriction is active (FR-004, FR-013/FR-043); for a nickname target, it must be any registered nickname; `<text>` MUST be valid UTF-8 (FR-054) | Delivers to all other channel members (FR-004) or the direct-message recipient (FR-005), assigning one server-generated `msgid` shared by every recipient with `message-tags` negotiated (FR-059) | `PRIVMSG` delivered to recipients; `echo-message`-negotiated senders also receive their own message back (with the same `msgid` as everyone else, letting them correlate it with what they sent); `442 ERR_NOTONCHANNEL` if `members-only` is active and the sender isn't a member (FR-013/FR-043); `421 ERR_UNKNOWNCOMMAND`-style malformed-message rejection (FR-015) if `<text>` isn't valid UTF-8 |
 | `NOTICE <target> :<text>` | C→S | Same as `PRIVMSG` | Same delivery semantics as `PRIVMSG`, but MUST NOT trigger automated replies | Delivered like `PRIVMSG` |
-| `QUIT [:reason]` | C→S | Any time | Disconnects; removes all channel memberships (FR-017) | `QUIT` echoed to all affected channels |
+| `QUIT [:reason]` | C→S | Any time, including before registration completes (FR-060); `<reason>`, if given, MUST be valid UTF-8 (FR-054) | Disconnects; removes all channel memberships, if any (FR-017) | `QUIT` echoed to all affected channels, always carrying a reason — `<reason>` if given, a fixed server default otherwise (FR-060, research.md "Voluntary disconnect and quit reasons") — never blank; `421 ERR_UNKNOWNCOMMAND`-style malformed-message rejection (FR-015) if a given `<reason>` isn't valid UTF-8 |
 | `TOPIC <channel>` | C→S | `REGISTERED` session; no membership required for a non-private/secret channel, or for a member/administrator of one (FR-040/FR-041's discovery framing, subject to FR-047) | Returns `channel`'s current topic | `332 RPL_TOPIC` if a topic is set, `331 RPL_NOTOPIC` if not; `403 ERR_NOSUCHCHANNEL` if `channel` doesn't exist, or is private/secret and the requester is neither a member nor an administrator (FR-047 — same response either way) |
 | `TOPIC <channel> :<topic>` | C→S | `REGISTERED` session; sender is a channel operator (FR-013); `<topic>` MUST be valid UTF-8 (FR-054) and MUST NOT exceed `ServerConfiguration.topicMaxLength` (FR-056) | Sets/changes `channel`'s topic (FR-040) | `TOPIC` echoed to all members on success; `482 ERR_CHANOPRIVSNEEDED` if sender isn't an operator; `421 ERR_UNKNOWNCOMMAND`-style malformed-message rejection (FR-015) if `<topic>` isn't valid UTF-8; `417 ERR_INPUTTOOLONG` if `<topic>` exceeds the configured maximum length (FR-056, FR-049's numeric reused) |
 | `NAMES <channel>` | C→S | `REGISTERED` session; no membership required for a non-private/secret channel, or for a member/administrator of one (FR-041, subject to FR-047) | Returns `channel`'s current membership list, the same on-demand query `JOIN` already triggers automatically | `353 RPL_NAMREPLY` + `366 RPL_ENDOFNAMES`; `461 ERR_NEEDMOREPARAMS` if `channel` is omitted; `403 ERR_NOSUCHCHANNEL` under the identical private/secret condition `TOPIC` uses (FR-047) |

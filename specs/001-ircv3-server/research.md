@@ -1320,6 +1320,68 @@ project's actual blocking/virtual-thread model). Wrapping
 `SSLEngine`: technically possible but reinvents what `SSLSocket` already
 provides, for no gain.
 
+## Voluntary disconnect and quit reasons (FR-017/FR-060)
+
+**Decision**: `QuitCommandHandler` is not "the `QUIT` command's handler"
+in the narrow sense — it's the one shared disconnect-cleanup entry
+point (channel membership removal, `QUIT` notification to every
+affected channel, FR-017) that every disconnect path funnels through,
+whichever triggered it: a client-sent `QUIT` (FR-060, this decision), a
+keep-alive timeout (FR-039, "Connection keep-alive" below), or an
+abrupt TCP-level connection loss. What differs between these paths is
+only the *reason* text carried on the notification:
+
+- **Client-sent `QUIT :<reason>`**: the supplied reason, verbatim
+  (subject to FR-054's UTF-8 validity requirement, same as any other
+  human-readable field).
+- **Client-sent `QUIT` with no reason**: a short, fixed server default
+  (e.g., `"Client Quit"`, the conventional real-IRC wording) — never a
+  blank/empty reason, which would read as a formatting bug rather than
+  a deliberate "no reason given."
+- **Keep-alive timeout**: a server-generated reason describing why
+  (e.g., `"Ping timeout"`), distinct from the client-quit default so a
+  channel's remaining members can tell the two apart in their own
+  client's disconnect log, even though both reach the identical
+  cleanup path.
+- **Abrupt TCP-level loss** (a read returning EOF/error, no `ERROR` or
+  `QUIT` involved): a server-generated reason describing the connection
+  having simply dropped (e.g., `"Connection reset by peer"` or
+  similarly worded, mapped from the underlying I/O exception where
+  reasonable).
+
+A session that has not yet completed registration MAY still send
+`QUIT` (contracts/irc-protocol-commands.md "Channel Operations" —
+`QUIT`'s "any time" precondition, unlike every other command in that
+table) — `QuitCommandHandler` runs the same cleanup path, which is
+simply a no-op for channel memberships since a not-yet-registered
+session has none.
+
+**Rationale**: FR-017 already required disconnect cleanup "whether
+gracefully or unexpectedly," and the "Connection keep-alive" decision
+below already established that a keep-alive timeout reuses
+`QuitCommandHandler`'s path rather than its own separate one — this
+decision is what makes that reuse concrete by defining what varies (the
+reason) versus what's identical (the cleanup) across every trigger.
+Never allowing a blank reason matters for the same reason FR-051's
+burst-completion signal matters: a client parsing "no notification body
+at all" cannot distinguish "nothing to report" from "a bug that dropped
+the content," so the server MUST always supply *something*, even when
+the client itself supplied nothing.
+
+**Alternatives considered**:
+- *A separate handler/code path for keep-alive-triggered and
+  TCP-loss-triggered disconnects, distinct from `QuitCommandHandler`*:
+  rejected — this is exactly the duplication "Connection keep-alive"
+  below already rejected once (the "no keep-alive at all" alternative's
+  sibling concern): FR-017's cleanup logic must not exist twice,
+  redundantly, in different states of correctness.
+- *Show no reason at all for server-generated disconnects (timeout,
+  TCP loss), only for client-supplied `QUIT` text*: rejected — an empty
+  reason on some disconnects and populated text on others is an
+  inconsistent notification shape a client's UI would have to special-case
+  for no benefit; a short, fixed default costs nothing and keeps every
+  `QUIT` notification uniformly shaped.
+
 ## Connection keep-alive (FR-039)
 
 **Decision**: A per-connection `LivenessMonitor`, driven by an injectable

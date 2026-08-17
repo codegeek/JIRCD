@@ -406,7 +406,16 @@ their presented (not real) hostname.
 
 - **FR-001**: The server MUST accept incoming client connections and allow
   a client to register a unique nickname and associated user information
-  before participating in chat.
+  before participating in chat. The command that supplies that user
+  information (`USER`) is strictly one-shot per connection: it MUST be
+  rejected with a clear, specific error — distinct from FR-015's other
+  malformed-message cases — if a session that has already processed one
+  `USER` command sends a second, whether the repeat arrives before or
+  after registration completes. Re-sending it MUST NOT re-trigger the
+  registration-completion burst, alter the session's already-established
+  `ident`/real name, or otherwise be silently accepted as a no-op;
+  `NICK` is unaffected by this restriction and remains usable at any
+  time to change an already-registered session's nickname (FR-002).
 - **FR-002**: The server MUST reject registration attempts that use a
   nickname currently claimed by another connected client, and MUST inform
   the requesting client clearly. Nickname claims MUST be resolved
@@ -853,16 +862,17 @@ their presented (not real) hostname.
   nickname yet"), not an empty value, not a value the client hasn't
   claimed yet, and not omitted entirely.
 - **FR-054**: Message text the server interprets as human-readable
-  content — `PRIVMSG`/`NOTICE` bodies, channel topics, realnames, and
+  content — `PRIVMSG`/`NOTICE` bodies, channel topics, realnames,
   channel names (FR-048's grammar, further constrained by this
-  requirement) — MUST be valid UTF-8. The server MUST reject a message
-  containing an invalid UTF-8 byte sequence in one of these fields as
-  malformed (FR-015), the same way any other malformed protocol message
-  is rejected — not pass the invalid bytes through unvalidated,
-  mistranscode them, or silently discard just the invalid portion while
-  accepting the rest. This does not apply to nicknames, which already
-  have their own strict, ASCII-only grammar (FR-002) that valid UTF-8
-  membership doesn't add anything to.
+  requirement), and `QUIT`/`PART` reasons (FR-060) — MUST be valid
+  UTF-8. The server MUST reject a message containing an invalid UTF-8
+  byte sequence in one of these fields as malformed (FR-015), the same
+  way any other malformed protocol message is rejected — not pass the
+  invalid bytes through unvalidated, mistranscode them, or silently
+  discard just the invalid portion while accepting the rest. This does
+  not apply to nicknames, which already have their own strict,
+  ASCII-only grammar (FR-002) that valid UTF-8 membership doesn't add
+  anything to.
 - **FR-055**: As part of the registration-completion burst (FR-051), the
   server MUST advertise its feature/limit support to the newly
   registered client via the standard `RPL_ISUPPORT` mechanism (the de
@@ -964,6 +974,24 @@ their presented (not real) hostname.
   nothing suggests a client would want `message-tags` without message
   identification also being available, so `msgid` is simply part of what
   `message-tags` itself provides once negotiated.
+- **FR-060**: The server MUST allow a client to voluntarily end its own
+  connection at any time — including before registration completes, not
+  only afterward — via a dedicated `QUIT` command, optionally supplying
+  a human-readable reason. A voluntary `QUIT` MUST use the same
+  cleanup and notification FR-017 already requires for a lost
+  connection (channel membership removal, notification to every
+  affected channel) — `QUIT` is the client-initiated trigger for that
+  cleanup, not a separate mechanism from it, and is the same shared
+  cleanup path a keep-alive timeout (FR-039) or an abrupt, unexpected
+  disconnect also triggers. The notification sent to affected channels
+  MUST always carry a reason: the client-supplied one if `QUIT` gave
+  one, or a server-supplied default if it didn't or if the disconnect
+  wasn't client-initiated at all (e.g., a keep-alive timeout) — never an
+  empty or blank reason, since "no reason given" and "no notification
+  content at all" are different things a client shouldn't have to guess
+  between. A session that has not yet completed registration MAY still
+  send `QUIT` to cleanly close its connection — it simply has no channel
+  memberships yet to clean up, not a case this command needs to reject.
 
 ### Key Entities
 

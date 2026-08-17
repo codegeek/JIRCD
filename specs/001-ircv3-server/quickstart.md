@@ -32,6 +32,9 @@ schema in `contracts/server-configuration.md`.
 1. Open two terminals, each: `nc localhost 6667`.
 2. In terminal A: send `NICK alice` then `USER alice 0 * :Alice`.
    - **Expected**: `001` welcome reply (contracts/irc-numeric-replies.md).
+   Then send `USER alice 0 * :Alice` again.
+   - **Expected**: `462 ERR_ALREADYREGISTRED` — no second burst arrives
+     (FR-001).
 3. In terminal B: send `NICK alice` (same name, before A registers a
    different one).
    - **Expected**: `433 ERR_NICKNAMEINUSE` — validates FR-002's atomic
@@ -52,9 +55,15 @@ schema in `contracts/server-configuration.md`.
      showing alice and bob as members, and a `322 RPL_LIST` entry for
      `#lobby` followed by `323 RPL_LISTEND` — all without carol having
      joined the channel (FR-040/FR-041/FR-042).
-9. Close terminal A's connection (Ctrl-C).
-   - **Expected**: terminal B sees a `PART`/`QUIT` notification for alice
-     (FR-017).
+9. As bob (terminal B), send `QUIT :heading out`.
+   - **Expected**: bob's connection closes; carol (still connected, not
+     in `#lobby`) sees nothing since she never joined; re-`JOIN #lobby`
+     as carol and confirm bob is no longer listed (FR-017). This
+     exercises `QUIT` with an explicit reason (FR-060).
+10. Close terminal A's connection (Ctrl-C), without sending `QUIT`.
+    - **Expected**: carol (now in `#lobby`) sees a `QUIT` notification
+      for alice with a non-blank, server-generated reason, even though
+      alice never sent `QUIT` herself (FR-017, FR-060).
 
 ## Story 2 — Discover and Use Enhanced Capabilities
 
