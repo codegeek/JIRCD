@@ -1,0 +1,117 @@
+/*
+ * Copyright 2026 Guillermo Castro
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+ * implied. See the License for the specific language governing
+ * permissions and limitations under the License.
+ */
+package net.jircd.core.session.command;
+
+import java.util.List;
+import java.util.Map;
+import java.util.function.IntSupplier;
+import java.util.function.Supplier;
+import net.jircd.core.session.Channel;
+import net.jircd.core.session.ChannelRegistry;
+import net.jircd.core.session.ClientSession;
+import net.jircd.protocol.Command;
+import net.jircd.protocol.Message;
+import net.jircd.protocol.NumericReply;
+import net.jircd.protocol.Utf8Validator;
+
+/**
+ * {@code TOPIC} — view (any client, FR-041's discovery framing) or set (operator-only, FR-040) a
+ * channel's topic.
+ */
+public final class TopicCommandHandler implements CommandHandler {
+
+  private final ChannelRegistry channelRegistry;
+  private final Supplier<String> serverName;
+  private final IntSupplier topicMaxLength;
+
+  public TopicCommandHandler(
+      ChannelRegistry channelRegistry, Supplier<String> serverName, IntSupplier topicMaxLength) {
+    this.channelRegistry = channelRegistry;
+    this.serverName = serverName;
+    this.topicMaxLength = topicMaxLength;
+  }
+
+  @Override
+  public void handle(ClientSession session, Message message) {
+    if (message.params().isEmpty()) {
+      Replies.send(
+          session,
+          serverName.get(),
+          NumericReply.ERR_NEEDMOREPARAMS,
+          "TOPIC",
+          "Not enough parameters");
+      return;
+    }
+    String channelName = message.params().getFirst();
+    var found = channelRegistry.lookup(channelName);
+    if (found.isEmpty()) {
+      Replies.send(
+          session,
+          serverName.get(),
+          NumericReply.ERR_NOSUCHCHANNEL,
+          channelName,
+          "No such channel");
+      return;
+    }
+    Channel channel = found.get();
+
+    if (message.params().size() < 2) {
+      if (channel.topic() == null) {
+        Replies.send(
+            session, serverName.get(), NumericReply.RPL_NOTOPIC, channel.name(), "No topic is set");
+      } else {
+        Replies.send(
+            session, serverName.get(), NumericReply.RPL_TOPIC, channel.name(), channel.topic());
+      }
+      return;
+    }
+
+    if (!channel.operators().contains(session)) {
+      Replies.send(
+          session,
+          serverName.get(),
+          NumericReply.ERR_CHANOPRIVSNEEDED,
+          channel.name(),
+          "You're not channel operator");
+      return;
+    }
+
+    String newTopic = message.params().get(1);
+    if (!Utf8Validator.isValidUtf8(newTopic.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
+      Replies.send(
+          session,
+          serverName.get(),
+          NumericReply.ERR_UNKNOWNCOMMAND,
+          "TOPIC",
+          "Invalid UTF-8 in topic");
+      return;
+    }
+    if (newTopic.length() > topicMaxLength.getAsInt()) {
+      Replies.send(session, serverName.get(), NumericReply.ERR_INPUTTOOLONG, "Topic too long");
+      return;
+    }
+
+    channel.setTopic(newTopic);
+    Message topicNotification =
+        new Message(
+            Map.of(), serverName.get(), Command.TOPIC, "TOPIC", List.of(channel.name(), newTopic));
+    for (ClientSession member : channel.members()) {
+      if (member.writer() != null) {
+        member.writer().enqueueRaw(topicNotification);
+      }
+    }
+  }
+}

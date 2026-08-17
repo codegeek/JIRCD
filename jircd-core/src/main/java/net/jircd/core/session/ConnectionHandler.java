@@ -1,0 +1,216 @@
+/*
+ * Copyright 2026 Guillermo Castro
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+ * implied. See the License for the specific language governing
+ * permissions and limitations under the License.
+ */
+package net.jircd.core.session;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
+import net.jircd.core.extension.ConnectionAdmissionExtension;
+import net.jircd.core.extension.Extension;
+import net.jircd.core.extension.ExtensionRegistry;
+import net.jircd.core.extension.ServerExtension;
+import net.jircd.core.session.command.CommandHandler;
+import net.jircd.core.session.command.Replies;
+import net.jircd.protocol.Command;
+import net.jircd.protocol.MalformedMessageException;
+import net.jircd.protocol.Message;
+import net.jircd.protocol.MessageParser;
+import net.jircd.protocol.NumericReply;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * The per-connection command dispatch loop (FR-015): blocking read → parse via {@code
+ * jircd-protocol} → route to a registered handler, matched case-insensitively. Before creating a
+ * {@link ClientSession} at all, consults the {@code connection-admission} extension point (FR-066);
+ * with nothing claiming it this release, every connection is admitted.
+ */
+public final class ConnectionHandler {
+
+  private static final Logger LOG = LoggerFactory.getLogger(ConnectionHandler.class);
+
+  /**
+   * 512 bytes (command+params, CR-LF inclusive) plus up to 4096 bytes for a message-tags section
+   * (FR-049).
+   */
+  private static final int MAX_LINE_LENGTH_BYTES = 512 + 4096;
+
+  /** Commands valid before registration completes (FR-001, FR-060, FR-039, FR-006). */
+  private static final java.util.Set<Command> PRE_REGISTRATION_COMMANDS =
+      java.util.Set.of(
+          Command.NICK, Command.USER, Command.CAP, Command.PING, Command.PONG, Command.QUIT);
+
+  private final ExtensionRegistry extensionRegistry;
+  private final DisconnectCleanup disconnectCleanup;
+  private final Supplier<String> serverName;
+  private final Map<Command, CommandHandler> handlers = new ConcurrentHashMap<>();
+  private final AtomicLong connectionIdCounter = new AtomicLong();
+
+  public ConnectionHandler(
+      ExtensionRegistry extensionRegistry,
+      DisconnectCleanup disconnectCleanup,
+      Supplier<String> serverName) {
+    this.extensionRegistry = extensionRegistry;
+    this.disconnectCleanup = disconnectCleanup;
+    this.serverName = serverName;
+  }
+
+  public void registerHandler(Command command, CommandHandler handler) {
+    handlers.put(command, handler);
+  }
+
+  /** Spawns one virtual thread to own this connection's lifetime end to end. */
+  public void accept(Socket socket) {
+    Thread.ofVirtual()
+        .name("connection-" + connectionIdCounter.get())
+        .start(() -> handleConnection(socket));
+  }
+
+  private void handleConnection(Socket socket) {
+    String remoteAddress =
+        socket.getInetAddress() == null ? "unknown" : socket.getInetAddress().getHostAddress();
+    if (!isAdmitted(remoteAddress)) {
+      closeQuietly(socket);
+      return;
+    }
+
+    String connectionId = "c" + connectionIdCounter.incrementAndGet();
+    ClientSession session =
+        new ClientSession(connectionId, remoteAddress, RateLimitBucket.withDefaults());
+    // Attached to the session and closed later via DisconnectCleanup, not in this method.
+    @SuppressWarnings("PMD.CloseResource")
+    SessionWriter writer;
+    try {
+      writer =
+          new SessionWriter(
+              session, socket.getOutputStream(), net.jircd.core.session.TagRenderer.NONE);
+    } catch (IOException e) {
+      closeQuietly(socket);
+      return;
+    }
+    session.attachWriter(writer);
+    writer.setOnOverflow(() -> disconnectCleanup.cleanup(session, "Excess Flood"));
+
+    try (BufferedReader reader =
+        new BufferedReader(
+            new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8))) {
+      String line;
+      while ((line = reader.readLine()) != null) {
+        if (session.lifecycle().isClosing()) {
+          break;
+        }
+        processLine(session, line);
+        if (session.lifecycle().isClosing()) {
+          break;
+        }
+      }
+      if (!session.lifecycle().isClosing()) {
+        disconnectCleanup.cleanup(session, "Connection reset by peer");
+      }
+    } catch (IOException e) {
+      if (!session.lifecycle().isClosing()) {
+        disconnectCleanup.cleanup(session, "Connection reset by peer");
+      }
+    } finally {
+      closeQuietly(socket);
+    }
+  }
+
+  private void processLine(ClientSession session, String line) {
+    byte[] lineBytes = line.getBytes(StandardCharsets.UTF_8);
+    if (lineBytes.length + 2 > MAX_LINE_LENGTH_BYTES) {
+      Replies.send(
+          session, serverName.get(), NumericReply.ERR_INPUTTOOLONG, "Input line was too long");
+      return;
+    }
+
+    Message message;
+    try {
+      message = MessageParser.parse(line);
+    } catch (MalformedMessageException e) {
+      Replies.send(
+          session, serverName.get(), NumericReply.ERR_UNKNOWNCOMMAND, line, "Malformed message");
+      return;
+    }
+
+    if (!session.rateLimitBucket().tryConsume()) {
+      return; // FR-016: silently drop over-rate traffic rather than disconnecting immediately
+    }
+
+    if (message.command() == null) {
+      Replies.send(
+          session,
+          serverName.get(),
+          NumericReply.ERR_UNKNOWNCOMMAND,
+          message.rawCommand(),
+          "Unknown command");
+      return;
+    }
+
+    CommandHandler handler = handlers.get(message.command());
+    if (handler == null) {
+      Replies.send(
+          session,
+          serverName.get(),
+          NumericReply.ERR_UNKNOWNCOMMAND,
+          message.rawCommand(),
+          "Unknown command");
+      return;
+    }
+
+    if (!session.lifecycle().isRegistered()
+        && !PRE_REGISTRATION_COMMANDS.contains(message.command())) {
+      Replies.send(
+          session, serverName.get(), NumericReply.ERR_NOTREGISTERED, "You have not registered");
+      return;
+    }
+
+    try {
+      handler.handle(session, message);
+    } catch (RuntimeException e) {
+      LOG.warn(
+          "Command handler for {} threw on connection {}",
+          message.command(),
+          session.connectionId(),
+          e);
+    }
+  }
+
+  private boolean isAdmitted(String remoteAddress) {
+    for (Extension extension : extensionRegistry.enabled()) {
+      if (extension instanceof ServerExtension serverExtension
+          && "connection-admission".equals(serverExtension.extensionPoint())
+          && extension instanceof ConnectionAdmissionExtension admission) {
+        return admission.admit(remoteAddress);
+      }
+    }
+    return true; // nothing claims connection-admission this release — always permit
+  }
+
+  private static void closeQuietly(Socket socket) {
+    try {
+      socket.close();
+    } catch (IOException ignored) {
+      // best-effort
+    }
+  }
+}

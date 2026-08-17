@@ -1,0 +1,24 @@
+<FindBugsFilter>
+    <!--
+      EI_EXPOSE_REP / EI_EXPOSE_REP2: SpotBugs flags every getter that returns
+      a mutable field, and every constructor/setter that stores a caller-
+      supplied mutable reference, as a potential encapsulation break.
+
+      This project's session/channel/config model intentionally exposes live,
+      thread-safe collections (ConcurrentHashMap-backed sets, CopyOnWriteArrayList)
+      directly — e.g. Channel.members()/operators()/voiced(), ClientSession's
+      collections, ServerContext's registries, ServerConfiguration's parsed
+      collections. These are shared, concurrently-mutated views by design
+      (research.md "Message fan-out concurrency model"): defensively copying
+      them on every access would both defeat their purpose (callers need to
+      observe live membership/state) and cost real allocation on hot paths
+      (every channel message fan-out, every registration burst). There is no
+      untrusted-code boundary within jircd-core/jircd-server crossing these
+      getters — this is exactly the "instances are accessed only by code
+      within this project" case EI_EXPOSE_REP's own documentation names as
+      the situation where the finding does not apply.
+    -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2" />
+    </Match>
+</FindBugsFilter>

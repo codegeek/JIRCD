@@ -1,0 +1,180 @@
+/*
+ * Copyright 2026 Guillermo Castro
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+ * implied. See the License for the specific language governing
+ * permissions and limitations under the License.
+ */
+package net.jircd.core.session;
+
+import java.time.Instant;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+
+/**
+ * A single connected client's live state, from TCP accept to disconnect (data-model.md
+ * "ClientSession", Aggregate Root). {@code connectionId} is its identity; everything else is
+ * mutable state guarded by this aggregate.
+ */
+public final class ClientSession {
+
+  private final String connectionId;
+  private final ConnectionLifecycle lifecycle = new ConnectionLifecycle();
+  private final Set<String> negotiatedCapabilities = ConcurrentHashMap.newKeySet();
+  private final Set<Channel> channelMemberships = ConcurrentHashMap.newKeySet();
+  private final Set<UserMode> userModes = ConcurrentHashMap.newKeySet();
+  private final RateLimitBucket rateLimitBucket;
+  private final String realHostname;
+
+  private volatile SessionWriter writer;
+  private volatile LivenessMonitor livenessMonitor;
+  private volatile boolean negotiatingCapabilities;
+  private volatile String nickname;
+  private volatile String ident;
+  private volatile String realname;
+  private final AtomicBoolean administratorPrivilege = new AtomicBoolean(false);
+  private final AtomicInteger failedOperAttempts = new AtomicInteger(0);
+  private final AtomicReference<Instant> lastLivenessAt = new AtomicReference<>(Instant.now());
+
+  public ClientSession(String connectionId, String realHostname, RateLimitBucket rateLimitBucket) {
+    this.connectionId = connectionId;
+    this.realHostname = realHostname;
+    this.rateLimitBucket = rateLimitBucket;
+  }
+
+  public String connectionId() {
+    return connectionId;
+  }
+
+  public ConnectionLifecycle lifecycle() {
+    return lifecycle;
+  }
+
+  public SessionWriter writer() {
+    return writer;
+  }
+
+  public void attachWriter(SessionWriter writer) {
+    this.writer = writer;
+  }
+
+  public LivenessMonitor livenessMonitor() {
+    return livenessMonitor;
+  }
+
+  public void attachLivenessMonitor(LivenessMonitor livenessMonitor) {
+    this.livenessMonitor = livenessMonitor;
+  }
+
+  public String realHostname() {
+    return realHostname;
+  }
+
+  public String nickname() {
+    return nickname;
+  }
+
+  public void setNickname(String nickname) {
+    this.nickname = nickname;
+  }
+
+  public String ident() {
+    return ident;
+  }
+
+  /**
+   * Also the source-of-truth signal for FR-001's one-shot USER restriction: absent means USER
+   * hasn't been processed yet.
+   */
+  public boolean hasProcessedUser() {
+    return ident != null;
+  }
+
+  public void setIdent(String ident) {
+    this.ident = ident;
+  }
+
+  public String realname() {
+    return realname;
+  }
+
+  public void setRealname(String realname) {
+    this.realname = realname;
+  }
+
+  public Set<String> negotiatedCapabilities() {
+    return negotiatedCapabilities;
+  }
+
+  public boolean isNegotiatingCapabilities() {
+    return negotiatingCapabilities;
+  }
+
+  public void setNegotiating(boolean negotiating) {
+    this.negotiatingCapabilities = negotiating;
+  }
+
+  public Set<Channel> channelMemberships() {
+    return channelMemberships;
+  }
+
+  public Set<UserMode> userModes() {
+    return userModes;
+  }
+
+  public RateLimitBucket rateLimitBucket() {
+    return rateLimitBucket;
+  }
+
+  public boolean isAdministrator() {
+    return administratorPrivilege.get();
+  }
+
+  /**
+   * Grants administrator privilege and adds the operator user mode in the same act (FR-034/FR-044).
+   */
+  public void grantAdministratorPrivilege() {
+    administratorPrivilege.set(true);
+    userModes.add(UserMode.OPERATOR);
+    failedOperAttempts.set(0);
+  }
+
+  /**
+   * Revokes administrator privilege and removes the operator user mode in the same act (FR-044).
+   */
+  public void revokeAdministratorPrivilege() {
+    administratorPrivilege.set(false);
+    userModes.remove(UserMode.OPERATOR);
+  }
+
+  public int incrementFailedOperAttempts() {
+    return failedOperAttempts.incrementAndGet();
+  }
+
+  public Instant lastLivenessAt() {
+    return lastLivenessAt.get();
+  }
+
+  public void markAlive() {
+    lastLivenessAt.set(Instant.now());
+  }
+
+  /**
+   * Same as {@link #markAlive()}, but against a caller-supplied instant (e.g. an injected clock in
+   * tests).
+   */
+  public void markAliveAt(Instant instant) {
+    lastLivenessAt.set(instant);
+  }
+}

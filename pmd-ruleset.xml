@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset name="jircd"
+    xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
+
+    <description>
+        Catches resource-management and modernization issues SpotBugs doesn't
+        reliably cover for this project — notably CloseResource, which flags a
+        Closeable/AutoCloseable obtained without a guarantee it's closed on
+        every path (SpotBugs's own Obligation detector doesn't track custom
+        AutoCloseable types the way it tracks JDK Closeable ones).
+    </description>
+
+
+    <rule ref="category/java/errorprone.xml/CloseResource"/>
+    <rule ref="category/java/bestpractices.xml/LooseCoupling"/>
+    <rule ref="category/java/bestpractices.xml/RelianceOnDefaultCharset"/>
+    <rule ref="category/java/bestpractices.xml/UnusedLocalVariable"/>
+    <rule ref="category/java/bestpractices.xml/UnusedPrivateMethod"/>
+</ruleset>

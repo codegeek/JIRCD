@@ -1,0 +1,24 @@
+[versions]
+slf4j = "2.0.16"
+logback = "1.5.16"
+snakeyaml = "2.3"
+bcrypt = "0.10.2"
+junit = "5.11.4"
+assertj = "3.27.3"
+spotless = "8.10.0"
+spotbugs = "6.5.10"
+pmd = "7.26.0"
+spotbugsTool = "4.10.3"
+
+[libraries]
+slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
+logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
+snakeyaml = { module = "org.yaml:snakeyaml", version.ref = "snakeyaml" }
+bcrypt = { module = "at.favre.lib:bcrypt", version.ref = "bcrypt" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+assertj-core = { module = "org.assertj:assertj-core", version.ref = "assertj" }
+
+[plugins]
+spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
+spotbugs = { id = "com.github.spotbugs", version.ref = "spotbugs" }

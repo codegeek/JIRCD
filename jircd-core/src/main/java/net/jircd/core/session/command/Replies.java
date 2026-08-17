@@ -1,0 +1,47 @@
+/*
+ * Copyright 2026 Guillermo Castro
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+ * implied. See the License for the specific language governing
+ * permissions and limitations under the License.
+ */
+package net.jircd.core.session.command;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import net.jircd.core.session.ClientSession;
+import net.jircd.protocol.Message;
+import net.jircd.protocol.NumericReply;
+
+/**
+ * Builds and sends numeric-reply {@link Message}s, always addressed to the session's current
+ * nickname, or {@code *} if it hasn't claimed one yet (FR-053).
+ */
+public final class Replies {
+
+  private Replies() {}
+
+  public static void send(
+      ClientSession session, String serverName, NumericReply numeric, String... trailingParams) {
+    List<String> params = new ArrayList<>();
+    params.add(target(session));
+    params.addAll(List.of(trailingParams));
+    Message message = new Message(Map.of(), serverName, null, numeric.wireCode(), params);
+    if (session.writer() != null) {
+      session.writer().enqueueRaw(message);
+    }
+  }
+
+  public static String target(ClientSession session) {
+    return session.nickname() != null ? session.nickname() : "*";
+  }
+}

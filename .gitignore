@@ -1,3 +1,19 @@
 .idea/
 __pycache__/
 *.pyc
+
+# Java / Gradle
+.gradle/
+build/
+out/
+*.class
+!gradle/wrapper/gradle-wrapper.jar
+.gradletasknamecache
+
+# Logs produced by a running jircd-server (logback.xml)
+logs/
+
+# Editors / OS
+*.iml
+.vscode/
+.DS_Store
