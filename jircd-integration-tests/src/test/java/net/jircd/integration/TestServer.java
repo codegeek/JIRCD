@@ -36,9 +36,11 @@ public final class TestServer implements AutoCloseable {
       """;
 
   public final JircdServerApplication application;
+  public final Path configPath;
 
-  private TestServer(JircdServerApplication application) {
+  private TestServer(JircdServerApplication application, Path configPath) {
     this.application = application;
+    this.configPath = configPath;
   }
 
   public static TestServer start() throws Exception {
@@ -47,20 +49,24 @@ public final class TestServer implements AutoCloseable {
 
   public static TestServer start(String extraYaml) throws Exception {
     Path configPath = Files.createTempFile("jircd-test-", ".yaml");
-    Files.writeString(
-        configPath,
-        """
-                serverName: test.jircd.local
-                listeners:
-                  - port: 0
-                    tls: false
-                  - port: 0
-                    tls: true
-                """
-            + extraYaml);
+    Files.writeString(configPath, baseYaml() + extraYaml);
     JircdServerApplication application = new JircdServerApplication(configPath);
     application.start();
-    return new TestServer(application);
+    return new TestServer(application, configPath);
+  }
+
+  /**
+   * The {@code serverName}/{@code listeners} preamble every config in this test suite starts with.
+   */
+  public static String baseYaml() {
+    return """
+        serverName: test.jircd.local
+        listeners:
+          - port: 0
+            tls: false
+          - port: 0
+            tls: true
+        """;
   }
 
   public int plaintextPort() {

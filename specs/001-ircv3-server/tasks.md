@@ -249,13 +249,13 @@ Story 4).
 
 > **Write these tests FIRST, ensure they FAIL before implementation.**
 
-- [ ] T093 [P] [US4] Integration test: editing `capabilities.message-tags` to `disabled` and sending the process `SIGHUP` removes it from `CAP LS` and stops tagging already-connected sessions' messages within SC-005's 1-minute budget, with no server restart (SC-005, FR-011) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story4ConfigToggleTest.java`
-- [ ] T094 [P] [US4] Integration test: an invalid configuration (`capabilities.nonexistent`, `capabilities.moderation`, `capabilities.cloak` — a section/kind mismatch) at both server startup and via a `SIGHUP`-triggered reload each produce a specific error naming the offending key, and a `SIGHUP` reload rejection leaves the server running on its previous, valid configuration (FR-012, SC-008) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story4InvalidConfigTest.java`
-- [ ] T095 [P] [US4] Integration test: starting the server with `nicknameMaxLength: 5`, `channelNameMaxLength: 10`, `topicMaxLength: 20` configured enforces those (not the 9/50/390 defaults) against `NICK`/`JOIN`/`TOPIC`, and `005 RPL_ISUPPORT` advertises `NICKLEN=5`/`CHANNELLEN=10`/`TOPICLEN=20`; a config value of `0`, a non-integer, or `401` (over the 400 ceiling) for any of the three is rejected at startup with a specific error naming the offending key (FR-056, FR-012) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story4LengthLimitConfigTest.java`
+- [X] T093 [P] [US4] Integration test: editing `capabilities.message-tags` to `disabled` and sending the process `SIGHUP` removes it from `CAP LS` and stops tagging already-connected sessions' messages within SC-005's 1-minute budget, with no server restart (SC-005, FR-011) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story4ConfigToggleTest.java`
+- [X] T094 [P] [US4] Integration test: an invalid configuration (`capabilities.nonexistent`, `capabilities.moderation`, `capabilities.cloak` — a section/kind mismatch) at both server startup and via a `SIGHUP`-triggered reload each produce a specific error naming the offending key, and a `SIGHUP` reload rejection leaves the server running on its previous, valid configuration (FR-012, SC-008) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story4InvalidConfigTest.java`
+- [X] T095 [P] [US4] Integration test: starting the server with `nicknameMaxLength: 5`, `channelNameMaxLength: 10`, `topicMaxLength: 20` configured enforces those (not the 9/50/390 defaults) against `NICK`/`JOIN`/`TOPIC`, and `005 RPL_ISUPPORT` advertises `NICKLEN=5`/`CHANNELLEN=10`/`TOPICLEN=20`; a config value of `0`, a non-integer, or `401` (over the 400 ceiling) for any of the three is rejected at startup with a specific error naming the offending key (FR-056, FR-012) in `jircd-integration-tests/src/test/java/net/jircd/integration/Story4LengthLimitConfigTest.java`
 
 ### Implementation for User Story 4
 
-- [ ] T096 [US4] Wire `JircdServerApplication` startup to refuse to start and report the specific validation error when `ConfigurationLoader` rejects the configuration (FR-012) in `jircd-server/src/main/java/net/jircd/server/JircdServerApplication.java`
+- [X] T096 [US4] Wire `JircdServerApplication` startup to refuse to start and report the specific validation error when `ConfigurationLoader` rejects the configuration (FR-012) in `jircd-server/src/main/java/net/jircd/server/JircdServerApplication.java`
 
 **Checkpoint**: User Stories 1, 2, and 4 all work independently.
 

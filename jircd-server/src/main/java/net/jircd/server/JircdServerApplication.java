@@ -273,10 +273,21 @@ public final class JircdServerApplication {
     return hostname.contains(".") ? hostname : hostname + ".local";
   }
 
-  public static void main(String[] args) throws Exception {
+  public static void main(String[] args) throws InterruptedException {
     Path configPath = Path.of(args.length > 0 ? args[0] : "jircd.yaml");
-    JircdServerApplication application = new JircdServerApplication(configPath);
-    application.start();
+    JircdServerApplication application;
+    try {
+      application = new JircdServerApplication(configPath);
+      application.start();
+    } catch (ConfigurationException e) {
+      LOG.error("Refusing to start: {}", e.getMessage());
+      System.exit(1);
+      return;
+    } catch (IOException | GeneralSecurityException e) {
+      LOG.error("Refusing to start: {}", e.getMessage());
+      System.exit(1);
+      return;
+    }
     SighupReloadHandler.install(application);
     LOG.info("jircd started as {}", application.serverName());
     Thread.currentThread().join();
