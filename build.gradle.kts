@@ -12,6 +12,27 @@ plugins {
     alias(libs.plugins.sonarqube)
 }
 
+// Every module that has `main` source worth measuring coverage for — used both by the root
+// aggregate HTML report below and by each module's own per-module Sonar coverage wiring
+// (subprojects block), since a module's own `test` task alone understates coverage for anything
+// jircd-integration-tests exercises instead (research.md "Message fan-out concurrency model").
+val coverageTargetPaths =
+    listOf(
+        "jircd-protocol",
+        "jircd-core",
+        "jircd-server",
+        "jircd-capabilities:message-tags",
+        "jircd-capabilities:server-time",
+        "jircd-capabilities:echo-message",
+        "jircd-server-extensions:cloak",
+        "jircd-server-extensions:admin",
+    )
+val coverageTargets = coverageTargetPaths.map { project(":$it") }
+
+// jircd-integration-tests contributes execution data (it exercises the targets above over real
+// sockets) but has no `main` source of its own to measure.
+val executionDataSources = coverageTargets + project(":jircd-integration-tests")
+
 subprojects {
     plugins.apply("java")
     plugins.apply("com.diffplug.spotless")
@@ -132,6 +153,36 @@ subprojects {
     tasks.withType<Test>().configureEach {
         finalizedBy(tasks.withType<JacocoReport>())
     }
+
+    if (project.path in coverageTargetPaths.map { ":$it" }) {
+        // Reconfigure this module's own default jacocoTestReport (not the root aggregate) to
+        // fold in every source's execution data, then point Sonar at that single-module XML
+        // instead of the shared root aggregate — pointing every subproject's inherited
+        // sonar.coverage.jacoco.xmlReportPaths at the SAME multi-package aggregate file left
+        // jircd-core/jircd-protocol/jircd-server's coverage stuck at 0% (every one of their
+        // classes logged "File 'X.java' not found in project sources" and SonarCloud kept
+        // reporting 0% even after confirming the aggregate XML itself had correct data), while
+        // jircd-capabilities/*'s single-package reports matched fine — a per-module report is
+        // the standard, unambiguous shape Sonar's JaCoCo importer expects for each module scope.
+        tasks.named<JacocoReport>("jacocoTestReport") {
+            dependsOn(executionDataSources.map { it.tasks.named("test") })
+            executionData.setFrom(
+                executionDataSources.map {
+                    it.tasks.named<Test>("test").map { test ->
+                        test.extensions.getByType<JacocoTaskExtension>().destinationFile
+                    }
+                }
+            )
+        }
+        configure<org.sonarqube.gradle.SonarExtension> {
+            properties {
+                property(
+                    "sonar.coverage.jacoco.xmlReportPaths",
+                    layout.buildDirectory.file("reports/jacoco/test/jacocoTestReport.xml").get().asFile.path
+                )
+            }
+        }
+    }
 }
 
 // Aggregates coverage across every module — including code in jircd-core/
@@ -141,23 +192,9 @@ subprojects {
 // that plugin's variant-attribute wiring didn't resolve cleanly against this
 // Gradle/plugin version combination ("Providers passed to attributeProvider
 // must always be present when queried"), and this direct approach is the
-// long-standing, well-understood pattern it was meant to replace.
-val coverageTargets =
-    listOf(
-        "jircd-protocol",
-        "jircd-core",
-        "jircd-server",
-        "jircd-capabilities:message-tags",
-        "jircd-capabilities:server-time",
-        "jircd-capabilities:echo-message",
-        "jircd-server-extensions:cloak",
-        "jircd-server-extensions:admin",
-    ).map { project(":$it") }
-
-// jircd-integration-tests contributes execution data (it exercises the targets
-// above over real sockets) but has no `main` source of its own to measure.
-val executionDataSources = coverageTargets + project(":jircd-integration-tests")
-
+// long-standing, well-understood pattern it was meant to replace. This is a
+// human-facing HTML/XML artifact only now — Sonar reads each module's own
+// jacocoTestReport.xml instead (see the subprojects block above).
 plugins.apply("jacoco")
 
 configure<JacocoPluginExtension> {
@@ -194,20 +231,13 @@ sonar {
     properties {
         property("sonar.projectKey", "codegeek_JIRCD")
         property("sonar.organization", "codegeek")
-        property(
-            "sonar.coverage.jacoco.xmlReportPaths",
-            layout.buildDirectory
-                .file("reports/jacoco/testCodeCoverageReport/testCodeCoverageReport.xml")
-                .get()
-                .asFile
-                .path
-        )
     }
 }
 
-// The scanner reads whatever XML is on disk; without this it happily reports
-// zero coverage instead of failing, which is what "coverage doesn't show up"
+// The single root `sonar` task reads every subproject's inherited properties at analysis
+// time — it must run after each coverage-bearing module's own jacocoTestReport, or it reads
+// stale/absent XML instead of failing outright, which is what "coverage doesn't show up"
 // silently means in practice.
 tasks.named("sonar") {
-    dependsOn("testCodeCoverageReport")
+    dependsOn(coverageTargets.map { it.tasks.named("jacocoTestReport") })
 }
