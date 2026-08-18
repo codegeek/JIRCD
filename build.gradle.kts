@@ -9,14 +9,15 @@ import org.gradle.testing.jacoco.tasks.JacocoReport
 plugins {
     alias(libs.plugins.spotless) apply false
     alias(libs.plugins.spotbugs) apply false
+    alias(libs.plugins.sonarqube)
 }
 
 subprojects {
-    apply(plugin = "java")
-    apply(plugin = "com.diffplug.spotless")
-    apply(plugin = "com.github.spotbugs")
-    apply(plugin = "pmd")
-    apply(plugin = "jacoco")
+    plugins.apply("java")
+    plugins.apply("com.diffplug.spotless")
+    plugins.apply("com.github.spotbugs")
+    plugins.apply("pmd")
+    plugins.apply("jacoco")
 
     extensions.configure<JavaPluginExtension> {
         toolchain {
@@ -151,7 +152,7 @@ val coverageTargets =
 // above over real sockets) but has no `main` source of its own to measure.
 val executionDataSources = coverageTargets + project(":jircd-integration-tests")
 
-apply(plugin = "jacoco")
+plugins.apply("jacoco")
 
 configure<JacocoPluginExtension> {
     toolVersion = "0.8.15"
@@ -181,4 +182,26 @@ tasks.register<JacocoReport>("testCodeCoverageReport") {
         xml.required.set(true)
         html.required.set(true)
     }
+}
+
+sonar {
+    properties {
+        property("sonar.projectKey", "codegeek_JIRCD")
+        property("sonar.organization", "codegeek")
+        property(
+            "sonar.coverage.jacoco.xmlReportPaths",
+            layout.buildDirectory
+                .file("reports/jacoco/testCodeCoverageReport/testCodeCoverageReport.xml")
+                .get()
+                .asFile
+                .path
+        )
+    }
+}
+
+// The scanner reads whatever XML is on disk; without this it happily reports
+// zero coverage instead of failing, which is what "coverage doesn't show up"
+// silently means in practice.
+tasks.named("sonar") {
+    dependsOn("testCodeCoverageReport")
 }

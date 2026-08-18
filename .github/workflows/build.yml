@@ -12,9 +12,14 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # SonarCloud wants full history for blame/new-code analysis.
+          fetch-depth: 0
 
       - name: Set up JDK 25
         uses: actions/setup-java@v4
@@ -27,6 +32,15 @@ jobs:
 
       - name: Build and verify
         run: ./gradlew build testCodeCoverageReport --stacktrace
+
+      - name: SonarCloud analysis
+        # Forked-PR builds don't get repo secrets, so SONAR_TOKEN is empty there.
+        if: ${{ env.SONAR_TOKEN != '' }}
+        # --no-parallel: the sonar task resolves every subproject's classpath
+        # itself and isn't safe under this project's org.gradle.parallel=true
+        # (fails with "Resolution of the configuration ... was attempted
+        # without an exclusive lock" otherwise).
+        run: ./gradlew sonar --no-parallel --stacktrace
 
       - name: Upload test reports
         if: failure()
