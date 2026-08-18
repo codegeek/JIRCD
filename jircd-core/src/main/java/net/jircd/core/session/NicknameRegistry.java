@@ -15,6 +15,7 @@
  */
 package net.jircd.core.session;
 
+import java.util.Collection;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -53,5 +54,10 @@ public final class NicknameRegistry {
 
   public Optional<ClientSession> lookup(String nickname) {
     return Optional.ofNullable(byFoldedNickname.get(CaseMapping.fold(nickname)));
+  }
+
+  /** Every currently-registered session (FR-061's bare/mask {@code WHO} forms). */
+  public Collection<ClientSession> all() {
+    return byFoldedNickname.values();
   }
 }

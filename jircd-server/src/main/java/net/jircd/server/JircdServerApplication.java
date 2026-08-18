@@ -50,6 +50,8 @@ import net.jircd.core.session.command.QuitCommandHandler;
 import net.jircd.core.session.command.TopicCommandHandler;
 import net.jircd.core.session.command.UserCommandHandler;
 import net.jircd.core.session.command.UserModeCommandHandler;
+import net.jircd.core.session.command.WhoCommandHandler;
+import net.jircd.core.session.command.WhoisCommandHandler;
 import net.jircd.protocol.Command;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -189,6 +191,17 @@ public final class JircdServerApplication {
         new NamesCommandHandler(channelRegistry, extensionRegistry, () -> serverName));
     connectionHandler.registerHandler(
         Command.LIST, new ListCommandHandler(channelRegistry, extensionRegistry, () -> serverName));
+    connectionHandler.registerHandler(
+        Command.WHOIS,
+        new WhoisCommandHandler(nicknameRegistry, extensionRegistry, () -> serverName));
+    connectionHandler.registerHandler(
+        Command.WHO,
+        new WhoCommandHandler(
+            channelRegistry,
+            nicknameRegistry,
+            extensionRegistry,
+            () -> serverName,
+            () -> configuration.whoMaskEnabled()));
     connectionHandler.registerHandler(Command.PING, PingPongCommandHandler.ping());
     connectionHandler.registerHandler(Command.PONG, PingPongCommandHandler.pong());
     connectionHandler.registerHandler(

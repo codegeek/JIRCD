@@ -57,6 +57,26 @@ public final class TestServer implements AutoCloseable {
         + "\"\n";
   }
 
+  /** Enables {@code cloak} (off by default) alone, with no {@code admin}. */
+  public static final String CLOAK_ENABLED_YAML = "server-extensions:\n  cloak: enabled\n";
+
+  /**
+   * Both {@code admin} and {@code cloak} enabled together, one {@code server-extensions:} block.
+   */
+  public static String adminAndCloakEnabledYaml() {
+    String hash = BCrypt.withDefaults().hashToString(10, ADMIN_PASSWORD.toCharArray());
+    return "server-extensions:\n"
+        + "  admin: enabled\n"
+        + "  cloak: enabled\n"
+        + "administratorCredentials:\n"
+        + "  - username: "
+        + ADMIN_USERNAME
+        + "\n"
+        + "    hashedPassword: \""
+        + hash
+        + "\"\n";
+  }
+
   public final JircdServerApplication application;
   public final Path configPath;
 

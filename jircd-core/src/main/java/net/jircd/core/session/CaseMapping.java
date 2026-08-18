@@ -45,4 +45,32 @@ public final class CaseMapping {
       default -> c;
     };
   }
+
+  /** Case-insensitive (rfc1459-folded) {@code *}/{@code ?} wildcard match (FR-052/FR-061). */
+  public static boolean matches(String value, String mask) {
+    return wildcardMatch(fold(value), fold(mask), 0, 0);
+  }
+
+  private static boolean wildcardMatch(String text, String pattern, int ti, int pi) {
+    while (pi < pattern.length() && pattern.charAt(pi) != '*') {
+      if (ti >= text.length()) {
+        return false;
+      }
+      char pc = pattern.charAt(pi);
+      if (pc != '?' && pc != text.charAt(ti)) {
+        return false;
+      }
+      ti++;
+      pi++;
+    }
+    if (pi == pattern.length()) {
+      return ti == text.length();
+    }
+    for (int nextTi = ti; nextTi <= text.length(); nextTi++) {
+      if (wildcardMatch(text, pattern, nextTi, pi + 1)) {
+        return true;
+      }
+    }
+    return false;
+  }
 }
