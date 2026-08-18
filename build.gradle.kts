@@ -18,6 +18,12 @@ subprojects {
     plugins.apply("com.github.spotbugs")
     plugins.apply("pmd")
     plugins.apply("jacoco")
+    // Applying only at root left the SonarCloud JaCoCo XML importer unable to match coverage data
+    // back to source files in the top-level subprojects (jircd-core, jircd-protocol, jircd-server)
+    // — every one of their classes logged "File 'X.java' not found in project sources" and showed
+    // 0% coverage, while jircd-capabilities/*'s nested modules matched correctly. Applying the
+    // plugin to each subproject too is SonarSource's documented fix for this multi-module symptom.
+    plugins.apply("org.sonarqube")
 
     extensions.configure<JavaPluginExtension> {
         toolchain {

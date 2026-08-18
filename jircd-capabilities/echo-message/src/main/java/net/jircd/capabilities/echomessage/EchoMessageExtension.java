@@ -15,9 +15,7 @@
  */
 package net.jircd.capabilities.echomessage;
 
-import net.jircd.core.capability.Capability;
-import net.jircd.core.extension.CapabilityExtension;
-import net.jircd.core.extension.ServerContext;
+import net.jircd.core.extension.AbstractCapabilityExtension;
 import net.jircd.core.session.ClientSession;
 
 /**
@@ -26,25 +24,12 @@ import net.jircd.core.session.ClientSession;
  * net.jircd.core.session.command.MessageCommandHandler} calls {@link #includeSenderInFanOut} once,
  * when building a fan-out's recipient list, to decide whether the sender's own session is included.
  */
-public final class EchoMessageExtension implements CapabilityExtension {
+public final class EchoMessageExtension extends AbstractCapabilityExtension {
 
   public static final String ID = "echo-message";
-  private static final Capability CAPABILITY = new Capability(ID);
 
-  @Override
-  public String id() {
-    return ID;
-  }
-
-  @Override
-  public void start(ServerContext context) {}
-
-  @Override
-  public void stop() {}
-
-  @Override
-  public Capability providedCapability() {
-    return CAPABILITY;
+  public EchoMessageExtension() {
+    super(ID);
   }
 
   @Override

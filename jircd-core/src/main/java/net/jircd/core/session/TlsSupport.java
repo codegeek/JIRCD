@@ -20,8 +20,12 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileAttribute;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.security.GeneralSecurityException;
 import java.security.KeyStore;
+import java.util.Set;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import org.slf4j.Logger;
@@ -61,9 +65,17 @@ public final class TlsSupport {
     return context;
   }
 
+  private static final FileAttribute<Set<PosixFilePermission>> OWNER_ONLY_DIR =
+      PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------"));
+
   private static Path selfSignedKeystorePath(String password) throws IOException {
-    Path path = Files.createTempFile("jircd-selfsigned-", ".p12");
-    Files.delete(path); // keytool refuses to -genkeypair into a pre-existing (empty) file
+    // The shared system temp directory is world-readable/writable on most platforms (CWE-379),
+    // and keytool controls the keystore file's own permissions once it creates it — so instead,
+    // this file holding a TLS private key lives in its own owner-only-traversable directory,
+    // which keeps it inaccessible to other users regardless of the file's own mode bits.
+    Path dir = Files.createTempDirectory("jircd-tls-", OWNER_ONLY_DIR);
+    dir.toFile().deleteOnExit();
+    Path path = dir.resolve("keystore.p12");
     path.toFile().deleteOnExit();
     String javaHome = System.getProperty("java.home");
     String keytool = Path.of(javaHome, "bin", "keytool").toString();

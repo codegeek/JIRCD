@@ -18,9 +18,7 @@ package net.jircd.capabilities.servertime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
-import net.jircd.core.capability.Capability;
-import net.jircd.core.extension.CapabilityExtension;
-import net.jircd.core.extension.ServerContext;
+import net.jircd.core.extension.AbstractCapabilityExtension;
 import net.jircd.core.session.OutboundMessage;
 
 /**
@@ -28,29 +26,16 @@ import net.jircd.core.session.OutboundMessage;
  * OutboundMessage#sentAt()} — the sender's send-time instant, the same value for every recipient,
  * never each recipient's own drain time (data-model.md "OutboundMessage").
  */
-public final class ServerTimeExtension implements CapabilityExtension {
+public final class ServerTimeExtension extends AbstractCapabilityExtension {
 
   public static final String ID = "server-time";
-  private static final Capability CAPABILITY = new Capability(ID);
 
   /** IRCv3 server-time's required format: millisecond-precision, UTC, {@code Z}-suffixed. */
   private static final DateTimeFormatter TIME_FORMAT =
       DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").withZone(ZoneOffset.UTC);
 
-  @Override
-  public String id() {
-    return ID;
-  }
-
-  @Override
-  public void start(ServerContext context) {}
-
-  @Override
-  public void stop() {}
-
-  @Override
-  public Capability providedCapability() {
-    return CAPABILITY;
+  public ServerTimeExtension() {
+    super(ID);
   }
 
   @Override

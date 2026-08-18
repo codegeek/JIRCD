@@ -16,9 +16,7 @@
 package net.jircd.capabilities.messagetags;
 
 import java.util.Map;
-import net.jircd.core.capability.Capability;
-import net.jircd.core.extension.CapabilityExtension;
-import net.jircd.core.extension.ServerContext;
+import net.jircd.core.extension.AbstractCapabilityExtension;
 import net.jircd.core.session.OutboundMessage;
 
 /**
@@ -27,25 +25,12 @@ import net.jircd.core.session.OutboundMessage;
  * regardless of whether {@code server-time} is also negotiated (FR-059, data-model.md
  * "OutboundMessage" — {@code messageId}).
  */
-public final class MessageTagsExtension implements CapabilityExtension {
+public final class MessageTagsExtension extends AbstractCapabilityExtension {
 
   public static final String ID = "message-tags";
-  private static final Capability CAPABILITY = new Capability(ID);
 
-  @Override
-  public String id() {
-    return ID;
-  }
-
-  @Override
-  public void start(ServerContext context) {}
-
-  @Override
-  public void stop() {}
-
-  @Override
-  public Capability providedCapability() {
-    return CAPABILITY;
+  public MessageTagsExtension() {
+    super(ID);
   }
 
   @Override
