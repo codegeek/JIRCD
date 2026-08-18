@@ -111,7 +111,7 @@ public final class UserModeCommandHandler implements CommandHandler {
                   serverName.get(),
                   Command.MODE,
                   "MODE",
-                  List.of(session.nickname(), formatChanges(applied))));
+                  List.of(session.nickname(), ModeEcho.format(applied))));
     }
   }
 
@@ -127,19 +127,6 @@ public final class UserModeCommandHandler implements CommandHandler {
   private static String formatModes(ClientSession session) {
     StringBuilder sb = new StringBuilder("+");
     session.userModes().stream().map(UserMode::flag).sorted().forEach(sb::append);
-    return sb.toString();
-  }
-
-  private static String formatChanges(List<ModeChange> changes) {
-    StringBuilder sb = new StringBuilder();
-    char currentSign = 0;
-    for (ModeChange change : changes) {
-      if (change.sign() != currentSign) {
-        sb.append(change.sign());
-        currentSign = change.sign();
-      }
-      sb.append(change.flag());
-    }
     return sb.toString();
   }
 }

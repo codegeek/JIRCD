@@ -173,18 +173,51 @@ public final class JircdServerApplication {
     connectionHandler.registerHandler(
         Command.TOPIC,
         new TopicCommandHandler(
-            channelRegistry, () -> serverName, () -> configuration.topicMaxLength()));
+            channelRegistry,
+            extensionRegistry,
+            () -> serverName,
+            () -> configuration.topicMaxLength()));
     connectionHandler.registerHandler(
-        Command.NAMES, new NamesCommandHandler(channelRegistry, () -> serverName));
+        Command.NAMES,
+        new NamesCommandHandler(channelRegistry, extensionRegistry, () -> serverName));
     connectionHandler.registerHandler(
-        Command.LIST, new ListCommandHandler(channelRegistry, () -> serverName));
-    connectionHandler.registerHandler(Command.MODE, new UserModeCommandHandler(() -> serverName));
+        Command.LIST, new ListCommandHandler(channelRegistry, extensionRegistry, () -> serverName));
     connectionHandler.registerHandler(Command.PING, PingPongCommandHandler.ping());
     connectionHandler.registerHandler(Command.PONG, PingPongCommandHandler.pong());
     connectionHandler.registerHandler(
         Command.CAP,
         new CapCommandHandler(
             new CapabilityNegotiator(extensionRegistry), () -> serverName, registrationCompletion));
+    registerModerationHandlers();
+  }
+
+  /** {@code KICK}/channel-{@code MODE}/{@code INVITE} (Story 5, FR-013/FR-014/FR-064/FR-065). */
+  private void registerModerationHandlers() {
+    connectionHandler.registerHandler(
+        Command.KICK,
+        new net.jircd.core.session.command.KickCommandHandler(
+            channelRegistry, extensionRegistry, () -> serverName));
+    connectionHandler.registerHandler(
+        Command.INVITE,
+        new net.jircd.core.session.command.InviteCommandHandler(
+            channelRegistry, nicknameRegistry, extensionRegistry, () -> serverName));
+
+    var userModeHandler = new UserModeCommandHandler(() -> serverName);
+    var channelModeHandler =
+        new net.jircd.core.session.command.ModeCommandHandler(
+            channelRegistry,
+            extensionRegistry,
+            () -> serverName,
+            () -> configuration.maxModesPerCommand());
+    connectionHandler.registerHandler(
+        Command.MODE,
+        (session, message) -> {
+          if (!message.params().isEmpty() && message.params().getFirst().startsWith("#")) {
+            channelModeHandler.handle(session, message);
+          } else {
+            userModeHandler.handle(session, message);
+          }
+        });
   }
 
   public void start() throws IOException, GeneralSecurityException {

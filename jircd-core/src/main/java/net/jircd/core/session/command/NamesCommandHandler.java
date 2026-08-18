@@ -16,22 +16,30 @@
 package net.jircd.core.session.command;
 
 import java.util.function.Supplier;
+import net.jircd.core.extension.ExtensionRegistry;
 import net.jircd.core.session.ChannelRegistry;
+import net.jircd.core.session.ChannelVisibility;
 import net.jircd.core.session.ClientSession;
 import net.jircd.protocol.Message;
 import net.jircd.protocol.NumericReply;
 
 /**
  * {@code NAMES} — current membership list of a channel, regardless of the requester's own
- * membership (FR-041).
+ * membership (FR-041); a {@code private}/{@code secret} channel is invisible to a non-member,
+ * non-administrator requester, indistinguishable from a nonexistent one (FR-047).
  */
 public final class NamesCommandHandler implements CommandHandler {
 
   private final ChannelRegistry channelRegistry;
+  private final ExtensionRegistry extensionRegistry;
   private final Supplier<String> serverName;
 
-  public NamesCommandHandler(ChannelRegistry channelRegistry, Supplier<String> serverName) {
+  public NamesCommandHandler(
+      ChannelRegistry channelRegistry,
+      ExtensionRegistry extensionRegistry,
+      Supplier<String> serverName) {
     this.channelRegistry = channelRegistry;
+    this.extensionRegistry = extensionRegistry;
     this.serverName = serverName;
   }
 
@@ -47,7 +55,8 @@ public final class NamesCommandHandler implements CommandHandler {
       return;
     }
     var found = channelRegistry.lookup(message.params().getFirst());
-    if (found.isEmpty()) {
+    if (found.isEmpty()
+        || ChannelVisibility.isHiddenFrom(found.get(), session, extensionRegistry)) {
       Replies.send(
           session,
           serverName.get(),

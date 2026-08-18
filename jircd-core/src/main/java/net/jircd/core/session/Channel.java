@@ -17,6 +17,7 @@ package net.jircd.core.session;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -107,6 +108,32 @@ public final class Channel {
     members.remove(session);
     operators.remove(session);
     voiced.remove(session);
+  }
+
+  /** Case-insensitive lookup of a current member by nickname (FR-064's `MEMBER`-kind targets). */
+  public Optional<ClientSession> findMember(String nickname) {
+    return members.stream().filter(m -> m.nickname().equalsIgnoreCase(nickname)).findFirst();
+  }
+
+  /**
+   * Adds a ban mask, enforcing the 100-entry cap atomically (FR-062) — {@code true} if the mask is
+   * now present (including already-present, a no-op success), {@code false} if adding it would
+   * exceed the cap.
+   */
+  public synchronized boolean addBan(BanEntry entry) {
+    if (bans.stream().anyMatch(b -> b.mask().equals(entry.mask()))) {
+      return true;
+    }
+    if (bans.size() >= MAX_BANS) {
+      return false;
+    }
+    bans.add(entry);
+    return true;
+  }
+
+  /** Removes a ban mask — a silent no-op if not present (FR-062). */
+  public void removeBan(String mask) {
+    bans.removeIf(b -> b.mask().equals(mask));
   }
 
   @Override

@@ -17,56 +17,53 @@ package net.jircd.core.session.command;
 
 import java.util.List;
 import java.util.Map;
-import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 import net.jircd.core.extension.ExtensionRegistry;
 import net.jircd.core.session.Channel;
 import net.jircd.core.session.ChannelRegistry;
-import net.jircd.core.session.ChannelVisibility;
 import net.jircd.core.session.ClientSession;
+import net.jircd.core.session.PresentedIdentity;
+import net.jircd.core.session.SecurityEventLog;
 import net.jircd.protocol.Command;
 import net.jircd.protocol.Message;
 import net.jircd.protocol.NumericReply;
-import net.jircd.protocol.Utf8Validator;
 
 /**
- * {@code TOPIC} — view (any client, FR-041's discovery framing) or set (operator-only, FR-040) a
- * channel's topic; a {@code private}/{@code secret} channel is invisible to a non-member,
- * non-administrator requester, indistinguishable from a nonexistent one (FR-047).
+ * {@code KICK} — operator-only channel member removal (FR-013/FR-014). Always available, never
+ * gated by {@code FR-011} toggling (FR-036).
  */
-public final class TopicCommandHandler implements CommandHandler {
+public final class KickCommandHandler implements CommandHandler {
 
   private final ChannelRegistry channelRegistry;
   private final ExtensionRegistry extensionRegistry;
   private final Supplier<String> serverName;
-  private final IntSupplier topicMaxLength;
 
-  public TopicCommandHandler(
+  public KickCommandHandler(
       ChannelRegistry channelRegistry,
       ExtensionRegistry extensionRegistry,
-      Supplier<String> serverName,
-      IntSupplier topicMaxLength) {
+      Supplier<String> serverName) {
     this.channelRegistry = channelRegistry;
     this.extensionRegistry = extensionRegistry;
     this.serverName = serverName;
-    this.topicMaxLength = topicMaxLength;
   }
 
   @Override
   public void handle(ClientSession session, Message message) {
-    if (message.params().isEmpty()) {
+    if (message.params().size() < 2) {
       Replies.send(
           session,
           serverName.get(),
           NumericReply.ERR_NEEDMOREPARAMS,
-          "TOPIC",
+          "KICK",
           "Not enough parameters");
       return;
     }
     String channelName = message.params().getFirst();
+    String targetNickname = message.params().get(1);
+    String reason = message.params().size() > 2 ? message.params().get(2) : null;
+
     var found = channelRegistry.lookup(channelName);
-    if (found.isEmpty()
-        || ChannelVisibility.isHiddenFrom(found.get(), session, extensionRegistry)) {
+    if (found.isEmpty()) {
       Replies.send(
           session,
           serverName.get(),
@@ -77,18 +74,9 @@ public final class TopicCommandHandler implements CommandHandler {
     }
     Channel channel = found.get();
 
-    if (message.params().size() < 2) {
-      if (channel.topic() == null) {
-        Replies.send(
-            session, serverName.get(), NumericReply.RPL_NOTOPIC, channel.name(), "No topic is set");
-      } else {
-        Replies.send(
-            session, serverName.get(), NumericReply.RPL_TOPIC, channel.name(), channel.topic());
-      }
-      return;
-    }
-
     if (!channel.operators().contains(session)) {
+      SecurityEventLog.rejectedModerationAction(
+          session.connectionId(), "KICK", channelName, "not a channel operator");
       Replies.send(
           session,
           serverName.get(),
@@ -98,29 +86,31 @@ public final class TopicCommandHandler implements CommandHandler {
       return;
     }
 
-    String newTopic = message.params().get(1);
-    if (!Utf8Validator.isValidUtf8(newTopic.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
+    var target = channel.findMember(targetNickname);
+    if (target.isEmpty()) {
       Replies.send(
           session,
           serverName.get(),
-          NumericReply.ERR_UNKNOWNCOMMAND,
-          "TOPIC",
-          "Invalid UTF-8 in topic");
-      return;
-    }
-    if (newTopic.length() > topicMaxLength.getAsInt()) {
-      Replies.send(session, serverName.get(), NumericReply.ERR_INPUTTOOLONG, "Topic too long");
+          NumericReply.ERR_USERNOTINCHANNEL,
+          targetNickname,
+          "They aren't on that channel");
       return;
     }
 
-    channel.setTopic(newTopic);
-    Message topicNotification =
-        new Message(
-            Map.of(), serverName.get(), Command.TOPIC, "TOPIC", List.of(channel.name(), newTopic));
+    String presentedForm = PresentedIdentity.presentedForm(session, extensionRegistry);
+    List<String> params =
+        reason != null
+            ? List.of(channel.name(), target.get().nickname(), reason)
+            : List.of(channel.name(), target.get().nickname());
+    Message kickNotification = new Message(Map.of(), presentedForm, Command.KICK, "KICK", params);
     for (ClientSession member : channel.members()) {
       if (member.writer() != null) {
-        member.writer().enqueueRaw(topicNotification);
+        member.writer().enqueueRaw(kickNotification);
       }
     }
+
+    channel.removeMember(target.get());
+    target.get().channelMemberships().remove(channel);
+    channelRegistry.removeIfEmpty(channel);
   }
 }

@@ -18,11 +18,15 @@ package net.jircd.core.session.command;
 import java.util.Set;
 import java.util.function.Supplier;
 import net.jircd.core.extension.ExtensionRegistry;
+import net.jircd.core.session.Channel;
 import net.jircd.core.session.ChannelRegistry;
 import net.jircd.core.session.ClientSession;
+import net.jircd.core.session.CoreChannelModes;
 import net.jircd.core.session.NicknameRegistry;
 import net.jircd.core.session.OutboundMessage;
 import net.jircd.core.session.PresentedIdentity;
+import net.jircd.protocol.Hostmask;
+import net.jircd.protocol.NickMask;
 import net.jircd.protocol.NumericReply;
 import net.jircd.protocol.Utf8Validator;
 
@@ -85,7 +89,7 @@ public final class MessageCommandHandler implements CommandHandler {
     Set<ClientSession> recipients;
     if (target.startsWith("#")) {
       var channel = channelRegistry.lookup(target);
-      if (channel.isEmpty()) {
+      if (channel.isEmpty() || !passesSendGate(channel.get(), session)) {
         if (!notice) {
           Replies.send(
               session,
@@ -128,5 +132,34 @@ public final class MessageCommandHandler implements CommandHandler {
         recipient.writer().enqueue(outbound);
       }
     }
+  }
+
+  /**
+   * The {@code SEND}-gate check point FR-043 requires: every currently-recognized flag whose {@code
+   * gates} includes {@code SEND}, checked independently — {@code members-only} requires membership;
+   * {@code moderated} requires operator or voice (FR-045); {@code ban-mask} requires neither the
+   * sender's presented nor real identity to match any active ban (FR-062, dual-matched to resist
+   * {@code cloak} evasion) — muting a matched sender without removing them from members.
+   */
+  private boolean passesSendGate(Channel channel, ClientSession session) {
+    if (channel.activeModes().contains(CoreChannelModes.MEMBERS_ONLY)
+        && !channel.members().contains(session)) {
+      return false;
+    }
+    if (channel.activeModes().contains(CoreChannelModes.MODERATED)
+        && !channel.operators().contains(session)
+        && !channel.voiced().contains(session)) {
+      return false;
+    }
+    if (!channel.bans().isEmpty()) {
+      String presented = PresentedIdentity.presentedForm(session, extensionRegistry);
+      String real = Hostmask.format(session.nickname(), session.ident(), session.realHostname());
+      for (var ban : channel.bans()) {
+        if (NickMask.matches(presented, ban.mask()) || NickMask.matches(real, ban.mask())) {
+          return false;
+        }
+      }
+    }
+    return true;
   }
 }
