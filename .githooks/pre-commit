@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+echo "Running Spotless formatting check..."
+if ! ./gradlew spotlessCheck --quiet; then
+  echo
+  echo "Spotless found formatting violations. Run './gradlew spotlessApply' to fix, then re-stage and commit."
+  exit 1
+fi

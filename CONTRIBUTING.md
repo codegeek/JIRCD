@@ -60,9 +60,16 @@ This means:
 
 ## Code style
 
-Once the build is in place, formatting and static analysis (Spotless,
-SpotBugs — see [`research.md`](specs/001-ircv3-server/research.md)) run as
-part of the build and are expected to pass cleanly before review.
+Formatting and static analysis (Spotless, SpotBugs, PMD — see
+[`research.md`](specs/001-ircv3-server/research.md)) run as part of the
+build and are expected to pass cleanly before review.
+
+After cloning, run this once to enable the repo's pre-commit hook, which
+runs `spotlessCheck` before each commit:
+
+```sh
+git config core.hooksPath .githooks
+```
 
 ## Questions
 
