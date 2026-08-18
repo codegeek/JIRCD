@@ -54,7 +54,8 @@ public final class RegistrationCompletion {
   public void tryComplete(ClientSession session) {
     if (session.lifecycle().isRegistered()
         || session.nickname() == null
-        || !session.hasProcessedUser()) {
+        || !session.hasProcessedUser()
+        || session.isNegotiatingCapabilities()) {
       return;
     }
     session.lifecycle().completeRegistration();

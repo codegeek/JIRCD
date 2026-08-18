@@ -17,3 +17,6 @@ logs/
 *.iml
 .vscode/
 .DS_Store
+.project
+.classpath
+.settings/

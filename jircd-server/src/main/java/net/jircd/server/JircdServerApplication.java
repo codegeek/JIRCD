@@ -26,6 +26,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Properties;
 import java.util.Set;
+import net.jircd.core.capability.CapabilityNegotiator;
 import net.jircd.core.config.ConfigurationException;
 import net.jircd.core.config.ConfigurationLoader;
 import net.jircd.core.config.ConfigurationReloader;
@@ -38,6 +39,7 @@ import net.jircd.core.session.DisconnectCleanup;
 import net.jircd.core.session.NicknameRegistry;
 import net.jircd.core.session.PlaintextListener;
 import net.jircd.core.session.TlsListener;
+import net.jircd.core.session.command.CapCommandHandler;
 import net.jircd.core.session.command.JoinCommandHandler;
 import net.jircd.core.session.command.ListCommandHandler;
 import net.jircd.core.session.command.MessageCommandHandler;
@@ -179,6 +181,10 @@ public final class JircdServerApplication {
     connectionHandler.registerHandler(Command.MODE, new UserModeCommandHandler(() -> serverName));
     connectionHandler.registerHandler(Command.PING, PingPongCommandHandler.ping());
     connectionHandler.registerHandler(Command.PONG, PingPongCommandHandler.pong());
+    connectionHandler.registerHandler(
+        Command.CAP,
+        new CapCommandHandler(
+            new CapabilityNegotiator(extensionRegistry), () -> serverName, registrationCompletion));
   }
 
   public void start() throws IOException, GeneralSecurityException {

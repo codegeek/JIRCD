@@ -26,6 +26,15 @@ import net.jircd.server.JircdServerApplication;
  */
 public final class TestServer implements AutoCloseable {
 
+  /** Enables all three Story 2 capabilities — none are enabled by default (research.md). */
+  public static final String ALL_CAPABILITIES_ENABLED_YAML =
+      """
+      capabilities:
+        message-tags: enabled
+        server-time: enabled
+        echo-message: enabled
+      """;
+
   public final JircdServerApplication application;
 
   private TestServer(JircdServerApplication application) {

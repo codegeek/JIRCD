@@ -115,8 +115,13 @@ public final class MessageCommandHandler implements CommandHandler {
 
     String presentedForm = PresentedIdentity.presentedForm(session, extensionRegistry);
     OutboundMessage outbound = OutboundMessage.now(presentedForm, commandName, target, body);
+    boolean echoToSender =
+        extensionRegistry.enabled().stream()
+            .filter(net.jircd.core.extension.CapabilityExtension.class::isInstance)
+            .map(net.jircd.core.extension.CapabilityExtension.class::cast)
+            .anyMatch(capability -> capability.includeSenderInFanOut(session));
     for (ClientSession recipient : recipients) {
-      if (recipient == session) {
+      if (recipient == session && !echoToSender) {
         continue; // echo-message (Story 2) decides whether the sender sees its own message
       }
       if (recipient.writer() != null) {

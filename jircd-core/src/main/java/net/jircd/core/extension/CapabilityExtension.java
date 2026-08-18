@@ -15,7 +15,10 @@
  */
 package net.jircd.core.extension;
 
+import java.util.Map;
 import net.jircd.core.capability.Capability;
+import net.jircd.core.session.ClientSession;
+import net.jircd.core.session.OutboundMessage;
 
 /**
  * An {@link Extension} that also provides exactly one client-negotiable {@link Capability}
@@ -24,4 +27,23 @@ import net.jircd.core.capability.Capability;
 public interface CapabilityExtension extends Extension {
 
   Capability providedCapability();
+
+  /**
+   * Tags this capability contributes to a delivered message, for a recipient that has this
+   * capability negotiated (T088/T089) — the caller ({@code CapabilityTagRenderer}) checks that
+   * precondition before calling this; implementations don't re-check it themselves. Extensions that
+   * don't decorate tags (e.g. {@code echo-message}) leave this at its no-op default.
+   */
+  default Map<String, String> contributeTags(OutboundMessage message) {
+    return Map.of();
+  }
+
+  /**
+   * Whether the sender's own session should be included among a fan-out's recipients (T090) — only
+   * {@code echo-message} overrides this; every other capability affects per-recipient formatting
+   * ({@link #contributeTags}), not recipient-set construction.
+   */
+  default boolean includeSenderInFanOut(ClientSession sender) {
+    return false;
+  }
 }

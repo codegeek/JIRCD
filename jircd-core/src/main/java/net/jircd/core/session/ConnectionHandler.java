@@ -62,6 +62,7 @@ public final class ConnectionHandler {
   private final ExtensionRegistry extensionRegistry;
   private final DisconnectCleanup disconnectCleanup;
   private final Supplier<String> serverName;
+  private final TagRenderer tagRenderer;
   private final Map<Command, CommandHandler> handlers = new ConcurrentHashMap<>();
   private final AtomicLong connectionIdCounter = new AtomicLong();
 
@@ -72,6 +73,7 @@ public final class ConnectionHandler {
     this.extensionRegistry = extensionRegistry;
     this.disconnectCleanup = disconnectCleanup;
     this.serverName = serverName;
+    this.tagRenderer = new CapabilityTagRenderer(extensionRegistry);
   }
 
   public void registerHandler(Command command, CommandHandler handler) {
@@ -100,9 +102,7 @@ public final class ConnectionHandler {
     @SuppressWarnings("PMD.CloseResource")
     SessionWriter writer;
     try {
-      writer =
-          new SessionWriter(
-              session, socket.getOutputStream(), net.jircd.core.session.TagRenderer.NONE);
+      writer = new SessionWriter(session, socket.getOutputStream(), tagRenderer);
     } catch (IOException e) {
       closeQuietly(socket);
       return;

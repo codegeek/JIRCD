@@ -66,10 +66,16 @@ public final class RawIrcClient implements AutoCloseable {
   }
 
   /**
-   * Reads lines until one starting with {@code prefix} is found (or the timeout elapses), returning
-   * it.
+   * Reads lines until one containing {@code prefix} is found (or the timeout elapses), returning
+   * it. A purely-numeric {@code prefix} (a reply code) is matched as an isolated digit run — not a
+   * raw substring — so it can't spuriously match inside an unrelated free-text numeric, e.g. a
+   * {@code 221} search matching inside {@code RPL_CREATED}'s {@code ...42.221297Z} timestamp.
    */
   public String readUntil(String prefix, Duration timeout) throws IOException {
+    java.util.regex.Pattern numericBoundary =
+        prefix.chars().allMatch(Character::isDigit)
+            ? java.util.regex.Pattern.compile("(?<!\\d)" + prefix + "(?!\\d)")
+            : null;
     Instant deadline = Instant.now().plus(timeout);
     socket.setSoTimeout(Math.max(1, (int) timeout.toMillis()));
     while (Instant.now().isBefore(deadline)) {
@@ -77,7 +83,9 @@ public final class RawIrcClient implements AutoCloseable {
       if (line == null) {
         throw new IOException("Connection closed while waiting for: " + prefix);
       }
-      if (line.contains(prefix)) {
+      boolean matches =
+          numericBoundary != null ? numericBoundary.matcher(line).find() : line.contains(prefix);
+      if (matches) {
         return line;
       }
     }
