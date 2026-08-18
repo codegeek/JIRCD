@@ -15,6 +15,7 @@
  */
 package net.jircd.integration;
 
+import at.favre.lib.crypto.bcrypt.BCrypt;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -34,6 +35,27 @@ public final class TestServer implements AutoCloseable {
         server-time: enabled
         echo-message: enabled
       """;
+
+  public static final String ADMIN_USERNAME = "root-admin";
+  public static final String ADMIN_PASSWORD = "correct horse battery staple";
+
+  /**
+   * Enables {@code admin} (off by default, contracts/server-configuration.md) with one real,
+   * bcrypt-hashed credential for {@link #ADMIN_USERNAME}/{@link #ADMIN_PASSWORD} — {@code admin}
+   * itself MUST be enabled for {@code OPER} etc. to work at all.
+   */
+  public static String adminEnabledYaml() {
+    String hash = BCrypt.withDefaults().hashToString(10, ADMIN_PASSWORD.toCharArray());
+    return "server-extensions:\n"
+        + "  admin: enabled\n"
+        + "administratorCredentials:\n"
+        + "  - username: "
+        + ADMIN_USERNAME
+        + "\n"
+        + "    hashedPassword: \""
+        + hash
+        + "\"\n";
+  }
 
   public final JircdServerApplication application;
   public final Path configPath;

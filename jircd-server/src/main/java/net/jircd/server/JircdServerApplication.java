@@ -32,7 +32,6 @@ import net.jircd.core.config.ConfigurationLoader;
 import net.jircd.core.config.ConfigurationReloader;
 import net.jircd.core.config.ServerConfiguration;
 import net.jircd.core.extension.ExtensionRegistry;
-import net.jircd.core.extension.ServerContext;
 import net.jircd.core.session.ChannelRegistry;
 import net.jircd.core.session.ConnectionHandler;
 import net.jircd.core.session.DisconnectCleanup;
@@ -81,8 +80,6 @@ public final class JircdServerApplication {
   private TlsListener tlsListener;
 
   public JircdServerApplication(Path configPath) throws ConfigurationException, IOException {
-    extensionRegistry.attachContext(
-        new ServerContext(nicknameRegistry, channelRegistry, extensionRegistry));
     extensionRegistry.discover(Thread.currentThread().getContextClassLoader());
 
     Set<String> knownCapabilityIds =
@@ -115,6 +112,16 @@ public final class JircdServerApplication {
     registerStory1Handlers();
 
     this.reloader = new ConfigurationReloader(configPath, loader, extensionRegistry, configuration);
+
+    extensionRegistry.attachContext(
+        new net.jircd.core.extension.ServerContext(
+            nicknameRegistry,
+            channelRegistry,
+            extensionRegistry,
+            () -> serverName,
+            reloader,
+            disconnectCleanup,
+            connectionHandler::registerHandler));
 
     enableConfiguredExtensions();
   }

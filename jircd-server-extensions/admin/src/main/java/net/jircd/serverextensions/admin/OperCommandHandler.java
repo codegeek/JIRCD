@@ -1,0 +1,79 @@
+/*
+ * Copyright 2026 Guillermo Castro
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+ * implied. See the License for the specific language governing
+ * permissions and limitations under the License.
+ */
+package net.jircd.serverextensions.admin;
+
+import java.util.function.Supplier;
+import net.jircd.core.config.ConfigurationReloader;
+import net.jircd.core.session.ClientSession;
+import net.jircd.core.session.DisconnectCleanup;
+import net.jircd.core.session.SecurityEventLog;
+import net.jircd.core.session.command.CommandHandler;
+import net.jircd.core.session.command.Replies;
+import net.jircd.protocol.Message;
+import net.jircd.protocol.NumericReply;
+
+/**
+ * {@code OPER} — verifies administrator credentials (FR-034), granting privilege on success and
+ * tracking consecutive failures toward a per-connection disconnect (research.md "OPER
+ * failed-attempt lockout"). Deliberately does not itself check {@link AdminPrivilege} — this is the
+ * credential-verification entry point that grants privilege, not a privilege-gated action.
+ */
+public final class OperCommandHandler implements CommandHandler {
+
+  private final Supplier<String> serverName;
+  private final ConfigurationReloader configurationReloader;
+  private final DisconnectCleanup disconnectCleanup;
+
+  public OperCommandHandler(
+      Supplier<String> serverName,
+      ConfigurationReloader configurationReloader,
+      DisconnectCleanup disconnectCleanup) {
+    this.serverName = serverName;
+    this.configurationReloader = configurationReloader;
+    this.disconnectCleanup = disconnectCleanup;
+  }
+
+  @Override
+  public void handle(ClientSession session, Message message) {
+    if (message.params().size() < 2) {
+      Replies.send(
+          session,
+          serverName.get(),
+          NumericReply.ERR_NEEDMOREPARAMS,
+          "OPER",
+          "Not enough parameters");
+      return;
+    }
+    String username = message.params().getFirst();
+    String password = message.params().get(1);
+    var config = configurationReloader.current();
+
+    if (AdminCredentialVerifier.verify(config.administratorCredentials(), username, password)) {
+      session.grantAdministratorPrivilege();
+      Replies.send(
+          session, serverName.get(), NumericReply.RPL_YOUREOPER, "You are now an IRC operator");
+      return;
+    }
+
+    SecurityEventLog.failedAuthentication(
+        session.connectionId(), username, "invalid OPER credentials");
+    Replies.send(session, serverName.get(), NumericReply.ERR_PASSWDMISMATCH, "Password incorrect");
+    int attempts = session.incrementFailedOperAttempts();
+    if (attempts >= config.operFailureThreshold()) {
+      disconnectCleanup.cleanup(session, "Too many failed OPER attempts");
+    }
+  }
+}

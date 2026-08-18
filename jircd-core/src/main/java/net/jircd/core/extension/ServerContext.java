@@ -15,15 +15,23 @@
  */
 package net.jircd.core.extension;
 
+import java.util.function.Supplier;
+import net.jircd.core.config.ConfigurationReloader;
 import net.jircd.core.session.ChannelRegistry;
+import net.jircd.core.session.DisconnectCleanup;
 import net.jircd.core.session.NicknameRegistry;
 
 /**
  * What an {@link Extension} receives at {@code start(ServerContext)} — its handle onto the core
  * registries it may need, without depending on the rest of {@code jircd-core}/{@code
- * jircd-server}'s wiring directly.
+ * jircd-server}'s wiring directly. {@code serverName} is a live supplier, not a snapshot, since it
+ * (like the rest of {@code configurationReloader}'s live state) can change across a reload.
  */
 public record ServerContext(
     NicknameRegistry nicknameRegistry,
     ChannelRegistry channelRegistry,
-    ExtensionRegistry extensionRegistry) {}
+    ExtensionRegistry extensionRegistry,
+    Supplier<String> serverName,
+    ConfigurationReloader configurationReloader,
+    DisconnectCleanup disconnectCleanup,
+    CommandRegistrar commandRegistrar) {}

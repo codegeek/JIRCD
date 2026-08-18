@@ -18,7 +18,15 @@ package net.jircd.core.extension;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import net.jircd.core.config.ConfigurationLoader;
+import net.jircd.core.config.ConfigurationReloader;
+import net.jircd.core.config.ServerConfiguration;
 import net.jircd.core.session.ChannelRegistry;
+import net.jircd.core.session.DisconnectCleanup;
 import net.jircd.core.session.NicknameRegistry;
 import org.junit.jupiter.api.Test;
 
@@ -58,8 +66,35 @@ class ExtensionRegistryTest {
 
   private ExtensionRegistry newRegistry() {
     ExtensionRegistry registry = new ExtensionRegistry();
+    NicknameRegistry nicknameRegistry = new NicknameRegistry();
+    ChannelRegistry channelRegistry = new ChannelRegistry();
+    ServerConfiguration configuration =
+        new ServerConfiguration(
+            Map.of(),
+            Map.of(),
+            List.of(),
+            new ServerConfiguration.RateLimit(10, 1.0),
+            List.of(),
+            "test.jircd.local",
+            ServerConfiguration.DEFAULT_NICKNAME_MAX_LENGTH,
+            ServerConfiguration.DEFAULT_CHANNEL_NAME_MAX_LENGTH,
+            ServerConfiguration.DEFAULT_TOPIC_MAX_LENGTH,
+            true,
+            ServerConfiguration.DEFAULT_MAX_MODES_PER_COMMAND,
+            ServerConfiguration.DEFAULT_OPER_FAILURE_THRESHOLD);
     registry.attachContext(
-        new ServerContext(new NicknameRegistry(), new ChannelRegistry(), registry));
+        new ServerContext(
+            nicknameRegistry,
+            channelRegistry,
+            registry,
+            () -> "test.jircd.local",
+            new ConfigurationReloader(
+                Path.of("unused.yaml"),
+                new ConfigurationLoader(Set.of(), Set.of()),
+                registry,
+                configuration),
+            new DisconnectCleanup(nicknameRegistry, channelRegistry),
+            (command, handler) -> {}));
     return registry;
   }
 

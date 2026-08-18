@@ -54,6 +54,10 @@ public final class ConfigurationReloader {
     return current;
   }
 
+  public Path configPath() {
+    return configPath;
+  }
+
   /** Re-reads and re-validates the configuration file, reconciling extension state on success. */
   public ServerConfiguration reload() throws ConfigurationException, IOException {
     ServerConfiguration reloaded;

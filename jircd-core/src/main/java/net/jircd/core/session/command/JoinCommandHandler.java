@@ -116,7 +116,7 @@ public final class JoinCommandHandler implements CommandHandler {
     sendNamesReply(session, channel, serverName.get());
   }
 
-  static void sendNamesReply(ClientSession requester, Channel channel, String serverName) {
+  public static void sendNamesReply(ClientSession requester, Channel channel, String serverName) {
     StringBuilder names = new StringBuilder();
     for (ClientSession member : channel.members()) {
       if (!names.isEmpty()) {
