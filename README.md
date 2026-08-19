@@ -84,6 +84,35 @@ administration (`OPER`, `REHASH`, etc.), see the full annotated schema in
 For a guided, story-by-story walkthrough of every feature, see
 [`quickstart.md`](specs/001-ircv3-server/quickstart.md).
 
+### Running a standalone build
+
+`./gradlew :jircd-server:run` is for development only — it stays attached
+to Gradle. For a standalone install (no Gradle needed to run it), build a
+distribution instead:
+
+```bash
+./gradlew :jircd-server:installDist
+```
+
+This produces `jircd-server/build/install/jircd-server/`, containing a
+`bin/jircd-server` (and `.bat`) launcher plus every runtime dependency —
+including the bundled capability/extension jars, which are discovered via
+`ServiceLoader` at startup — in `lib/`. Run it from that directory (it
+looks for `jircd.yaml` in the working directory, same as `:run`):
+
+```bash
+cd jircd-server/build/install/jircd-server
+touch jircd.yaml
+bin/jircd-server
+```
+
+To produce a distributable archive instead (e.g. for attaching to a
+release), use `distZip` or `distTar`, which land in
+`jircd-server/build/distributions/`. See
+[Releases](https://github.com/codegeek/JIRCD/releases) for prebuilt
+archives — pushing a `vX.Y.Z` tag builds and publishes these automatically
+(see [`.github/workflows/release.yml`](.github/workflows/release.yml)).
+
 ## Contributing
 
 Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the

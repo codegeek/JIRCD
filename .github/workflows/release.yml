@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Derive release version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and verify
+        run: ./gradlew build -Pversion=${{ steps.version.outputs.version }} --stacktrace
+
+      - name: Assemble standalone distribution
+        run: ./gradlew :jircd-server:assembleDist -Pversion=${{ steps.version.outputs.version }} --stacktrace
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            jircd-server/build/distributions/*.zip \
+            jircd-server/build/distributions/*.tar \
+            --title "${{ github.ref_name }}" \
+            --generate-notes

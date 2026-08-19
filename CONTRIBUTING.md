@@ -71,6 +71,14 @@ runs `spotlessCheck` before each commit:
 git config core.hooksPath .githooks
 ```
 
+## Releasing
+
+Maintainers cut a release by pushing a tag matching `vX.Y.Z` (e.g. `v0.2.0`)
+to `main`. [`.github/workflows/release.yml`](.github/workflows/release.yml)
+then builds a standalone distribution stamped with that version (overriding
+the `0.1.0-SNAPSHOT` in `gradle.properties` for the build) and publishes it
+as a GitHub Release with the `distZip`/`distTar` archives attached.
+
 ## Questions
 
 Open a [discussion or issue](../../issues) if anything above is unclear.
