@@ -15,9 +15,10 @@
  */
 package net.jircd.core.session;
 
-import java.io.BufferedReader;
+import java.io.BufferedInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.InputStream;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
@@ -36,6 +37,7 @@ import net.jircd.protocol.MalformedMessageException;
 import net.jircd.protocol.Message;
 import net.jircd.protocol.MessageParser;
 import net.jircd.protocol.NumericReply;
+import net.jircd.protocol.Utf8Validator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,6 +46,14 @@ import org.slf4j.LoggerFactory;
  * jircd-protocol} → route to a registered handler, matched case-insensitively. Before creating a
  * {@link ClientSession} at all, consults the {@code connection-admission} extension point (FR-066);
  * with nothing claiming it this release, every connection is admitted.
+ *
+ * <p>Reads raw bytes and validates each line's UTF-8 well-formedness (FR-054) before ever decoding
+ * it to a {@code String} — a lenient, char-stream-based reader (e.g. {@code
+ * InputStreamReader}/{@code BufferedReader} over a {@code Charset}) silently substitutes the
+ * replacement character for malformed input by default, which would make every downstream per-field
+ * {@code Utf8Validator} check in individual command handlers permanently unreachable: by the time a
+ * handler sees a {@code String}, any invalid byte sequence has already been silently sanitized
+ * away. Validating the whole raw line once, here, is the single source of truth instead.
  */
 public final class ConnectionHandler {
 
@@ -121,15 +131,13 @@ public final class ConnectionHandler {
     session.attachWriter(writer);
     writer.setOnOverflow(() -> disconnectCleanup.cleanup(session, "Excess Flood"));
 
-    try (BufferedReader reader =
-        new BufferedReader(
-            new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8))) {
-      String line;
-      while ((line = reader.readLine()) != null) {
+    try (BufferedInputStream in = new BufferedInputStream(socket.getInputStream())) {
+      byte[] lineBytes;
+      while ((lineBytes = readLineBytes(in)) != null) {
         if (session.lifecycle().isClosing()) {
           break;
         }
-        processLine(session, line);
+        processLine(session, lineBytes);
         if (session.lifecycle().isClosing()) {
           break;
         }
@@ -146,13 +154,48 @@ public final class ConnectionHandler {
     }
   }
 
-  private void processLine(ClientSession session, String line) {
-    byte[] lineBytes = line.getBytes(StandardCharsets.UTF_8);
+  /**
+   * Reads raw bytes up to the next {@code \n} (an optional preceding {@code \r} is stripped),
+   * returning them without decoding. Returns {@code null} only at end-of-stream with no bytes read
+   * at all — a final, unterminated line at EOF is still returned, the same as {@code
+   * BufferedReader#readLine()} would.
+   */
+  private static byte[] readLineBytes(InputStream in) throws IOException {
+    ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+    int b;
+    while ((b = in.read()) != -1) {
+      if (b == '\n') {
+        break;
+      }
+      buffer.write(b);
+    }
+    if (b == -1 && buffer.size() == 0) {
+      return null;
+    }
+    byte[] bytes = buffer.toByteArray();
+    int length = bytes.length;
+    if (length > 0 && bytes[length - 1] == '\r') {
+      length--;
+    }
+    return length == bytes.length ? bytes : java.util.Arrays.copyOf(bytes, length);
+  }
+
+  private void processLine(ClientSession session, byte[] lineBytes) {
+    if (!Utf8Validator.isValidUtf8(lineBytes)) {
+      Replies.send(
+          session,
+          serverName.get(),
+          NumericReply.ERR_UNKNOWNCOMMAND,
+          "*",
+          "Malformed message (invalid UTF-8)");
+      return;
+    }
     if (lineBytes.length + 2 > MAX_LINE_LENGTH_BYTES) {
       Replies.send(
           session, serverName.get(), NumericReply.ERR_INPUTTOOLONG, "Input line was too long");
       return;
     }
+    String line = new String(lineBytes, StandardCharsets.UTF_8);
 
     Message message;
     try {

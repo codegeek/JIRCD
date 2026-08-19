@@ -19,7 +19,6 @@ import net.jircd.core.session.ClientSession;
 import net.jircd.protocol.Hostmask;
 import net.jircd.protocol.Message;
 import net.jircd.protocol.NumericReply;
-import net.jircd.protocol.Utf8Validator;
 
 /**
  * {@code USER} — one-shot per connection (FR-001): rejected with {@code 462 ERR_ALREADYREGISTRED}
@@ -61,16 +60,6 @@ public final class UserCommandHandler implements CommandHandler {
 
     String username = message.params().getFirst();
     String realname = message.params().get(3);
-
-    if (!Utf8Validator.isValidUtf8(realname.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
-      Replies.send(
-          session,
-          serverName.get(),
-          NumericReply.ERR_UNKNOWNCOMMAND,
-          "USER",
-          "Invalid UTF-8 in realname");
-      return;
-    }
 
     String ident = Hostmask.isValidUsernameContent(username) ? username : "user";
     if (ident.length() > 9) {

@@ -15,7 +15,6 @@
  */
 package net.jircd.serverextensions.admin;
 
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.function.IntSupplier;
@@ -32,7 +31,6 @@ import net.jircd.protocol.ChannelName;
 import net.jircd.protocol.Command;
 import net.jircd.protocol.Message;
 import net.jircd.protocol.NumericReply;
-import net.jircd.protocol.Utf8Validator;
 
 /**
  * {@code SAJOIN} — the sender's own session joins a channel via the same create-or-join path
@@ -78,10 +76,7 @@ public final class SajoinCommandHandler implements CommandHandler {
     }
     String name = message.params().getFirst();
 
-    boolean validGrammar =
-        ChannelName.isValid(name, channelNameMaxLength.getAsInt())
-            && Utf8Validator.isValidUtf8(name.getBytes(StandardCharsets.UTF_8));
-    if (!validGrammar) {
+    if (!ChannelName.isValid(name, channelNameMaxLength.getAsInt())) {
       Replies.send(
           session, serverName.get(), NumericReply.ERR_BADCHANMASK, name, "Bad Channel Mask");
       return;

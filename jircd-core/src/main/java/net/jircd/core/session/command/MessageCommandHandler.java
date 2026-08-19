@@ -28,7 +28,6 @@ import net.jircd.core.session.PresentedIdentity;
 import net.jircd.protocol.Hostmask;
 import net.jircd.protocol.NickMask;
 import net.jircd.protocol.NumericReply;
-import net.jircd.protocol.Utf8Validator;
 
 /**
  * {@code PRIVMSG}/{@code NOTICE} — channel and direct messaging (FR-004, FR-005). Builds one shared
@@ -73,18 +72,6 @@ public final class MessageCommandHandler implements CommandHandler {
     }
     String target = message.params().getFirst();
     String body = message.params().get(1);
-
-    if (!Utf8Validator.isValidUtf8(body.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
-      if (!notice) {
-        Replies.send(
-            session,
-            serverName.get(),
-            NumericReply.ERR_UNKNOWNCOMMAND,
-            commandName,
-            "Invalid UTF-8 in message body");
-      }
-      return;
-    }
 
     Set<ClientSession> recipients;
     if (target.startsWith("#")) {

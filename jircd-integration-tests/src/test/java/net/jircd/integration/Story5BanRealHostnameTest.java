@@ -20,28 +20,46 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.time.Duration;
 import org.junit.jupiter.api.Test;
 
-class Story7AdminLookupTest {
+/**
+ * T107: with {@code cloak} enabled (presenting a member's channel-visible hostmask as something
+ * other than their real value), a ban mask matching that member's *real*, uncloaked hostname/IP
+ * still mutes them — a ban is not evadable simply because a cloaking extension changes what other
+ * clients see (FR-062's dual real-vs-presented matching, US5 Acceptance Scenario 8).
+ */
+class Story5BanRealHostnameTest {
 
   @Test
-  void administratorLookupOfAnotherClientReturnsRealHostnameConsistentWithWhohost()
-      throws Exception {
+  void banMaskMatchingRealHostnameMutesDespiteCloakedPresentedHostname() throws Exception {
     try (TestServer server = TestServer.start(TestServer.adminAndCloakEnabledYaml());
+        RawIrcClient alice = RawIrcClient.connectPlaintext(server.plaintextPort());
         RawIrcClient bob = RawIrcClient.connectPlaintext(server.plaintextPort());
         RawIrcClient root = RawIrcClient.connectPlaintext(server.plaintextPort())) {
 
+      alice.registerAndAwaitWelcome("alice", "alice"); // operator, creates the channel
       bob.registerAndAwaitWelcome("bob", "bob");
       root.registerAndAwaitWelcome("root", "root");
       root.send("OPER " + TestServer.ADMIN_USERNAME + " :" + TestServer.ADMIN_PASSWORD);
       root.readUntil("381", Duration.ofSeconds(5));
+
+      alice.send("JOIN #lobby");
+      alice.readUntil("353", Duration.ofSeconds(5));
+      bob.send("JOIN #lobby");
+      String bobJoinEcho = bob.readUntil("353", Duration.ofSeconds(5));
 
       root.send("WHOHOST bob");
       String whohostNotice = root.readUntil("NOTICE", Duration.ofSeconds(5));
       String realHost =
           whohostNotice.substring(whohostNotice.indexOf("connecting from ") + 16).trim();
 
-      root.send("WHOIS bob");
-      String whoisUser = root.readUntil("311", Duration.ofSeconds(5));
-      assertThat(whoisUser).contains(realHost).doesNotContain("user-");
+      // bob's own presented hostmask (what alice actually sees in his JOIN) is cloaked — never
+      // the literal real value — confirming this test's ban mask cannot be matching by accident.
+      assertThat(bobJoinEcho).doesNotContain(realHost);
+
+      alice.send("MODE #lobby +b *!*@" + realHost);
+      alice.readUntil("MODE #lobby +b", Duration.ofSeconds(5));
+
+      bob.send("PRIVMSG #lobby :can you hear me");
+      assertThat(bob.readUntil("404", Duration.ofSeconds(5))).contains("404");
     }
   }
 }

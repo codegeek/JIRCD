@@ -59,4 +59,33 @@ class Story5PrivacyTest {
       assertThat(alice.readUntil("353", Duration.ofSeconds(5))).contains("#secret");
     }
   }
+
+  @Test
+  void secretChannelIsVisibleToAnAdministratorWhoIsNotAMember() throws Exception {
+    try (TestServer server = TestServer.start(TestServer.adminEnabledYaml());
+        RawIrcClient alice = RawIrcClient.connectPlaintext(server.plaintextPort());
+        RawIrcClient root = RawIrcClient.connectPlaintext(server.plaintextPort())) {
+
+      alice.registerAndAwaitWelcome("alice", "alice"); // operator
+      root.registerAndAwaitWelcome("root", "root"); // stays a non-member, gains admin privilege
+      root.send("OPER " + TestServer.ADMIN_USERNAME + " :" + TestServer.ADMIN_PASSWORD);
+      root.readUntil("381", Duration.ofSeconds(5));
+
+      alice.send("JOIN #secret");
+      alice.readUntil("353", Duration.ofSeconds(5));
+      alice.send("MODE #secret +s");
+      alice.readUntil("MODE #secret +s", Duration.ofSeconds(5));
+
+      root.send("TOPIC #secret");
+      assertThat(root.readUntil("331", Duration.ofSeconds(5))).contains("331"); // RPL_NOTOPIC
+
+      root.send("NAMES #secret");
+      assertThat(root.readUntil("353", Duration.ofSeconds(5)))
+          .contains("#secret")
+          .contains("alice");
+
+      root.send("LIST");
+      assertThat(root.readUntil("322", Duration.ofSeconds(5))).contains("#secret"); // RPL_LIST
+    }
+  }
 }

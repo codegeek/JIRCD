@@ -181,8 +181,7 @@ public final class JircdServerApplication {
         Command.NOTICE,
         new MessageCommandHandler(
             channelRegistry, nicknameRegistry, extensionRegistry, () -> serverName, true));
-    connectionHandler.registerHandler(
-        Command.QUIT, new QuitCommandHandler(disconnectCleanup, () -> serverName));
+    connectionHandler.registerHandler(Command.QUIT, new QuitCommandHandler(disconnectCleanup));
     connectionHandler.registerHandler(
         Command.TOPIC,
         new TopicCommandHandler(

@@ -61,6 +61,17 @@ public final class RawIrcClient implements AutoCloseable {
     out.flush();
   }
 
+  /**
+   * Writes a raw line verbatim (plus CR-LF), for tests that need to put invalid-UTF-8 byte
+   * sequences on the wire — impossible via {@link #send(String)} since a Java {@code String} cannot
+   * represent malformed UTF-8 in the first place.
+   */
+  public void sendRawBytes(byte[] line) throws IOException {
+    out.write(line);
+    out.write("\r\n".getBytes(StandardCharsets.UTF_8));
+    out.flush();
+  }
+
   public String readLine() throws IOException {
     return reader.readLine();
   }

@@ -27,7 +27,6 @@ import net.jircd.core.session.ClientSession;
 import net.jircd.protocol.Command;
 import net.jircd.protocol.Message;
 import net.jircd.protocol.NumericReply;
-import net.jircd.protocol.Utf8Validator;
 
 /**
  * {@code TOPIC} — view (any client, FR-041's discovery framing) or set (operator-only, FR-040) a
@@ -99,15 +98,6 @@ public final class TopicCommandHandler implements CommandHandler {
     }
 
     String newTopic = message.params().get(1);
-    if (!Utf8Validator.isValidUtf8(newTopic.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
-      Replies.send(
-          session,
-          serverName.get(),
-          NumericReply.ERR_UNKNOWNCOMMAND,
-          "TOPIC",
-          "Invalid UTF-8 in topic");
-      return;
-    }
     if (newTopic.length() > topicMaxLength.getAsInt()) {
       Replies.send(session, serverName.get(), NumericReply.ERR_INPUTTOOLONG, "Topic too long");
       return;

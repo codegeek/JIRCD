@@ -32,7 +32,6 @@ import net.jircd.protocol.Hostmask;
 import net.jircd.protocol.Message;
 import net.jircd.protocol.NickMask;
 import net.jircd.protocol.NumericReply;
-import net.jircd.protocol.Utf8Validator;
 
 /**
  * {@code JOIN} — create-or-join (FR-003), with the {@code JOIN}-gate check point FR-043 requires:
@@ -71,10 +70,7 @@ public final class JoinCommandHandler implements CommandHandler {
     }
     String name = message.params().getFirst();
 
-    boolean validGrammar =
-        ChannelName.isValid(name, channelNameMaxLength.getAsInt())
-            && Utf8Validator.isValidUtf8(name.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-    if (!validGrammar) {
+    if (!ChannelName.isValid(name, channelNameMaxLength.getAsInt())) {
       Replies.send(
           session, serverName.get(), NumericReply.ERR_BADCHANMASK, name, "Bad Channel Mask");
       return;

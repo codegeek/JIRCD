@@ -26,7 +26,6 @@ import net.jircd.core.session.PresentedIdentity;
 import net.jircd.protocol.Command;
 import net.jircd.protocol.Message;
 import net.jircd.protocol.NumericReply;
-import net.jircd.protocol.Utf8Validator;
 
 /**
  * {@code PART} — leaves a channel. {@code <reason>}, if given, is echoed (absent otherwise — no
@@ -61,16 +60,6 @@ public final class PartCommandHandler implements CommandHandler {
     }
     String channelName = message.params().getFirst();
     String reason = message.params().size() > 1 ? message.params().get(1) : null;
-    if (reason != null
-        && !Utf8Validator.isValidUtf8(reason.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
-      Replies.send(
-          session,
-          serverName.get(),
-          NumericReply.ERR_UNKNOWNCOMMAND,
-          "PART",
-          "Invalid UTF-8 in reason");
-      return;
-    }
 
     var found = channelRegistry.lookup(channelName);
     if (found.isEmpty() || !found.get().members().contains(session)) {

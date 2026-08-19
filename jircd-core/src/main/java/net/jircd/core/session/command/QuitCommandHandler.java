@@ -15,12 +15,9 @@
  */
 package net.jircd.core.session.command;
 
-import java.util.function.Supplier;
 import net.jircd.core.session.ClientSession;
 import net.jircd.core.session.DisconnectCleanup;
 import net.jircd.protocol.Message;
-import net.jircd.protocol.NumericReply;
-import net.jircd.protocol.Utf8Validator;
 
 /**
  * {@code QUIT} — usable at any time, including before registration completes (FR-060). Invokes
@@ -32,26 +29,14 @@ public final class QuitCommandHandler implements CommandHandler {
   private static final String DEFAULT_REASON = "Client Quit";
 
   private final DisconnectCleanup disconnectCleanup;
-  private final Supplier<String> serverName;
 
-  public QuitCommandHandler(DisconnectCleanup disconnectCleanup, Supplier<String> serverName) {
+  public QuitCommandHandler(DisconnectCleanup disconnectCleanup) {
     this.disconnectCleanup = disconnectCleanup;
-    this.serverName = serverName;
   }
 
   @Override
   public void handle(ClientSession session, Message message) {
     String reason = message.params().isEmpty() ? null : message.params().getFirst();
-    if (reason != null
-        && !Utf8Validator.isValidUtf8(reason.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
-      Replies.send(
-          session,
-          serverName.get(),
-          NumericReply.ERR_UNKNOWNCOMMAND,
-          "QUIT",
-          "Invalid UTF-8 in reason");
-      return;
-    }
     disconnectCleanup.cleanup(session, reason != null ? reason : DEFAULT_REASON);
   }
 }
