@@ -21,6 +21,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -69,6 +71,18 @@ public final class ConnectionHandler {
   private static final java.util.Set<Command> PRE_REGISTRATION_COMMANDS =
       java.util.Set.of(
           Command.NICK, Command.USER, Command.CAP, Command.PING, Command.PONG, Command.QUIT);
+
+  /**
+   * Reasonable, industry-standard keep-alive defaults (FR-039) — deliberately not exposed as an
+   * administrator-configurable {@code ServerConfiguration} setting (spec.md Assumptions), unlike
+   * {@link #rateLimit}'s thresholds.
+   */
+  private static final Duration KEEP_ALIVE_IDLE_INTERVAL = Duration.ofSeconds(30);
+
+  private static final Duration KEEP_ALIVE_TIMEOUT = Duration.ofSeconds(10);
+
+  /** How often the per-connection liveness loop re-evaluates {@link LivenessMonitor#checkNow()}. */
+  private static final Duration LIVENESS_CHECK_TICK = Duration.ofSeconds(5);
 
   private final ExtensionRegistry extensionRegistry;
   private final DisconnectCleanup disconnectCleanup;
@@ -131,6 +145,18 @@ public final class ConnectionHandler {
     session.attachWriter(writer);
     writer.setOnOverflow(() -> disconnectCleanup.cleanup(session, "Excess Flood"));
 
+    LivenessMonitor livenessMonitor =
+        new LivenessMonitor(
+            session,
+            disconnectCleanup,
+            KEEP_ALIVE_IDLE_INTERVAL,
+            KEEP_ALIVE_TIMEOUT,
+            Clock.systemUTC());
+    session.attachLivenessMonitor(livenessMonitor);
+    Thread.ofVirtual()
+        .name("liveness-" + connectionId)
+        .start(() -> runLivenessLoop(session, livenessMonitor, socket));
+
     try (BufferedInputStream in = new BufferedInputStream(socket.getInputStream())) {
       byte[] lineBytes;
       while ((lineBytes = readLineBytes(in)) != null) {
@@ -152,6 +178,35 @@ public final class ConnectionHandler {
     } finally {
       closeQuietly(socket);
     }
+  }
+
+  /**
+   * Ticks {@link LivenessMonitor#checkNow()} on its own virtual thread (FR-039) — the connection's
+   * main thread is blocked inside {@link #readLineBytes} waiting for socket input, so probing idle
+   * connections needs a separate thread. {@link DisconnectCleanup#cleanup} only closes the writer
+   * and marks the session {@code CLOSING}; it has no reference to the socket itself, so a
+   * disconnect triggered from any thread other than this connection's own main thread (a keep-alive
+   * timeout, here, or an outbound-queue overflow, {@code SessionWriter}'s {@code onOverflow}) would
+   * otherwise leave the main thread blocked in {@code read()} forever, waiting for input that will
+   * never arrive. This loop is this connection's single reliable backstop: whenever the session
+   * becomes {@code CLOSING} for any reason, it closes the socket directly, which unblocks that read
+   * and lets the main thread reach its own cleanup path.
+   */
+  private static void runLivenessLoop(
+      ClientSession session, LivenessMonitor livenessMonitor, Socket socket) {
+    while (!session.lifecycle().isClosing()) {
+      try {
+        Thread.sleep(LIVENESS_CHECK_TICK);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        break;
+      }
+      if (session.lifecycle().isClosing()) {
+        break;
+      }
+      livenessMonitor.checkNow();
+    }
+    closeQuietly(socket);
   }
 
   /**
