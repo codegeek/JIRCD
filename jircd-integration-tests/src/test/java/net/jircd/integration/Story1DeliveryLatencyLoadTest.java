@@ -41,12 +41,16 @@ class Story1DeliveryLatencyLoadTest {
       bob.send("JOIN #lobby");
       bob.readUntil("353", Duration.ofSeconds(5));
 
+      // Paced below the server's per-connection rate limit (FR-016, 20-token bucket refilling at
+      // 10/sec) — back-to-back sends would otherwise get silently dropped past the initial burst,
+      // timing out the readUntil waiting for an echo that never arrives (Story5BanCapTest).
       for (int i = 0; i < 50; i++) {
         Instant sentAt = Instant.now();
         alice.send("PRIVMSG #lobby :message " + i);
         bob.readUntil("message " + i, Duration.ofSeconds(2));
         Duration elapsed = Duration.between(sentAt, Instant.now());
         assertThat(elapsed).isLessThan(Duration.ofSeconds(1));
+        Thread.sleep(110);
       }
     }
   }

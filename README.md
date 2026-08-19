@@ -5,9 +5,11 @@
 A modular IRCv3 chat server, written in Java, designed to be extended
 without touching its core.
 
-> **Status: pre-implementation.** The project is currently a fully
-> specified and planned feature — no server code has been written yet.
-> See [Project status](#project-status) below.
+> **Status: implemented.** All six mandatory user stories from the initial
+> release plan (connect/chat, capability negotiation, extension toggling,
+> channel moderation, in-band administration, and user lookup) are built
+> and covered by integration tests. See [Project status](#project-status)
+> below.
 
 ## What is JIRCD?
 
@@ -55,9 +57,32 @@ performance) are recorded in the
 
 ## Getting started
 
-There's no buildable server yet — task breakdown and implementation are
-the next steps. Once implementation begins, build/run instructions will
-live here.
+Requires JDK 25.
+
+```bash
+./gradlew build                 # build + unit/integration tests + static analysis, all subprojects
+touch jircd-server/jircd.yaml   # a Server Configuration file must exist at this path; an empty
+                                 # file is valid and loads every default
+./gradlew :jircd-server:run     # starts the server on 6667 (plaintext) and 6697 (TLS)
+```
+
+Then connect with any IRC client, or a raw TCP tool for a quick check:
+
+```bash
+nc localhost 6667
+NICK alice
+USER alice 0 * :Alice
+JOIN #lobby
+PRIVMSG #lobby :hello
+```
+
+The empty config above enables no optional capabilities or extensions —
+only core protocol behavior (connecting, messaging, moderation, `WHOIS`/
+`WHO`). To turn on IRCv3 capabilities, hostname cloaking, or in-band
+administration (`OPER`, `REHASH`, etc.), see the full annotated schema in
+[`contracts/server-configuration.md`](specs/001-ircv3-server/contracts/server-configuration.md).
+For a guided, story-by-story walkthrough of every feature, see
+[`quickstart.md`](specs/001-ircv3-server/quickstart.md).
 
 ## Contributing
 

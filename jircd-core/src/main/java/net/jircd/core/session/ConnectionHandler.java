@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
+import net.jircd.core.config.ServerConfiguration;
 import net.jircd.core.extension.ConnectionAdmissionExtension;
 import net.jircd.core.extension.Extension;
 import net.jircd.core.extension.ExtensionRegistry;
@@ -62,6 +63,7 @@ public final class ConnectionHandler {
   private final ExtensionRegistry extensionRegistry;
   private final DisconnectCleanup disconnectCleanup;
   private final Supplier<String> serverName;
+  private final Supplier<ServerConfiguration.RateLimit> rateLimit;
   private final TagRenderer tagRenderer;
   private final Map<Command, CommandHandler> handlers = new ConcurrentHashMap<>();
   private final AtomicLong connectionIdCounter = new AtomicLong();
@@ -69,10 +71,12 @@ public final class ConnectionHandler {
   public ConnectionHandler(
       ExtensionRegistry extensionRegistry,
       DisconnectCleanup disconnectCleanup,
-      Supplier<String> serverName) {
+      Supplier<String> serverName,
+      Supplier<ServerConfiguration.RateLimit> rateLimit) {
     this.extensionRegistry = extensionRegistry;
     this.disconnectCleanup = disconnectCleanup;
     this.serverName = serverName;
+    this.rateLimit = rateLimit;
     this.tagRenderer = new CapabilityTagRenderer(extensionRegistry);
   }
 
@@ -96,8 +100,15 @@ public final class ConnectionHandler {
     }
 
     String connectionId = "c" + connectionIdCounter.incrementAndGet();
+    ServerConfiguration.RateLimit configuredRateLimit = rateLimit.get();
     ClientSession session =
-        new ClientSession(connectionId, remoteAddress, RateLimitBucket.withDefaults());
+        new ClientSession(
+            connectionId,
+            remoteAddress,
+            new RateLimitBucket(
+                configuredRateLimit.bucketSize(),
+                configuredRateLimit.refillRatePerSecond(),
+                java.time.Clock.systemUTC()));
     // Attached to the session and closed later via DisconnectCleanup, not in this method.
     @SuppressWarnings("PMD.CloseResource")
     SessionWriter writer;

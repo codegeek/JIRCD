@@ -154,11 +154,16 @@ public final class ConfigurationLoader {
   private static ServerConfiguration.RateLimit parseRateLimit(Object raw)
       throws ConfigurationException {
     if (raw == null) {
-      return new ServerConfiguration.RateLimit(20, 5.0);
+      return new ServerConfiguration.RateLimit(
+          ServerConfiguration.DEFAULT_RATE_LIMIT_BUCKET_SIZE,
+          ServerConfiguration.DEFAULT_RATE_LIMIT_REFILL_PER_SECOND);
     }
     Map<String, Object> map = (Map<String, Object>) raw;
-    Object bucketSize = map.getOrDefault("bucketSize", 20);
-    Object refillRate = map.getOrDefault("refillRatePerSecond", 5.0);
+    Object bucketSize =
+        map.getOrDefault("bucketSize", ServerConfiguration.DEFAULT_RATE_LIMIT_BUCKET_SIZE);
+    Object refillRate =
+        map.getOrDefault(
+            "refillRatePerSecond", ServerConfiguration.DEFAULT_RATE_LIMIT_REFILL_PER_SECOND);
     if (!(bucketSize instanceof Integer bucketSizeInt) || bucketSizeInt <= 0) {
       throw new ConfigurationException(
           "rateLimit.bucketSize must be a positive integer, got: " + bucketSize);

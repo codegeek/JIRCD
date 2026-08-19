@@ -13,6 +13,10 @@ out/
 # Logs produced by a running jircd-server (logback.xml)
 logs/
 
+# A locally-created Server Configuration file for `./gradlew :jircd-server:run` (default path,
+# JircdServerApplication#main) — administrator-specific, including credentials; never committed.
+jircd-server/jircd.yaml
+
 # Editors / OS
 *.iml
 .vscode/

@@ -399,11 +399,11 @@ independently.
 **Purpose**: Whole-system validation and documentation that spans
 multiple stories.
 
-- [ ] T153 [P] Load-tagged (`@Tag("load")`) test: the server sustains 1,000 simultaneous connections without channel message delivery delay exceeding SC-002's target (SC-003) in `jircd-integration-tests/src/test/java/net/jircd/integration/ConcurrentConnectionScaleLoadTest.java`
-- [ ] T154 [P] Load-tagged (`@Tag("load")`) test: during a sustained flood from one connection, delivery latency for other well-behaved clients does not increase beyond SC-002's target (SC-006) in `jircd-integration-tests/src/test/java/net/jircd/integration/RateLimitLoadTest.java`
-- [ ] T155 [P] Update `README.md`'s "Getting started" section with real build/run instructions now that the project builds (`./gradlew build`, `./gradlew :jircd-server:run`), replacing the pre-implementation placeholder
-- [ ] T156 Run the full `specs/001-ircv3-server/quickstart.md` validation pass manually against a running `./gradlew :jircd-server:run` instance, covering Stories 1, 2, 4, 5, 6, and 7 end-to-end (constitution UX Consistency principle's required manual usage-scenario check)
-- [ ] T157 [P] Code cleanup pass: remove any dead code/TODOs introduced during implementation and confirm `./gradlew build` runs Spotless and SpotBugs clean across all subprojects (constitution Code Quality principle)
+- [X] T153 [P] Load-tagged (`@Tag("load")`) test: the server sustains 1,000 simultaneous connections without channel message delivery delay exceeding SC-002's target (SC-003) in `jircd-integration-tests/src/test/java/net/jircd/integration/ConcurrentConnectionScaleLoadTest.java`
+- [X] T154 [P] Load-tagged (`@Tag("load")`) test: during a sustained flood from one connection, delivery latency for other well-behaved clients does not increase beyond SC-002's target (SC-006) in `jircd-integration-tests/src/test/java/net/jircd/integration/RateLimitLoadTest.java`
+- [X] T155 [P] Update `README.md`'s "Getting started" section with real build/run instructions now that the project builds (`./gradlew build`, `./gradlew :jircd-server:run`), replacing the pre-implementation placeholder
+- [X] T156 Run the full `specs/001-ircv3-server/quickstart.md` validation pass manually against a running `./gradlew :jircd-server:run` instance, covering Stories 1, 2, 4, 5, 6, and 7 end-to-end (constitution UX Consistency principle's required manual usage-scenario check)
+- [X] T157 [P] Code cleanup pass: remove any dead code/TODOs introduced during implementation and confirm `./gradlew build` runs Spotless and SpotBugs clean across all subprojects (constitution Code Quality principle)
 
 ---
 

@@ -18,14 +18,19 @@ end-to-end — it does not contain implementation code.
 ## Setup
 
 ```bash
-./gradlew build               # compiles all subprojects (jircd-protocol, jircd-core,
-                               # jircd-capabilities:*, jircd-server-extensions:*, jircd-server),
-                               # runs unit tests + static analysis
-./gradlew :jircd-server:run   # starts the server using the default config (see contracts/server-configuration.md)
+./gradlew build                    # compiles all subprojects (jircd-protocol, jircd-core,
+                                    # jircd-capabilities:*, jircd-server-extensions:*, jircd-server),
+                                    # runs unit tests + static analysis
+touch jircd-server/jircd.yaml      # a Server Configuration file MUST exist at this path (the
+                                    # default `./gradlew :jircd-server:run` working directory) —
+                                    # an empty file is valid and loads every default (FR-012)
+./gradlew :jircd-server:run        # starts the server using that config
 ```
 
-Default listeners: `6667` (plaintext) and `6697` (TLS), per the example
-schema in `contracts/server-configuration.md`.
+Default listeners: `6667` (plaintext) and `6697` (TLS). To exercise
+Story 6 (in-band administration), replace the empty file above with the
+full example schema in `contracts/server-configuration.md`, enabling
+`admin` and setting `administratorCredentials` to a real password hash.
 
 ## Story 1 — Connect and Chat in Real Time
 

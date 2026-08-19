@@ -109,11 +109,15 @@ public final class JircdServerApplication {
         configuration.topicMaxLength(),
         configuration.maxModesPerCommand());
 
-    this.connectionHandler =
-        new ConnectionHandler(extensionRegistry, disconnectCleanup, () -> serverName);
-    registerStory1Handlers();
-
     this.reloader = new ConfigurationReloader(configPath, loader, extensionRegistry, configuration);
+
+    this.connectionHandler =
+        new ConnectionHandler(
+            extensionRegistry,
+            disconnectCleanup,
+            () -> serverName,
+            () -> reloader.current().rateLimit());
+    registerStory1Handlers();
 
     extensionRegistry.attachContext(
         new net.jircd.core.extension.ServerContext(
@@ -156,7 +160,7 @@ public final class JircdServerApplication {
         new NickCommandHandler(
             nicknameRegistry,
             () -> serverName,
-            () -> configuration.nicknameMaxLength(),
+            () -> reloader.current().nicknameMaxLength(),
             registrationCompletion));
     connectionHandler.registerHandler(
         Command.USER, new UserCommandHandler(() -> serverName, registrationCompletion));
@@ -166,7 +170,7 @@ public final class JircdServerApplication {
             channelRegistry,
             extensionRegistry,
             () -> serverName,
-            () -> configuration.channelNameMaxLength()));
+            () -> reloader.current().channelNameMaxLength()));
     connectionHandler.registerHandler(
         Command.PART, new PartCommandHandler(channelRegistry, extensionRegistry, () -> serverName));
     connectionHandler.registerHandler(
@@ -185,7 +189,7 @@ public final class JircdServerApplication {
             channelRegistry,
             extensionRegistry,
             () -> serverName,
-            () -> configuration.topicMaxLength()));
+            () -> reloader.current().topicMaxLength()));
     connectionHandler.registerHandler(
         Command.NAMES,
         new NamesCommandHandler(channelRegistry, extensionRegistry, () -> serverName));
@@ -201,7 +205,7 @@ public final class JircdServerApplication {
             nicknameRegistry,
             extensionRegistry,
             () -> serverName,
-            () -> configuration.whoMaskEnabled()));
+            () -> reloader.current().whoMaskEnabled()));
     connectionHandler.registerHandler(Command.PING, PingPongCommandHandler.ping());
     connectionHandler.registerHandler(Command.PONG, PingPongCommandHandler.pong());
     connectionHandler.registerHandler(
@@ -228,7 +232,7 @@ public final class JircdServerApplication {
             channelRegistry,
             extensionRegistry,
             () -> serverName,
-            () -> configuration.maxModesPerCommand());
+            () -> reloader.current().maxModesPerCommand());
     connectionHandler.registerHandler(
         Command.MODE,
         (session, message) -> {

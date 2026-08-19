@@ -16,6 +16,7 @@
 package net.jircd.core.session;
 
 import java.time.Clock;
+import net.jircd.core.config.ServerConfiguration;
 
 /**
  * Per-connection token bucket rate limiter (FR-016, research.md "Rate limiting"). Protects overall
@@ -41,7 +42,10 @@ public final class RateLimitBucket {
   }
 
   public static RateLimitBucket withDefaults() {
-    return new RateLimitBucket(20, 10.0, Clock.systemUTC());
+    return new RateLimitBucket(
+        ServerConfiguration.DEFAULT_RATE_LIMIT_BUCKET_SIZE,
+        ServerConfiguration.DEFAULT_RATE_LIMIT_REFILL_PER_SECOND,
+        Clock.systemUTC());
   }
 
   /** Attempts to consume one token; returns {@code false} if the bucket is exhausted. */

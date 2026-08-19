@@ -50,4 +50,9 @@ public record ServerConfiguration(
   public static final int LENGTH_CEILING = 400;
   public static final int MAX_MODES_CEILING = 20;
   public static final int OPER_FAILURE_THRESHOLD_CEILING = 20;
+
+  /** The single source of truth for {@link RateLimit}'s default — never redefine this elsewhere. */
+  public static final int DEFAULT_RATE_LIMIT_BUCKET_SIZE = 20;
+
+  public static final double DEFAULT_RATE_LIMIT_REFILL_PER_SECOND = 10.0;
 }

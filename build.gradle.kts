@@ -70,12 +70,19 @@ subprojects {
         "testRuntimeOnly"(rootProject.libs.junit.platform.launcher)
     }
 
+    // Scoped to the built-in "test" task specifically, not tasks.withType<Test>().configureEach —
+    // that would also reach the "loadTest" task registered below and conflict with its own
+    // includeTags("load"), which JUnit Platform resolves by excluding the tag from both, silently
+    // leaving "loadTest" with nothing to run.
     tasks.withType<Test>().configureEach {
-        useJUnitPlatform {
-            excludeTags("load")
-        }
         testLogging {
             events("passed", "skipped", "failed")
+        }
+    }
+
+    tasks.named<Test>("test") {
+        useJUnitPlatform {
+            excludeTags("load")
         }
     }
 
@@ -89,9 +96,6 @@ subprojects {
         }
         testClassesDirs = testSourceSet.get().output.classesDirs
         classpath = testSourceSet.get().runtimeClasspath
-        testLogging {
-            events("passed", "skipped", "failed")
-        }
     }
 
     configure<com.diffplug.gradle.spotless.SpotlessExtension> {
