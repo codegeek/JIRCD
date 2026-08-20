@@ -233,8 +233,8 @@ tasks.register<JacocoReport>("testCodeCoverageReport") {
 
 sonar {
     properties {
-        property("sonar.projectKey", "codegeek_JIRCD")
-        property("sonar.organization", "codegeek")
+        property("sonar.projectKey", "jircd_jircd-server")
+        property("sonar.organization", "jircd")
     }
 }
 

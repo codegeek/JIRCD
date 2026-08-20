@@ -20,7 +20,7 @@ privately using one of these channels:
 
 1. **[GitHub Security Advisories](../../security/advisories/new)**
    (preferred) — lets you disclose privately and coordinate a fix.
-2. Email **github@codegeek.dev** with details.
+2. Email **contact@jircd.org** with details.
 
 Please include as much of the following as you can:
 

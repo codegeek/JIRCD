@@ -60,7 +60,7 @@ acting as an appointed representative at an online or offline event.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the project maintainer at **github@codegeek.dev**. All
+reported to the project maintainer at **contact@jircd.org**. All
 complaints will be reviewed and investigated promptly and fairly.
 
 All project maintainers are obligated to respect the privacy and security

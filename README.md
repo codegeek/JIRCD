@@ -109,7 +109,7 @@ bin/jircd-server
 To produce a distributable archive instead (e.g. for attaching to a
 release), use `distZip` or `distTar`, which land in
 `jircd-server/build/distributions/`. See
-[Releases](https://github.com/codegeek/JIRCD/releases) for prebuilt
+[Releases](https://github.com/jircd/jircd-server/releases) for prebuilt
 archives — pushing a `vX.Y.Z` tag builds and publishes these automatically
 (see [`.github/workflows/release.yml`](.github/workflows/release.yml)).
 
