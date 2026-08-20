@@ -266,6 +266,18 @@ non-negotiated client in the same channel receives nothing — independent of St
 
 ---
 
+## Phase 9: Convergence
+
+- [X] T031 Actually perform the manual `specs/002-extended-irc-commands/quickstart.md`
+  validation pass against a running `./gradlew :jircd-server:run` instance, with a real raw
+  TCP client (`nc`/`RawIrcClient`-style, or a real IRC client) walking through all five
+  stories end-to-end — T030 above was marked complete on the strength of the automated test
+  suite alone, which contradicts Constitution III's explicit requirement that "passing
+  automated tests alone is not sufficient evidence of a working feature" per Constitution
+  III (contradicts)
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
