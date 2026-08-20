@@ -64,6 +64,13 @@ public final class AdminExtension implements ServerExtension {
     registrar.register(
         Command.SAMODE,
         new SamodeCommandHandler(context.channelRegistry(), extensionRegistry, serverName));
+    registrar.register(
+        Command.KILL,
+        new KillCommandHandler(
+            context.nicknameRegistry(),
+            extensionRegistry,
+            serverName,
+            context.disconnectCleanup()));
   }
 
   @Override

@@ -16,6 +16,7 @@
 package net.jircd.core.session;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -24,18 +25,38 @@ import java.util.UUID;
  * capability-agnostic by construction — capability-dependent decoration ({@code
  * message-tags}/{@code server-time}) happens per-recipient at drain time in {@link SessionWriter},
  * never here.
+ *
+ * @param clientTags the sender's own tags (e.g. a {@code TAGMSG}'s vendor tags,
+ *     002-extended-irc-commands FR-020), empty for every other command — kept separate from
+ *     capability-contributed tags ({@code msgid}/{@code time}) so a client-supplied tag can never
+ *     clobber a server-reserved one (merge order in {@link SessionWriter})
  */
 public record OutboundMessage(
     String senderPresentedForm,
     String command,
     String target,
     String body,
+    Map<String, String> clientTags,
     Instant sentAt,
     UUID messageId) {
+
+  public OutboundMessage {
+    clientTags = Map.copyOf(clientTags);
+  }
 
   public static OutboundMessage now(
       String senderPresentedForm, String command, String target, String body) {
     return new OutboundMessage(
-        senderPresentedForm, command, target, body, Instant.now(), UUID.randomUUID());
+        senderPresentedForm, command, target, body, Map.of(), Instant.now(), UUID.randomUUID());
+  }
+
+  public static OutboundMessage now(
+      String senderPresentedForm,
+      String command,
+      String target,
+      String body,
+      Map<String, String> clientTags) {
+    return new OutboundMessage(
+        senderPresentedForm, command, target, body, clientTags, Instant.now(), UUID.randomUUID());
   }
 }

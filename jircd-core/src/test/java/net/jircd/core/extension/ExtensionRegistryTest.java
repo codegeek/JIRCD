@@ -28,6 +28,7 @@ import net.jircd.core.config.ServerConfiguration;
 import net.jircd.core.session.ChannelRegistry;
 import net.jircd.core.session.DisconnectCleanup;
 import net.jircd.core.session.NicknameRegistry;
+import net.jircd.core.session.WhowasHistory;
 import org.junit.jupiter.api.Test;
 
 class ExtensionRegistryTest {
@@ -81,7 +82,8 @@ class ExtensionRegistryTest {
             ServerConfiguration.DEFAULT_TOPIC_MAX_LENGTH,
             true,
             ServerConfiguration.DEFAULT_MAX_MODES_PER_COMMAND,
-            ServerConfiguration.DEFAULT_OPER_FAILURE_THRESHOLD);
+            ServerConfiguration.DEFAULT_OPER_FAILURE_THRESHOLD,
+            ServerConfiguration.DEFAULT_WHOWAS_HISTORY_SIZE);
     registry.attachContext(
         new ServerContext(
             nicknameRegistry,
@@ -93,7 +95,8 @@ class ExtensionRegistryTest {
                 new ConfigurationLoader(Set.of(), Set.of()),
                 registry,
                 configuration),
-            new DisconnectCleanup(nicknameRegistry, channelRegistry),
+            new DisconnectCleanup(
+                nicknameRegistry, channelRegistry, new WhowasHistory(() -> 100), registry),
             (command, handler) -> {}));
     return registry;
   }

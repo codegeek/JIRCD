@@ -31,7 +31,8 @@ disconnection is a point-in-time event, not a thing that changes afterward.
 |---|---|---|
 | `nickname` | string | The nickname this session held at the moment it disconnected; the lookup key `WHOWAS` matches against (case-insensitively, the same casemapping every other nickname comparison on this server already uses — `001-ircv3-server` FR-052). |
 | `ident` | string | Same value `UserIdentity.username`/the wire hostmask's `ident` field held at disconnection (`001-ircv3-server` data-model.md `UserIdentity`). |
-| `hostname` | string | The *real* hostname/IP, not a cloaked presentation — matching `WHOHOST`'s existing real-value-only convention (`001-ircv3-server` FR-032), since there is no longer a live session whose presented-vs-real distinction (FR-030/FR-038) could apply. |
+| `realHostname` | string | The connection's real hostname/IP, regardless of cloaking — shown only to an administrator querying `WHOWAS`, mirroring `WHOIS`/`WHO`'s own FR-038 resolution (`001-ircv3-server`), not `WHOHOST`'s always-real convention: unlike `WHOHOST`, `WHOWAS` is not admin-gated, so a non-administrator MUST NOT be able to read it. |
+| `presentedHostname` | string | The value `cloak` (if enabled) was displaying for this session at the moment it disconnected — a snapshot taken then, not a live recomputation against whatever `cloak` state happens to be active whenever `WHOWAS` is later queried (there is no longer a live session to recompute against). Shown to every non-administrator requester. |
 | `realname` | string | Same value `UserIdentity.realname` held at disconnection. |
 | `disconnectedAt` | instant | Used only to order entries newest-first within `WhowasHistory`; never itself displayed to a client. |
 

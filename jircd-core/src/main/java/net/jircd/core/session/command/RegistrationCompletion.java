@@ -86,15 +86,25 @@ public final class RegistrationCompletion {
         NumericReply.RPL_MYINFO,
         List.of(server, serverVersion, userModeLetters, channelModeLetters));
 
-    SupportedFeatures supportedFeatures = extensionRegistry.supportedFeatures();
-    List<String> isupportParams = new java.util.ArrayList<>(supportedFeatures.tokens());
-    isupportParams.add("are supported by this server");
-    sendRaw(session, server, NumericReply.RPL_ISUPPORT, isupportParams);
+    sendIsupport(session, server, extensionRegistry);
 
     Replies.send(session, server, NumericReply.ERR_NOMOTD, "MOTD File is missing");
   }
 
-  private void sendRaw(
+  /**
+   * Renders and sends the current {@code ISUPPORT} burst — shared by the registration burst above
+   * and {@code VERSION} (002-extended-irc-commands, research.md "VERSION + ISUPPORT reuse"), so the
+   * two never drift into two independently-maintained renderings of the same wire format.
+   */
+  public static void sendIsupport(
+      ClientSession session, String server, ExtensionRegistry extensionRegistry) {
+    SupportedFeatures supportedFeatures = extensionRegistry.supportedFeatures();
+    List<String> isupportParams = new java.util.ArrayList<>(supportedFeatures.tokens());
+    isupportParams.add("are supported by this server");
+    sendRaw(session, server, NumericReply.RPL_ISUPPORT, isupportParams);
+  }
+
+  private static void sendRaw(
       ClientSession session, String server, NumericReply numeric, List<String> trailingParams) {
     List<String> params = new java.util.ArrayList<>();
     params.add(Replies.target(session));

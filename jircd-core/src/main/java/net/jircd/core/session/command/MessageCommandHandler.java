@@ -73,44 +73,35 @@ public final class MessageCommandHandler implements CommandHandler {
     String target = message.params().getFirst();
     String body = message.params().get(1);
 
-    Set<ClientSession> recipients;
-    if (target.startsWith("#")) {
-      var channel = channelRegistry.lookup(target);
-      if (channel.isEmpty() || !passesSendGate(channel.get(), session)) {
-        if (!notice) {
-          Replies.send(
-              session,
-              serverName.get(),
-              NumericReply.ERR_CANNOTSENDTOCHAN,
-              target,
-              "Cannot send to channel");
-        }
-        return;
+    Set<ClientSession> recipients =
+        resolveRecipients(
+            channelRegistry,
+            nicknameRegistry,
+            extensionRegistry,
+            serverName,
+            session,
+            target,
+            !notice);
+    if (recipients.isEmpty()) {
+      return;
+    }
+    if (!target.startsWith("#")) {
+      // Direct-message form only (002-extended-irc-commands FR-007) — a channel target's away
+      // members, if any, are not individually called out.
+      ClientSession recipient = recipients.iterator().next();
+      if (recipient.isAway()) {
+        Replies.send(
+            session,
+            serverName.get(),
+            NumericReply.RPL_AWAY,
+            recipient.nickname(),
+            recipient.awayReason());
       }
-      recipients = channel.get().members();
-    } else {
-      var recipient = nicknameRegistry.lookup(target);
-      if (recipient.isEmpty()) {
-        if (!notice) {
-          Replies.send(
-              session,
-              serverName.get(),
-              NumericReply.ERR_NOSUCHNICK,
-              target,
-              "No such nick/channel");
-        }
-        return;
-      }
-      recipients = Set.of(recipient.get());
     }
 
     String presentedForm = PresentedIdentity.presentedForm(session, extensionRegistry);
     OutboundMessage outbound = OutboundMessage.now(presentedForm, commandName, target, body);
-    boolean echoToSender =
-        extensionRegistry.enabled().stream()
-            .filter(net.jircd.core.extension.CapabilityExtension.class::isInstance)
-            .map(net.jircd.core.extension.CapabilityExtension.class::cast)
-            .anyMatch(capability -> capability.includeSenderInFanOut(session));
+    boolean echoToSender = includeSenderInFanOut(extensionRegistry, session);
     for (ClientSession recipient : recipients) {
       if (recipient == session && !echoToSender) {
         continue; // echo-message (Story 2) decides whether the sender sees its own message
@@ -122,13 +113,63 @@ public final class MessageCommandHandler implements CommandHandler {
   }
 
   /**
+   * Resolves {@code target} into its recipient set for {@code PRIVMSG}/{@code NOTICE}/{@code
+   * TAGMSG} alike (002-extended-irc-commands FR-022, research.md "TAGMSG delivery reuse"): a
+   * channel name must exist and pass the {@code SEND} gate below, a nickname must be connected.
+   * Returns an empty set on failure, having already sent the appropriate error to {@code session}
+   * when {@code reportErrors} is {@code true} ({@code NOTICE}-style silence otherwise).
+   */
+  static Set<ClientSession> resolveRecipients(
+      ChannelRegistry channelRegistry,
+      NicknameRegistry nicknameRegistry,
+      ExtensionRegistry extensionRegistry,
+      Supplier<String> serverName,
+      ClientSession session,
+      String target,
+      boolean reportErrors) {
+    if (target.startsWith("#")) {
+      var channel = channelRegistry.lookup(target);
+      if (channel.isEmpty() || !passesSendGate(channel.get(), session, extensionRegistry)) {
+        if (reportErrors) {
+          Replies.send(
+              session,
+              serverName.get(),
+              NumericReply.ERR_CANNOTSENDTOCHAN,
+              target,
+              "Cannot send to channel");
+        }
+        return Set.of();
+      }
+      return channel.get().members();
+    }
+    var recipient = nicknameRegistry.lookup(target);
+    if (recipient.isEmpty()) {
+      if (reportErrors) {
+        Replies.send(
+            session, serverName.get(), NumericReply.ERR_NOSUCHNICK, target, "No such nick/channel");
+      }
+      return Set.of();
+    }
+    return Set.of(recipient.get());
+  }
+
+  /** Whether {@code echo-message} (Story 2) wants {@code session} included in its own fan-out. */
+  static boolean includeSenderInFanOut(ExtensionRegistry extensionRegistry, ClientSession session) {
+    return extensionRegistry.enabled().stream()
+        .filter(net.jircd.core.extension.CapabilityExtension.class::isInstance)
+        .map(net.jircd.core.extension.CapabilityExtension.class::cast)
+        .anyMatch(capability -> capability.includeSenderInFanOut(session));
+  }
+
+  /**
    * The {@code SEND}-gate check point FR-043 requires: every currently-recognized flag whose {@code
    * gates} includes {@code SEND}, checked independently — {@code members-only} requires membership;
    * {@code moderated} requires operator or voice (FR-045); {@code ban-mask} requires neither the
    * sender's presented nor real identity to match any active ban (FR-062, dual-matched to resist
    * {@code cloak} evasion) — muting a matched sender without removing them from members.
    */
-  private boolean passesSendGate(Channel channel, ClientSession session) {
+  private static boolean passesSendGate(
+      Channel channel, ClientSession session, ExtensionRegistry extensionRegistry) {
     if (channel.activeModes().contains(CoreChannelModes.MEMBERS_ONLY)
         && !channel.members().contains(session)) {
       return false;

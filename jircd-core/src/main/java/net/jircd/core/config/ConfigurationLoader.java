@@ -81,6 +81,12 @@ public final class ConfigurationLoader {
             "operFailureThreshold",
             ServerConfiguration.DEFAULT_OPER_FAILURE_THRESHOLD,
             ServerConfiguration.OPER_FAILURE_THRESHOLD_CEILING);
+    int whowasHistorySize =
+        positiveIntWithinCeiling(
+            root,
+            "whowasHistorySize",
+            ServerConfiguration.DEFAULT_WHOWAS_HISTORY_SIZE,
+            ServerConfiguration.WHOWAS_HISTORY_SIZE_CEILING);
 
     boolean whoMaskEnabled =
         root.containsKey("whoMaskEnabled") ? asBoolean(root.get("whoMaskEnabled")) : true;
@@ -114,7 +120,8 @@ public final class ConfigurationLoader {
         topicMaxLength,
         whoMaskEnabled,
         maxModesPerCommand,
-        operFailureThreshold);
+        operFailureThreshold,
+        whowasHistorySize);
   }
 
   private static int positiveIntWithinCeiling(

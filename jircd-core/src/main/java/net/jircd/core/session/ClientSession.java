@@ -43,6 +43,7 @@ public final class ClientSession {
   private volatile String nickname;
   private volatile String ident;
   private volatile String realname;
+  private volatile String awayReason;
   private final AtomicBoolean administratorPrivilege = new AtomicBoolean(false);
   private final AtomicInteger failedOperAttempts = new AtomicInteger(0);
   private final AtomicReference<Instant> lastLivenessAt = new AtomicReference<>(Instant.now());
@@ -111,6 +112,24 @@ public final class ClientSession {
 
   public void setRealname(String realname) {
     this.realname = realname;
+  }
+
+  /**
+   * Non-{@code null} while away, holding the reason; {@code null} otherwise. Presence, not a
+   * separate boolean, is the away/not-away signal — the same pattern {@link #ident} already uses as
+   * its own registration-state signal (002-extended-irc-commands FR-004/FR-005/FR-006).
+   */
+  public String awayReason() {
+    return awayReason;
+  }
+
+  public boolean isAway() {
+    return awayReason != null;
+  }
+
+  /** {@code null} clears away status; any other value sets/replaces the reason. */
+  public void setAwayReason(String awayReason) {
+    this.awayReason = awayReason;
   }
 
   public Set<String> negotiatedCapabilities() {

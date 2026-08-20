@@ -18,6 +18,7 @@ package net.jircd.core.session;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
@@ -38,6 +39,18 @@ public final class SessionWriter implements AutoCloseable {
 
   private static final Logger LOG = LoggerFactory.getLogger(SessionWriter.class);
   private static final int QUEUE_CAPACITY = 256;
+
+  /**
+   * Sentinel that tells {@link #drainLoop} to stop after everything queued ahead of it has been
+   * written — never itself run. Lets {@link #close} guarantee a message enqueued just before it
+   * (e.g. {@code KILL}'s {@code ERROR} line to a self-targeted admin, where the same thread that
+   * enqueues it also closes the connection moments later with no other delay) is actually written
+   * before the socket goes away, instead of racing an immediate {@code interrupt()} against the
+   * writer thread's next queue drain.
+   */
+  private static final Runnable POISON_PILL = () -> {};
+
+  private static final Duration CLOSE_DRAIN_TIMEOUT = Duration.ofSeconds(2);
 
   private final ClientSession session;
   private final OutputStream out;
@@ -87,7 +100,10 @@ public final class SessionWriter implements AutoCloseable {
   }
 
   private void writeFanOutMessage(OutboundMessage message) {
-    Map<String, String> tags = tagRenderer.render(session, message);
+    // Client-supplied tags (e.g. a TAGMSG's vendor tags) merge first so a capability-contributed,
+    // server-reserved tag (msgid/time) always wins on key conflict — never the reverse.
+    Map<String, String> tags = new java.util.LinkedHashMap<>(message.clientTags());
+    tags.putAll(tagRenderer.render(session, message));
     java.util.List<String> params =
         message.body() != null
             ? java.util.List.of(message.target(), message.body())
@@ -116,6 +132,9 @@ public final class SessionWriter implements AutoCloseable {
     try {
       while (!Thread.currentThread().isInterrupted()) {
         Runnable task = queue.take();
+        if (task == POISON_PILL) {
+          return;
+        }
         task.run();
       }
     } catch (InterruptedException e) {
@@ -123,8 +142,25 @@ public final class SessionWriter implements AutoCloseable {
     }
   }
 
+  /**
+   * Lets everything already queued drain before this session's writer thread stops — enqueues
+   * {@link #POISON_PILL} and waits (bounded) for the writer thread to reach it, rather than
+   * interrupting immediately, so a message queued just before {@code close()} (e.g. {@code KILL}'s
+   * {@code ERROR} line) is guaranteed written first, not racing the writer thread's next drain. If
+   * the queue is already full — the same "we're overwhelmed, drop what's left" case an overflow
+   * disconnect already accepts — falls back to an immediate interrupt rather than blocking here.
+   */
   @Override
   public void close() {
-    writerThread.interrupt();
+    if (queue.offer(POISON_PILL)) {
+      try {
+        writerThread.join(CLOSE_DRAIN_TIMEOUT.toMillis());
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
+    }
+    if (writerThread.isAlive()) {
+      writerThread.interrupt();
+    }
   }
 }

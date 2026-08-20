@@ -138,7 +138,7 @@ public final class WhoCommandHandler implements CommandHandler {
             ? target.realHostname()
             : PresentedIdentity.displayHostname(target, extensionRegistry);
 
-    StringBuilder flags = new StringBuilder("H");
+    StringBuilder flags = new StringBuilder(target.isAway() ? "G" : "H");
     if (target.userModes().contains(UserMode.OPERATOR)) {
       flags.append('*');
     }

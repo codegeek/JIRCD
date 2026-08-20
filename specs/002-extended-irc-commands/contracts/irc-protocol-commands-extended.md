@@ -99,6 +99,13 @@ whose Full Numeric Catalog already reserves every numeric this feature claims (`
   later.
 - `WHOWAS` accepts no count parameter in this release (spec.md Assumptions) — always the
   single most recent entry, unlike RFC 2812's optional count/server parameters.
+- `314 RPL_WHOWASUSER`'s hostname field follows the same FR-038 resolution `WHOIS`/`WHO`
+  already use — the real hostname/IP for an administrator requester, the presented
+  (cloaked, if `cloak` was active) value snapshotted at disconnect time for everyone else.
+  `WHOWAS` is not admin-gated like `WHOHOST`, so it MUST NOT default to always showing the
+  real value the way `WHOHOST` deliberately does — that would leak a disconnected client's
+  real hostname/IP to any registered user, defeating `cloak` for anyone who happens to
+  disconnect.
 
 ## Tag-Only Messages
 

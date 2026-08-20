@@ -82,6 +82,11 @@ public final class WhoisCommandHandler implements CommandHandler {
         "*",
         target.realname());
 
+    if (target.isAway()) {
+      Replies.send(
+          session, serverName.get(), NumericReply.RPL_AWAY, target.nickname(), target.awayReason());
+    }
+
     if (target.userModes().contains(UserMode.OPERATOR)) {
       Replies.send(
           session,

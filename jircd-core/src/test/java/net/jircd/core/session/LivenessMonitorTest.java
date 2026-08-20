@@ -84,7 +84,11 @@ class LivenessMonitorTest {
     MutableClock clock = new MutableClock(Instant.now());
     ClientSession session = newSession(clock);
     DisconnectCleanup cleanup =
-        new DisconnectCleanup(new NicknameRegistry(), new ChannelRegistry());
+        new DisconnectCleanup(
+            new NicknameRegistry(),
+            new ChannelRegistry(),
+            new WhowasHistory(() -> 100),
+            new net.jircd.core.extension.ExtensionRegistry());
     LivenessMonitor monitor =
         new LivenessMonitor(
             session, cleanup, Duration.ofSeconds(60), Duration.ofSeconds(30), clock);
@@ -101,7 +105,11 @@ class LivenessMonitorTest {
     MutableClock clock = new MutableClock(Instant.now());
     ClientSession session = newSession(clock);
     DisconnectCleanup cleanup =
-        new DisconnectCleanup(new NicknameRegistry(), new ChannelRegistry());
+        new DisconnectCleanup(
+            new NicknameRegistry(),
+            new ChannelRegistry(),
+            new WhowasHistory(() -> 100),
+            new net.jircd.core.extension.ExtensionRegistry());
     LivenessMonitor monitor =
         new LivenessMonitor(
             session, cleanup, Duration.ofSeconds(60), Duration.ofSeconds(30), clock);
@@ -122,7 +130,11 @@ class LivenessMonitorTest {
     MutableClock clock = new MutableClock(Instant.now());
     ClientSession session = newSession(clock);
     DisconnectCleanup cleanup =
-        new DisconnectCleanup(new NicknameRegistry(), new ChannelRegistry());
+        new DisconnectCleanup(
+            new NicknameRegistry(),
+            new ChannelRegistry(),
+            new WhowasHistory(() -> 100),
+            new net.jircd.core.extension.ExtensionRegistry());
     LivenessMonitor monitor =
         new LivenessMonitor(
             session, cleanup, Duration.ofSeconds(60), Duration.ofSeconds(30), clock);

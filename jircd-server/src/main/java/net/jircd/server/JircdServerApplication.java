@@ -38,20 +38,27 @@ import net.jircd.core.session.DisconnectCleanup;
 import net.jircd.core.session.NicknameRegistry;
 import net.jircd.core.session.PlaintextListener;
 import net.jircd.core.session.TlsListener;
+import net.jircd.core.session.WhowasHistory;
+import net.jircd.core.session.command.AwayCommandHandler;
 import net.jircd.core.session.command.CapCommandHandler;
 import net.jircd.core.session.command.JoinCommandHandler;
 import net.jircd.core.session.command.ListCommandHandler;
+import net.jircd.core.session.command.LusersCommandHandler;
 import net.jircd.core.session.command.MessageCommandHandler;
 import net.jircd.core.session.command.NamesCommandHandler;
 import net.jircd.core.session.command.NickCommandHandler;
 import net.jircd.core.session.command.PartCommandHandler;
 import net.jircd.core.session.command.PingPongCommandHandler;
 import net.jircd.core.session.command.QuitCommandHandler;
+import net.jircd.core.session.command.TagmsgCommandHandler;
+import net.jircd.core.session.command.TimeCommandHandler;
 import net.jircd.core.session.command.TopicCommandHandler;
 import net.jircd.core.session.command.UserCommandHandler;
 import net.jircd.core.session.command.UserModeCommandHandler;
+import net.jircd.core.session.command.VersionCommandHandler;
 import net.jircd.core.session.command.WhoCommandHandler;
 import net.jircd.core.session.command.WhoisCommandHandler;
+import net.jircd.core.session.command.WhowasCommandHandler;
 import net.jircd.protocol.Command;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -68,8 +75,8 @@ public final class JircdServerApplication {
   private final NicknameRegistry nicknameRegistry = new NicknameRegistry();
   private final ChannelRegistry channelRegistry = new ChannelRegistry();
   private final ExtensionRegistry extensionRegistry = new ExtensionRegistry();
-  private final DisconnectCleanup disconnectCleanup =
-      new DisconnectCleanup(nicknameRegistry, channelRegistry);
+  private final WhowasHistory whowasHistory;
+  private final DisconnectCleanup disconnectCleanup;
   private final ConnectionHandler connectionHandler;
   private final Instant startedAt = Instant.now();
 
@@ -110,6 +117,9 @@ public final class JircdServerApplication {
         configuration.maxModesPerCommand());
 
     this.reloader = new ConfigurationReloader(configPath, loader, extensionRegistry, configuration);
+    this.whowasHistory = new WhowasHistory(() -> reloader.current().whowasHistorySize());
+    this.disconnectCleanup =
+        new DisconnectCleanup(nicknameRegistry, channelRegistry, whowasHistory, extensionRegistry);
 
     this.connectionHandler =
         new ConnectionHandler(
@@ -212,6 +222,25 @@ public final class JircdServerApplication {
         new CapCommandHandler(
             new CapabilityNegotiator(extensionRegistry), () -> serverName, registrationCompletion));
     registerModerationHandlers();
+    registerExtendedCommandHandlers();
+  }
+
+  /** VERSION/TIME/LUSERS/AWAY/WHOWAS/TAGMSG (002-extended-irc-commands). */
+  private void registerExtendedCommandHandlers() {
+    connectionHandler.registerHandler(
+        Command.VERSION,
+        new VersionCommandHandler(() -> serverName, serverVersion, extensionRegistry));
+    connectionHandler.registerHandler(Command.TIME, new TimeCommandHandler(() -> serverName));
+    connectionHandler.registerHandler(
+        Command.LUSERS,
+        new LusersCommandHandler(nicknameRegistry, channelRegistry, () -> serverName));
+    connectionHandler.registerHandler(Command.AWAY, new AwayCommandHandler(() -> serverName));
+    connectionHandler.registerHandler(
+        Command.WHOWAS, new WhowasCommandHandler(whowasHistory, () -> serverName));
+    connectionHandler.registerHandler(
+        Command.TAGMSG,
+        new TagmsgCommandHandler(
+            channelRegistry, nicknameRegistry, extensionRegistry, () -> serverName));
   }
 
   /** {@code KICK}/channel-{@code MODE}/{@code INVITE} (Story 5, FR-013/FR-014/FR-064/FR-065). */

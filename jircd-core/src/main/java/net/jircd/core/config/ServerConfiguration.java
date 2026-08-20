@@ -34,7 +34,8 @@ public record ServerConfiguration(
     int topicMaxLength,
     boolean whoMaskEnabled,
     int maxModesPerCommand,
-    int operFailureThreshold) {
+    int operFailureThreshold,
+    int whowasHistorySize) {
 
   public record Listener(int port, boolean tls) {}
 
@@ -50,6 +51,11 @@ public record ServerConfiguration(
   public static final int LENGTH_CEILING = 400;
   public static final int MAX_MODES_CEILING = 20;
   public static final int OPER_FAILURE_THRESHOLD_CEILING = 20;
+
+  /** 002-extended-irc-commands contracts/server-configuration-extensions.md. */
+  public static final int DEFAULT_WHOWAS_HISTORY_SIZE = 100;
+
+  public static final int WHOWAS_HISTORY_SIZE_CEILING = 10_000;
 
   /** The single source of truth for {@link RateLimit}'s default — never redefine this elsewhere. */
   public static final int DEFAULT_RATE_LIMIT_BUCKET_SIZE = 20;

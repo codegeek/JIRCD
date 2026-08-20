@@ -17,6 +17,7 @@ package net.jircd.core.session;
 
 import java.util.HashSet;
 import java.util.Set;
+import net.jircd.core.extension.ExtensionRegistry;
 import net.jircd.protocol.Command;
 import net.jircd.protocol.Hostmask;
 import net.jircd.protocol.Message;
@@ -37,10 +38,18 @@ public final class DisconnectCleanup {
 
   private final NicknameRegistry nicknameRegistry;
   private final ChannelRegistry channelRegistry;
+  private final WhowasHistory whowasHistory;
+  private final ExtensionRegistry extensionRegistry;
 
-  public DisconnectCleanup(NicknameRegistry nicknameRegistry, ChannelRegistry channelRegistry) {
+  public DisconnectCleanup(
+      NicknameRegistry nicknameRegistry,
+      ChannelRegistry channelRegistry,
+      WhowasHistory whowasHistory,
+      ExtensionRegistry extensionRegistry) {
     this.nicknameRegistry = nicknameRegistry;
     this.channelRegistry = channelRegistry;
+    this.whowasHistory = whowasHistory;
+    this.extensionRegistry = extensionRegistry;
   }
 
   public void cleanup(ClientSession session, String reason) {
@@ -66,6 +75,22 @@ public final class DisconnectCleanup {
           writer.enqueueRaw(quit);
         }
       }
+      // 002-extended-irc-commands FR-016: one WHOWAS entry per disconnection, regardless of
+      // cause (QUIT, KILL, keep-alive timeout) — this is the single point every cause funnels
+      // through, so no cause-specific recording is needed anywhere else. presentedHostname is a
+      // snapshot of whatever cloak was displaying for this session right now, not a live
+      // recomputation against cloak's state whenever WHOWAS is later queried (research.md
+      // "Cloak extension boundary" — the same live-vs-cached distinction that section already
+      // establishes for a still-connected session doesn't apply here; there's no "live" state
+      // left to check once this session is gone).
+      whowasHistory.record(
+          new WhowasEntry(
+              session.nickname(),
+              session.ident(),
+              session.realHostname(),
+              PresentedIdentity.displayHostname(session, extensionRegistry),
+              session.realname(),
+              java.time.Instant.now()));
     }
 
     if (session.nickname() != null) {
