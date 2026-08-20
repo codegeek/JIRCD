@@ -303,3 +303,13 @@ Task: "Add 312 + two-parameter WHOIS parsing in jircd-core/.../command/WhoisComm
   `002-extended-irc-commands`'s own `WHOWAS` hostname-privacy fix already set.
 - Commit after each task or logical group.
 - Stop at any checkpoint to validate a story independently.
+
+## Phase 12: Convergence
+
+- [X] T021 Add a `312` | `RPL_WHOISSERVER` row to the "Used in This Release" table and mark
+  `312` `(Used)` in the full-catalog table in
+  `specs/001-ircv3-server/contracts/irc-numeric-replies.md` — `WhoisCommandHandler` now
+  genuinely sends it (FR-006) but this catalog doc doesn't yet reflect it (partial)
+- [X] T022 Update the `431 ERR_NONICKNAMEGIVEN` row's "Triggered by" text in
+  `specs/001-ircv3-server/contracts/irc-numeric-replies.md` (line 66) to also name bare
+  `WHOWAS`, not only `NICK` with no argument, per FR-005 (partial)

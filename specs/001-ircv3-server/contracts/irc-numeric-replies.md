@@ -13,8 +13,8 @@ has two layers:
    numerics already are. `jircd-protocol`'s `NumericReply` model MUST
    represent all of these, for the same reason its command model covers
    the full command set: a future client library needs to parse
-   `312 RPL_WHOISSERVER` from *any* server, not only one that happens to
-   implement the server-name part of `WHOIS`.
+   `317 RPL_WHOISIDLE` from *any* server, not only one that happens to
+   implement the idle-time part of `WHOIS`.
 2. **Server behavior** (`jircd-core` and extensions) — only the numerics
    marked **Used** below are actually sent by this release. Every other
    numeric in the full catalog is defined (correct code, correct name,
@@ -49,6 +49,7 @@ during that window.
 | `331` | `RPL_NOTOPIC` | `TOPIC` query on a channel with no topic set | FR-040 |
 | `332` | `RPL_TOPIC` | `TOPIC` query on a channel with a topic set | FR-040 |
 | `311` | `RPL_WHOISUSER` | Successful `WHOIS` | FR-037, FR-038 |
+| `312` | `RPL_WHOISSERVER` | `WHOIS`, sent immediately after `311` — this server's own name, restored per 003-irctest-conformance-fixes FR-006 (there being no federation, no other server name could ever appear here) | 003-irctest-conformance-fixes FR-006 |
 | `313` | `RPL_WHOISOPERATOR` | `WHOIS` for a target currently holding the `operator` user mode — visible to any querying client, not gated by administrator privilege or self-lookup (FR-037, FR-044) | FR-037, FR-044 |
 | `318` | `RPL_ENDOFWHOIS` | End of a `WHOIS` reply | FR-037 |
 | `352` | `RPL_WHOREPLY` | `WHO`, one per (visible) matching user (FR-061) | FR-061 |
@@ -63,7 +64,7 @@ during that window.
 | `403` | `ERR_NOSUCHCHANNEL` | `TOPIC`/`NAMES`/`WHO` (channel-name form) for a channel that doesn't exist, or that is private/secret and the requester is neither a member nor an administrator (identical response either way, FR-047) | FR-047, FR-061 |
 | `417` | `ERR_INPUTTOOLONG` | A line exceeding the 512-byte base limit or the 4096-byte `message-tags` allowance (FR-049), or a `TOPIC`-set attempt exceeding the configured `topicMaxLength` (FR-056) — not part of RFC 1459/2812 (there is no numeric defined in that gap, 416-420), but a widely-adopted de facto standard purpose-built for exactly this case, the same way this project already treats IRCv3's `CAP` numerics as belonging alongside the RFC set | FR-049, FR-056 |
 | `421` | `ERR_UNKNOWNCOMMAND` | Malformed/unrecognized command, a wire-protocol-recognized command with no handler in this release, or a human-readable-content parameter (`PRIVMSG`/`NOTICE` body, topic, realname, channel name) containing invalid UTF-8 (FR-054) | FR-015, FR-054 |
-| `431` | `ERR_NONICKNAMEGIVEN` | `NICK` with no argument | FR-001 (input validation) |
+| `431` | `ERR_NONICKNAMEGIVEN` | `NICK` with no argument; bare `WHOWAS` with no nickname argument (002-extended-irc-commands, 003-irctest-conformance-fixes FR-005 — same reply shape reused, not a generic `461`) | FR-001 (input validation), 003-irctest-conformance-fixes FR-005 |
 | `432` | `ERR_ERRONEUSNICKNAME` | `NICK` violating the nickname grammar (invalid leading/body characters or over 9 characters) | irc-protocol-commands.md "Connection Registration Grammar" |
 | `433` | `ERR_NICKNAMEINUSE` | `NICK` naming an already-claimed nickname | FR-002 |
 | `441` | `ERR_USERNOTINCHANNEL` | `MODE +v`/`-v` or `+o`/`-o <nickname>` naming a nickname that isn't a current member of the target channel | FR-045, FR-046 |
@@ -120,7 +121,7 @@ trigger them is "Recognized only" per irc-protocol-commands.md).
 | `300` | `RPL_NONE` | `301` | `RPL_AWAY` | `367` | `RPL_BANLIST` *(Used)* |
 | `302` | `RPL_USERHOST` | `303` | `RPL_ISON` | `368` | `RPL_ENDOFBANLIST` *(Used)* |
 | `305` | `RPL_UNAWAY` | `306` | `RPL_NOWAWAY` | `369` | `RPL_ENDOFWHOWAS` |
-| `311` | `RPL_WHOISUSER` *(Used)* | `312` | `RPL_WHOISSERVER` | `371` | `RPL_INFO` |
+| `311` | `RPL_WHOISUSER` *(Used)* | `312` | `RPL_WHOISSERVER` *(Used)* | `371` | `RPL_INFO` |
 | `313` | `RPL_WHOISOPERATOR` *(Used)* | `314` | `RPL_WHOWASUSER` | `372` | `RPL_MOTD` |
 | `315` | `RPL_ENDOFWHO` *(Used)* | `317` | `RPL_WHOISIDLE` | `374` | `RPL_ENDOFINFO` |
 | `318` | `RPL_ENDOFWHOIS` *(Used)* | `319` | `RPL_WHOISCHANNELS` | `375` | `RPL_MOTDSTART` |
