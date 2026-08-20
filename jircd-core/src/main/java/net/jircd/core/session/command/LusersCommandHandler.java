@@ -19,6 +19,7 @@ import java.util.function.Supplier;
 import net.jircd.core.session.ChannelRegistry;
 import net.jircd.core.session.ClientSession;
 import net.jircd.core.session.NicknameRegistry;
+import net.jircd.core.session.UserMode;
 import net.jircd.protocol.Message;
 import net.jircd.protocol.NumericReply;
 
@@ -47,12 +48,16 @@ public final class LusersCommandHandler implements CommandHandler {
   public void handle(ClientSession session, Message message) {
     String server = serverName.get();
     int clientCount = nicknameRegistry.all().size();
+    long invisibleCount =
+        nicknameRegistry.all().stream()
+            .filter(s -> s.userModes().contains(UserMode.INVISIBLE))
+            .count();
     int channelCount = channelRegistry.all().size();
     Replies.send(
         session,
         server,
         NumericReply.RPL_LUSERCLIENT,
-        "There are " + clientCount + " users on this server");
+        "There are " + clientCount + " users and " + invisibleCount + " invisible on 1 servers");
     Replies.send(
         session,
         server,

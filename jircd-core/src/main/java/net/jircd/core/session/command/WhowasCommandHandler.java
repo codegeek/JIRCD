@@ -40,8 +40,7 @@ public final class WhowasCommandHandler implements CommandHandler {
   public void handle(ClientSession session, Message message) {
     String server = serverName.get();
     if (message.params().isEmpty()) {
-      Replies.send(
-          session, server, NumericReply.ERR_NEEDMOREPARAMS, "WHOWAS", "Not enough parameters");
+      Replies.send(session, server, NumericReply.ERR_NONICKNAMEGIVEN, "No nickname given");
       return;
     }
     String nickname = message.params().getFirst();

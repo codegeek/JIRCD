@@ -157,6 +157,7 @@ public final class WhoCommandHandler implements CommandHandler {
         channelOrStar,
         target.ident(),
         hostname,
+        serverName.get(),
         target.nickname(),
         flags.toString(),
         "0 " + target.realname());

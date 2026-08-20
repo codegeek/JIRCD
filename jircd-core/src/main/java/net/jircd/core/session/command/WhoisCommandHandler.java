@@ -53,7 +53,11 @@ public final class WhoisCommandHandler implements CommandHandler {
     if (message.params().isEmpty()) {
       target = session;
     } else {
-      String targetNickname = message.params().getFirst();
+      // The optional RFC 2812 two-parameter form is WHOIS <target-server> <nickname> — the
+      // nickname is always the last parameter regardless of whether one or two were given. The
+      // leading server-name parameter, if present, is accepted but not used to route anywhere
+      // (this server has no federation to route to, FR-021).
+      String targetNickname = message.params().getLast();
       var found = nicknameRegistry.lookup(targetNickname);
       if (found.isEmpty()) {
         Replies.send(
@@ -81,6 +85,14 @@ public final class WhoisCommandHandler implements CommandHandler {
         hostname,
         "*",
         target.realname());
+
+    Replies.send(
+        session,
+        serverName.get(),
+        NumericReply.RPL_WHOISSERVER,
+        target.nickname(),
+        serverName.get(),
+        "jircd IRC server");
 
     if (target.isAway()) {
       Replies.send(

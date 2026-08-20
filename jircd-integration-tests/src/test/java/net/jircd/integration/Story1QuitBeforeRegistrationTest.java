@@ -17,6 +17,7 @@ package net.jircd.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Duration;
 import org.junit.jupiter.api.Test;
 
 class Story1QuitBeforeRegistrationTest {
@@ -28,7 +29,8 @@ class Story1QuitBeforeRegistrationTest {
       client.send("NICK alice"); // registration incomplete — no USER yet
       client.send("QUIT");
 
-      // The connection should simply close, not error or hang.
+      // FR-001: ERROR is sent regardless of registration state, then the connection closes.
+      assertThat(client.readUntil("ERROR", Duration.ofSeconds(5))).contains("ERROR");
       String line = client.readLine();
       assertThat(line).isNull();
     }

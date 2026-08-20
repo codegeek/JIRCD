@@ -25,7 +25,7 @@ whose Full Numeric Catalog already reserves every numeric this feature claims (`
 |---|---|---|---|---|
 | `VERSION` | C→S | `REGISTERED` session | Returns server name/version, then a fresh `RPL_ISUPPORT` burst (Clarifications, 2026-08-19) | `351 RPL_VERSION`, then one or more `005 RPL_ISUPPORT` lines — identical rendering to the registration completion burst's own `005` (`001-ircv3-server` "Registration Completion Burst"), via the shared helper research.md "VERSION + ISUPPORT reuse" describes |
 | `TIME` | C→S | `REGISTERED` session | Returns the server's current local time | `391 RPL_TIME` |
-| `LUSERS` | C→S | `REGISTERED` session | Returns current connected-client and active-channel counts (server-wide totals only — spec.md Assumptions) | `251 RPL_LUSERCLIENT` (client count), `254 RPL_LUSERCHANNELS` (channel count) |
+| `LUSERS` | C→S | `REGISTERED` session | Returns current connected-client and active-channel counts (server-wide totals only — spec.md Assumptions) | `251 RPL_LUSERCLIENT` (`"There are <clients> users and <invisible> invisible on 1 servers"` — the conventional, widely-parsed text shape, 003-irctest-conformance-fixes FR-004), then `254 RPL_LUSERCHANNELS` (channel count) |
 
 **Contract notes**:
 - `LUSERS` intentionally does not send the fuller RFC 2812 breakdown (`252`
@@ -35,6 +35,13 @@ whose Full Numeric Catalog already reserves every numeric this feature claims (`
   connection becomes a `ClientSession`, `001-ircv3-server` data-model.md), so those numerics
   have no meaningful value to report. Reserved in the numeric catalog, still unused after
   this feature.
+- `251`'s `<invisible>` count is a real, live filter over connected sessions holding the
+  `invisible` user mode (`001-ircv3-server` `UserMode.INVISIBLE`, FR-044) — not a placeholder
+  zero (003-irctest-conformance-fixes FR-004, research.md "LUSERS reply text matches the
+  conventional shape": reporting a knowingly-wrong `0` when invisible users may actually be
+  present would be actively misleading). `<servers>` is a fixed `1` — this server is never
+  more than zero hops from itself, the same non-federated assumption `WHO`'s hopcount field
+  documents (`001-ircv3-server` contracts/irc-protocol-commands.md).
 - `VERSION`'s `RPL_ISUPPORT` burst is byte-for-byte the same content `002` (registration)
   would send if the client re-registered right now — not a filtered or summarized subset.
 
@@ -86,12 +93,15 @@ whose Full Numeric Catalog already reserves every numeric this feature claims (`
 
 | Command | Direction | Preconditions | Effect | Replies |
 |---|---|---|---|---|
-| `WHOWAS <nickname>` | C→S | `REGISTERED` session | Returns the most recent `WhowasEntry` for `<nickname>`, if any (data-model.md `WhowasHistory`) | `314 RPL_WHOWASUSER`, then `369 RPL_ENDOFWHOWAS` on a match; `406 ERR_WASNOSUCHNICK`, then `369 RPL_ENDOFWHOWAS`, if no history exists for `<nickname>` |
+| `WHOWAS [nickname]` | C→S | `REGISTERED` session | Returns the most recent `WhowasEntry` for `<nickname>`, if any (data-model.md `WhowasHistory`) | `314 RPL_WHOWASUSER`, then `369 RPL_ENDOFWHOWAS` on a match; `406 ERR_WASNOSUCHNICK`, then `369 RPL_ENDOFWHOWAS`, if no history exists for `<nickname>`; `431 ERR_NONICKNAMEGIVEN` if `<nickname>` is omitted entirely (003-irctest-conformance-fixes FR-005 — the same reply shape `NICK` already uses for a bare `NICK`, replacing the previously-generic `461 ERR_NEEDMOREPARAMS`) |
 
 **Contract notes**:
 - `369 RPL_ENDOFWHOWAS` always closes the response, on both the success and no-history
   paths — the same "always send a defined completion signal" pattern `LIST`'s `323
   RPL_LISTEND` and `WHO`'s `315 RPL_ENDOFWHO` already use.
+- A bare `WHOWAS` does NOT also send `369` — `431` is the sole reply, matching `NICK`'s own
+  bare-argument convention (`001-ircv3-server` contracts/irc-protocol-commands.md), not the
+  match/no-match two-reply shape above.
 - `406 ERR_WASNOSUCHNICK` is distinct from `401 ERR_NOSUCHNICK` (used by `WHOIS`/`KILL`
   above) specifically because the two questions are different: `401` means "not currently
   connected," `406` means "no retained history at all" — a nickname can fail one, the other,

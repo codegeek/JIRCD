@@ -125,10 +125,26 @@ public final class JoinCommandHandler implements CommandHandler {
       }
       names.append(member.nickname());
     }
+    String visibility = visibilitySymbol(channel);
     Replies.send(
-        requester, serverName, NumericReply.RPL_NAMREPLY, "=", channel.name(), names.toString());
+        requester,
+        serverName,
+        NumericReply.RPL_NAMREPLY,
+        visibility,
+        channel.name(),
+        names.toString());
     Replies.send(
         requester, serverName, NumericReply.RPL_ENDOFNAMES, channel.name(), "End of /NAMES list");
+  }
+
+  private static String visibilitySymbol(Channel channel) {
+    if (channel.activeModes().contains(CoreChannelModes.SECRET)) {
+      return "@";
+    }
+    if (channel.activeModes().contains(CoreChannelModes.PRIVATE)) {
+      return "*";
+    }
+    return "=";
   }
 
   private boolean passesBanGate(Channel channel, ClientSession session) {

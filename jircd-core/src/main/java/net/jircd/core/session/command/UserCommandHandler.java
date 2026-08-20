@@ -60,6 +60,15 @@ public final class UserCommandHandler implements CommandHandler {
 
     String username = message.params().getFirst();
     String realname = message.params().get(3);
+    if (realname.isEmpty()) {
+      Replies.send(
+          session,
+          serverName.get(),
+          NumericReply.ERR_NEEDMOREPARAMS,
+          "USER",
+          "Not enough parameters");
+      return;
+    }
 
     String ident = Hostmask.isValidUsernameContent(username) ? username : "user";
     if (ident.length() > 9) {

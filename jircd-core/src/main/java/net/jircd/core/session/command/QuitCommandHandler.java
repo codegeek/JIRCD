@@ -15,14 +15,18 @@
  */
 package net.jircd.core.session.command;
 
+import java.util.List;
+import java.util.Map;
 import net.jircd.core.session.ClientSession;
 import net.jircd.core.session.DisconnectCleanup;
+import net.jircd.protocol.Command;
 import net.jircd.protocol.Message;
 
 /**
- * {@code QUIT} — usable at any time, including before registration completes (FR-060). Invokes
- * {@link DisconnectCleanup} with the client-supplied reason, or a fixed default if none was given —
- * never a blank reason.
+ * {@code QUIT} — usable at any time, including before registration completes (FR-060). Sends {@code
+ * ERROR} (RFC 2812 §3.1.7) before invoking {@link DisconnectCleanup} with the client-supplied
+ * reason, or a fixed default if none was given — never a blank reason — the same
+ * enqueue-then-cleanup order {@code KILL} and the keep-alive timeout already use.
  */
 public final class QuitCommandHandler implements CommandHandler {
 
@@ -37,6 +41,15 @@ public final class QuitCommandHandler implements CommandHandler {
   @Override
   public void handle(ClientSession session, Message message) {
     String reason = message.params().isEmpty() ? null : message.params().getFirst();
-    disconnectCleanup.cleanup(session, reason != null ? reason : DEFAULT_REASON);
+    String effectiveReason = reason != null ? reason : DEFAULT_REASON;
+    // Borrowed reference to this session's own still-active writer — closed below via
+    // disconnectCleanup.cleanup(), not directly by this handler.
+    @SuppressWarnings("PMD.CloseResource")
+    var writer = session.writer();
+    if (writer != null) {
+      writer.enqueueRaw(
+          new Message(Map.of(), null, Command.ERROR, "ERROR", List.of(effectiveReason)));
+    }
+    disconnectCleanup.cleanup(session, effectiveReason);
   }
 }

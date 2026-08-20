@@ -76,7 +76,7 @@ hostmask prefix — not any client's identity.
 | `CAP REQ :<caps>` | C→S | After `CAP LS` | Server enables requested capabilities it supports, declines the rest | `CAP * ACK`/`CAP * NAK` |
 | `CAP END` | C→S | After negotiation | Ends negotiation; registration may complete | (none; unblocks registration) |
 | `NICK <nickname>` | C→S | Session not yet holding a nickname, or changing an existing one | Atomically claims the nickname (FR-002) | `433 ERR_NICKNAMEINUSE` on conflict; silent success otherwise (reflected via subsequent replies) |
-| `USER <user> <mode> <unused> :<realname>` | C→S | Nickname claimed; this session has not already processed a `USER` command, whether or not it has reached `REGISTERED` yet (FR-001 — registration-only, strictly one-shot); `<realname>` MUST be valid UTF-8 (FR-054) | Completes registration (FR-001) | Registration Completion Burst (below); `462 ERR_ALREADYREGISTRED` if this session has already processed a `USER` command, checked before the UTF-8 validity check below; `421 ERR_UNKNOWNCOMMAND`-style malformed-message rejection (FR-015) if `<realname>` isn't valid UTF-8 |
+| `USER <user> <mode> <unused> :<realname>` | C→S | Nickname claimed; this session has not already processed a `USER` command, whether or not it has reached `REGISTERED` yet (FR-001 — registration-only, strictly one-shot); `<realname>` MUST be non-empty (003-irctest-conformance-fixes FR-002) and valid UTF-8 (FR-054) | Completes registration (FR-001) | Registration Completion Burst (below); `462 ERR_ALREADYREGISTRED` if this session has already processed a `USER` command, checked before the UTF-8 validity check below; `461 ERR_NEEDMOREPARAMS` if `<realname>` is empty (003-irctest-conformance-fixes FR-002 — an empty trailing parameter is syntactically present but semantically equivalent to "not given"); `421 ERR_UNKNOWNCOMMAND`-style malformed-message rejection (FR-015) if `<realname>` isn't valid UTF-8 |
 
 #### Connection Registration Grammar
 
@@ -215,7 +215,7 @@ defined, the same class of gap the nickname/channel grammars closed for
 | `PART <channel> [:reason]` | C→S | Session is a member; `<reason>`, if given, MUST be valid UTF-8 (FR-054) | Removes membership | `PART` echoed to all (former) members, with `<reason>` if one was given, absent otherwise (unlike `QUIT`, no default is synthesized); `421 ERR_UNKNOWNCOMMAND`-style malformed-message rejection (FR-015) if a given `<reason>` isn't valid UTF-8 |
 | `PRIVMSG <target> :<text>` | C→S | `REGISTERED` session; for a channel target, membership is NOT required by default — only when that channel's `members-only` restriction is active (FR-004, FR-013/FR-043); for a nickname target, it must be any registered nickname; `<text>` MUST be valid UTF-8 (FR-054); for a channel target, neither the sender's presented identity nor their real hostname/IP-based identity MUST match an active `ban-mask` entry on that channel (FR-062) | Delivers to all other channel members (FR-004) or the direct-message recipient (FR-005), assigning one server-generated `msgid` shared by every recipient with `message-tags` negotiated (FR-059) | `PRIVMSG` delivered to recipients; `echo-message`-negotiated senders also receive their own message back (with the same `msgid` as everyone else, letting them correlate it with what they sent); `442 ERR_NOTONCHANNEL` if `members-only` is active and the sender isn't a member (FR-013/FR-043); `404 ERR_CANNOTSENDTOCHAN` if `moderated` blocks the sender or the sender is banned (FR-062); `421 ERR_UNKNOWNCOMMAND`-style malformed-message rejection (FR-015) if `<text>` isn't valid UTF-8 |
 | `NOTICE <target> :<text>` | C→S | Same as `PRIVMSG` | Same delivery semantics as `PRIVMSG`, but MUST NOT trigger automated replies | Delivered like `PRIVMSG` |
-| `QUIT [:reason]` | C→S | Any time, including before registration completes (FR-060); `<reason>`, if given, MUST be valid UTF-8 (FR-054) | Disconnects; removes all channel memberships, if any (FR-017) | `QUIT` echoed to all affected channels, always carrying a reason — `<reason>` if given, a fixed server default otherwise (FR-060, research.md "Voluntary disconnect and quit reasons") — never blank; `421 ERR_UNKNOWNCOMMAND`-style malformed-message rejection (FR-015) if a given `<reason>` isn't valid UTF-8 |
+| `QUIT [:reason]` | C→S | Any time, including before registration completes (FR-060); `<reason>`, if given, MUST be valid UTF-8 (FR-054) | Disconnects; removes all channel memberships, if any (FR-017) | `ERROR :<reason>` sent to the quitting client itself before the connection closes (RFC 2812 §3.1.7, 003-irctest-conformance-fixes FR-001 — the same enqueue-then-close order `KILL` and the keep-alive timeout already use); `QUIT` echoed to all affected channels, always carrying a reason — `<reason>` if given, a fixed server default otherwise (FR-060, research.md "Voluntary disconnect and quit reasons") — never blank; `421 ERR_UNKNOWNCOMMAND`-style malformed-message rejection (FR-015) if a given `<reason>` isn't valid UTF-8 |
 | `TOPIC <channel>` | C→S | `REGISTERED` session; no membership required for a non-private/secret channel, or for a member/administrator of one (FR-040/FR-041's discovery framing, subject to FR-047) | Returns `channel`'s current topic | `332 RPL_TOPIC` if a topic is set, `331 RPL_NOTOPIC` if not; `403 ERR_NOSUCHCHANNEL` if `channel` doesn't exist, or is private/secret and the requester is neither a member nor an administrator (FR-047 — same response either way) |
 | `TOPIC <channel> :<topic>` | C→S | `REGISTERED` session; sender is a channel operator (FR-013); `<topic>` MUST be valid UTF-8 (FR-054) and MUST NOT exceed `ServerConfiguration.topicMaxLength` (FR-056) | Sets/changes `channel`'s topic (FR-040) | `TOPIC` echoed to all members on success; `482 ERR_CHANOPRIVSNEEDED` if sender isn't an operator; `421 ERR_UNKNOWNCOMMAND`-style malformed-message rejection (FR-015) if `<topic>` isn't valid UTF-8; `417 ERR_INPUTTOOLONG` if `<topic>` exceeds the configured maximum length (FR-056, FR-049's numeric reused) |
 | `NAMES <channel>` | C→S | `REGISTERED` session; no membership required for a non-private/secret channel, or for a member/administrator of one (FR-041, subject to FR-047) | Returns `channel`'s current membership list, the same on-demand query `JOIN` already triggers automatically | `353 RPL_NAMREPLY` + `366 RPL_ENDOFNAMES`; `461 ERR_NEEDMOREPARAMS` if `channel` is omitted; `403 ERR_NOSUCHCHANNEL` under the identical private/secret condition `TOPIC` uses (FR-047) |
@@ -269,6 +269,12 @@ was previously missing and needed its own definition (FR-048).
 - `TOPIC`-setting is the one operator-gated action in this section; it
   reuses `Channel.operators` (FR-013), already established at `JOIN` — no
   separate authorization mechanism is introduced for it.
+- `353 RPL_NAMREPLY`'s visibility-symbol parameter (the one preceding the
+  channel name) MUST reflect the channel's actual `private`/`secret`
+  state — `@` for `secret`, `*` for `private`, `=` for public
+  (003-irctest-conformance-fixes FR-003), matching RFC 2812; `private` and
+  `secret` are already mutually exclusive by validation rule
+  (data-model.md `Channel`), so the three cases are exhaustive.
 - `353 RPL_NAMREPLY`'s nickname list MUST prefix each operator's nickname
   with `@` and each voiced (non-operator) member's nickname with `+`,
   the standard IRC convention every client already expects — without it,
@@ -284,8 +290,8 @@ was previously missing and needed its own definition (FR-048).
 
 | Command | Direction | Preconditions | Effect | Replies |
 |---|---|---|---|---|
-| `WHOIS [target]` | C→S | `REGISTERED` session | Looks up `target` (the sender's own session if omitted) and returns its nickname, ident, hostname, and real name (FR-037). The returned hostname follows FR-038's three-tier resolution: real value for a self-lookup or an administrator, otherwise the same presented value the target's message hostmask already shows to this sender (FR-030/031). If `target` currently holds the `operator` user mode, an operator-status line is included — visible to any querying client, not gated like the hostname resolution (FR-037, FR-044) | `311 RPL_WHOISUSER`, then `313 RPL_WHOISOPERATOR` if `target` holds `operator`, then `318 RPL_ENDOFWHOIS` on success; `401 ERR_NOSUCHNICK` if `target` isn't connected |
-| `WHO [mask]` | C→S | `REGISTERED` session | Three forms dispatched on `mask`'s shape (FR-061): a channel name lists that channel's current members (same visibility as `NAMES`, including `invisible` members — FR-041/FR-047, never gated by invisibility or `whoMaskEnabled`); a wildcard (`*`/`?`) pattern matches against nicknames; anything else is an exact nickname; omitted matches every connected user. The latter two forms exclude an `invisible`-holding match (FR-044) unless the requester shares a channel membership with it or holds administrator privilege (FR-032/FR-047's transparency pattern, reused); independently, if `ServerConfiguration.whoMaskEnabled` is `false`, a non-administrator's mask/no-argument form returns no matches at all, administrators exempt (FR-061). Each match's hostname follows the same FR-038 resolution `WHOIS` uses | One `352 RPL_WHOREPLY` per (visible) match, then `315 RPL_ENDOFWHO` — zero matches (whether from a genuine non-match, `invisible` exclusion, or `whoMaskEnabled: false`) is not an error, still closes with `315`, all three indistinguishable to the requester; `403 ERR_NOSUCHCHANNEL` for the channel-name form under the identical private/secret condition `TOPIC`/`NAMES` use (FR-047) |
+| `WHOIS [target-server] target` | C→S | `REGISTERED` session | Looks up `target` (the sender's own session if omitted entirely) and returns its nickname, ident, hostname, and real name (FR-037). An optional leading `target-server` parameter (RFC 2812's two-parameter form) is accepted but not used to route anywhere — this server has no federation to route to (FR-021) — the nickname is always the *last* parameter, whichever form was sent (003-irctest-conformance-fixes FR-006/FR-007). The returned hostname follows FR-038's three-tier resolution: real value for a self-lookup or an administrator, otherwise the same presented value the target's message hostmask already shows to this sender (FR-030/031). If `target` currently holds the `operator` user mode, an operator-status line is included — visible to any querying client, not gated like the hostname resolution (FR-037, FR-044) | `311 RPL_WHOISUSER`, then `312 RPL_WHOISSERVER` (this server's own name — restored per 003-irctest-conformance-fixes FR-006, there being no other server it could ever name), then `313 RPL_WHOISOPERATOR` if `target` holds `operator`, then `318 RPL_ENDOFWHOIS` on success; `401 ERR_NOSUCHNICK` if `target` isn't connected |
+| `WHO [mask]` | C→S | `REGISTERED` session | Three forms dispatched on `mask`'s shape (FR-061): a channel name lists that channel's current members (same visibility as `NAMES`, including `invisible` members — FR-041/FR-047, never gated by invisibility or `whoMaskEnabled`); a wildcard (`*`/`?`) pattern matches against nicknames; anything else is an exact nickname; omitted matches every connected user. The latter two forms exclude an `invisible`-holding match (FR-044) unless the requester shares a channel membership with it or holds administrator privilege (FR-032/FR-047's transparency pattern, reused); independently, if `ServerConfiguration.whoMaskEnabled` is `false`, a non-administrator's mask/no-argument form returns no matches at all, administrators exempt (FR-061). Each match's hostname follows the same FR-038 resolution `WHOIS` uses | One `352 RPL_WHOREPLY` per (visible) match — its `<server>` field restored to this server's own name (003-irctest-conformance-fixes FR-006) — then `315 RPL_ENDOFWHO` — zero matches (whether from a genuine non-match, `invisible` exclusion, or `whoMaskEnabled: false`) is not an error, still closes with `315`, all three indistinguishable to the requester; `403 ERR_NOSUCHCHANNEL` for the channel-name form under the identical private/secret condition `TOPIC`/`NAMES` use (FR-047) |
 
 **Contract notes**:
 - `WHOIS`/`WHO` are core protocol behavior (FR-037/FR-061), like
@@ -300,18 +306,24 @@ was previously missing and needed its own definition (FR-048).
   `WHO` MUST reimplement this resolution independently. Two independent
   implementations of "who gets to see the real value" is exactly the kind
   of divergence that turns into a privacy bug later.
-- `WHO`'s `352 RPL_WHOREPLY` fields, simplified from RFC 2812's full
-  shape the same way `WHOIS`'s `311` already drops server
-  name/hopcount: `<channel-or-*> <ident> <presented-hostname> <nickname>
-  <status> :0 <realname>` — `<channel>` for the channel-scoped form,
-  `*` otherwise (this server has no server-name-federation concept to
-  put there, FR-021); the trailing `0` is a fixed hopcount (this server
-  is never more than zero hops from itself, having no server-to-server
-  links); `<status>` is always `H` (no `AWAY` in this release, so never
-  `G`) followed by `*` if the target holds `operator` (mirroring `313`'s
-  visibility) and, for the channel-scoped form only, `@`/`+` following
-  the exact same operator/voice precedence `353 RPL_NAMREPLY` already
-  uses (FR-045/FR-046).
+- `WHO`'s `352 RPL_WHOREPLY` fields: `<channel-or-*> <ident>
+  <presented-hostname> <server> <nickname> <status> :0 <realname>` —
+  `<channel>` for the channel-scoped form, `*` otherwise; `<server>` is
+  this server's own name (003-irctest-conformance-fixes FR-006 restored
+  it — previously omitted per FR-021's reasoning that there being no
+  federation, no *other* server name could ever appear there; restoring
+  it costs nothing and improves positional-parser compatibility with
+  strict tooling, since it always repeats the same known value); the
+  trailing `0` is a fixed hopcount (this server is never more than zero
+  hops from itself, having no server-to-server links); `<status>` is
+  always `H` (no `AWAY` in this release, so never `G`) followed by `*` if
+  the target holds `operator` (mirroring `313`'s visibility) and, for the
+  channel-scoped form only, `@`/`+` following the exact same
+  operator/voice precedence `353 RPL_NAMREPLY` already uses
+  (FR-045/FR-046). `WHOIS`'s `311` still omits it — RFC 2812's `311` field
+  layout (`<nick> <user> <host> * :<real name>`) has no server-name slot
+  to add one to; the server name is reported via a separate `312
+  RPL_WHOISSERVER` reply instead (003-irctest-conformance-fixes FR-006).
 - `WHO`'s mask matching (FR-061) is nickname-only, narrower than RFC
   2812's full host/server/real-name matching — this server has no
   server-name-federation concept to match against (FR-021), and nothing
@@ -631,11 +643,12 @@ any given server to implement it.
   complete, standard-compliant parser, independent of which commands any
   particular server (this one or another) has chosen to implement.
 - Numeric replies associated with "Recognized only" commands (e.g.,
-  `312`/`313`/`317`/`319` — the server/operator/idle/channel-list parts of
-  a fuller `WHOIS` reply this release doesn't implement) are still defined
-  in the full numeric catalog (irc-numeric-replies.md) for the same
-  reason — a client library needs to be able to parse them from *any*
-  server's responses, not only ones this server currently sends.
+  `317`/`319` — the idle-time/channel-list parts of a fuller `WHOIS` reply
+  this release doesn't implement; `312`/`313` are sent, see "User Queries"
+  above) are still defined in the full numeric catalog
+  (irc-numeric-replies.md) for the same reason — a client library needs to
+  be able to parse them from *any* server's responses, not only ones this
+  server currently sends.
 - This table does not change what any FR requires the server to *do* —
   it documents what the wire-protocol layer can *parse and represent*.
   Moving a "Recognized only" command to "Implemented" in a future release
