@@ -29,9 +29,17 @@ administrator action required.
 PKCS12 form, Clarifications) — `record Listener(int port, boolean tls, String certPath, String
 keyPath, String keystorePath, String keystorePassword)`. Exactly one of the two forms — both
 `certPath` and `keyPath` present, or `keystorePath` present — is valid for a listener with
-`tls: true`; `keystorePassword` is optional even with `keystorePath`, defaulting to `"changeit"`
-(the same default `jircd.tls.keystorePassword` already used, preserved for familiarity — not a
-new design fork).
+`tls: true`; `keystorePassword` is REQUIRED whenever `keystorePath` is set, with no default
+substituted (`ConfigurationLoader` rejects a `keystorePath` with no `keystorePassword` the same
+way it rejects any other incomplete certificate configuration).
+
+**Amendment**: The original decision here defaulted `keystorePassword` to `"changeit"` (the same
+default the pre-004 `jircd.tls.keystorePassword` system property already used), reasoned as "not
+a new design fork." Reconsidered after implementation: a PKCS12 keystore's password isn't just an
+access gate, it's the key-derivation input for the password-based encryption protecting the
+private key entry inside the file — a well-known default like `"changeit"` (flagged by CIS/OWASP
+as a known-default-credential smell) means anyone who obtains the `.p12` file also trivially
+obtains the key. No default is substituted now; the administrator must supply one explicitly.
 
 **Rationale**: A `Listener` is already the natural per-endpoint scope (`tls` itself is already
 per-listener) — reusing it avoids introducing a second, parallel "certificate" entity that would
@@ -103,6 +111,16 @@ manually re-wrapping the key in a PKCS#8 `PrivateKeyInfo` DER structure (a disti
 involved parsing path with its own failure modes) for a format the primary motivating workflow
 doesn't produce. An administrator with a PKCS#1 key can convert it with `openssl pkcs8 -topk8
 -nocrypt` — a single well-known command, not a jircd-side gap.
+
+**Amendment**: A passphrase-encrypted PEM key (`-----BEGIN ENCRYPTED PRIVATE KEY-----`) is real,
+if uncommon in practice — certbot itself never produces one (an encrypted key needs a human to
+type a passphrase on every unattended renewal/restart, defeating the point of automated renewal),
+but nothing stops an administrator from manually re-encrypting certbot's output, or using a
+different ACME client that does. Still out of scope for decryption support (spec.md Assumptions),
+but `readPemPrivateKey` now detects both the encrypted-PKCS#8 and legacy-PKCS#1 headers before
+attempting to parse, and fails with a specific message naming which unsupported format was found
+and the `openssl pkcs8` command to fix it — instead of the generic `InvalidKeySpecException`
+either would otherwise produce, which gave no indication of *why* the key was unreadable.
 
 ## The zero-config default listener list (FR-003, FR-004 applied)
 

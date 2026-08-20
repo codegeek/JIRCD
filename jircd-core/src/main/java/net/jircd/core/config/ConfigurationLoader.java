@@ -15,7 +15,9 @@
  */
 package net.jircd.core.config;
 
+import java.io.IOException;
 import java.io.InputStream;
+import java.security.GeneralSecurityException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -152,9 +154,71 @@ public final class ConfigurationLoader {
         throw new ConfigurationException("listeners entry missing a valid 'port': " + entry);
       }
       boolean tls = map.containsKey("tls") && asBoolean(map.get("tls"));
-      listeners.add(new ServerConfiguration.Listener((Integer) port, tls));
+      String certPath = asString(map.get("certPath"));
+      String keyPath = asString(map.get("keyPath"));
+      String keystorePath = asString(map.get("keystorePath"));
+      String keystorePassword = asString(map.get("keystorePassword"));
+
+      ServerConfiguration.Listener listener =
+          new ServerConfiguration.Listener(
+              (Integer) port, tls, certPath, keyPath, keystorePath, keystorePassword);
+
+      // Cert fields on a tls: false listener are left untouched, not validated — the same
+      // precedent this method already had of only reading recognized keys and ignoring
+      // anything else present in a listener's map (004-fix-tls-certificate research.md
+      // "Validation rules").
+      if (tls) {
+        validateAndLoadCertificate(listener);
+      }
+      listeners.add(listener);
     }
     return listeners;
+  }
+
+  private static void validateAndLoadCertificate(ServerConfiguration.Listener listener)
+      throws ConfigurationException {
+    boolean hasCertPath = listener.certPath() != null;
+    boolean hasKeyPath = listener.keyPath() != null;
+    boolean hasKeystorePath = listener.keystorePath() != null;
+
+    if (hasCertPath != hasKeyPath) {
+      throw new ConfigurationException(
+          "listener on port "
+              + listener.port()
+              + " requests TLS with an incomplete PEM certificate/key pair — both 'certPath'"
+              + " and 'keyPath' are required together");
+    }
+    boolean hasPemPair = hasCertPath && hasKeyPath;
+    if (hasPemPair && hasKeystorePath) {
+      throw new ConfigurationException(
+          "listener on port "
+              + listener.port()
+              + " requests TLS with both a PEM certificate/key pair and a 'keystorePath' —"
+              + " exactly one certificate source is allowed per listener");
+    }
+    if (!hasPemPair && !hasKeystorePath) {
+      throw new ConfigurationException(
+          "listener on port "
+              + listener.port()
+              + " requests TLS but no certificate is configured — set 'certPath'/'keyPath' or"
+              + " 'keystorePath'");
+    }
+    if (hasKeystorePath && listener.keystorePassword() == null) {
+      throw new ConfigurationException(
+          "listener on port "
+              + listener.port()
+              + " configures 'keystorePath' but no 'keystorePassword' — a password is required,"
+              + " no default is substituted");
+    }
+    try {
+      TlsCertificateLoader.load(listener);
+    } catch (GeneralSecurityException | IOException e) {
+      throw new ConfigurationException(
+          "listener on port "
+              + listener.port()
+              + " has an invalid TLS certificate configuration: "
+              + e.getMessage());
+    }
   }
 
   @SuppressWarnings("unchecked")

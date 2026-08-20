@@ -273,15 +273,16 @@ public final class JircdServerApplication {
   }
 
   public void start() throws IOException, GeneralSecurityException {
+    // No TLS entry in the zero-config default (004-fix-tls-certificate, research.md "The
+    // zero-config default listener list") — a TLS listener with no certificate configured now
+    // refuses to start, so defaulting to one here would break the simplest possible quickstart.
     List<ServerConfiguration.Listener> listeners =
         configuration.listeners().isEmpty()
-            ? List.of(
-                new ServerConfiguration.Listener(6667, false),
-                new ServerConfiguration.Listener(6697, true))
+            ? List.of(new ServerConfiguration.Listener(6667, false))
             : configuration.listeners();
     for (ServerConfiguration.Listener listener : listeners) {
       if (listener.tls()) {
-        tlsListener = new TlsListener(listener.port(), connectionHandler);
+        tlsListener = new TlsListener(listener, connectionHandler);
         tlsListener.start();
         LOG.info("TLS listener started on port {}", listener.port());
       } else {

@@ -19,6 +19,7 @@ import java.io.IOException;
 import java.security.GeneralSecurityException;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLServerSocket;
+import net.jircd.core.config.ServerConfiguration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,12 +35,12 @@ public final class TlsListener implements AutoCloseable {
   private final ConnectionHandler connectionHandler;
   private volatile boolean running = true;
 
-  public TlsListener(int port, ConnectionHandler connectionHandler)
+  public TlsListener(ServerConfiguration.Listener listener, ConnectionHandler connectionHandler)
       throws IOException, GeneralSecurityException {
     this.connectionHandler = connectionHandler;
-    SSLContext sslContext = TlsSupport.buildServerContext();
+    SSLContext sslContext = TlsSupport.buildServerContext(listener);
     this.serverSocket =
-        (SSLServerSocket) sslContext.getServerSocketFactory().createServerSocket(port);
+        (SSLServerSocket) sslContext.getServerSocketFactory().createServerSocket(listener.port());
   }
 
   public void start() {

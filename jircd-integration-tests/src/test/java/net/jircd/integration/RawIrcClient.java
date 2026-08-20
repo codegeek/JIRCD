@@ -56,6 +56,23 @@ public final class RawIrcClient implements AutoCloseable {
     return new RawIrcClient(context.getSocketFactory().createSocket("localhost", port));
   }
 
+  /**
+   * The SHA-256 fingerprint of the server certificate presented during this connection's TLS
+   * handshake — for tests proving certificate identity persists across a restart
+   * (004-fix-tls-certificate SC-001). Only valid for a connection made via {@link
+   * #connectTls(int)}.
+   */
+  public String peerCertificateFingerprint() throws Exception {
+    // Borrowed reference to this instance's own still-open socket — closed by this class's own
+    // close(), not here.
+    @SuppressWarnings("PMD.CloseResource")
+    var sslSocket = (javax.net.ssl.SSLSocket) socket;
+    var certificate = sslSocket.getSession().getPeerCertificates()[0];
+    var digest = java.security.MessageDigest.getInstance("SHA-256");
+    byte[] hash = digest.digest(certificate.getEncoded());
+    return java.util.HexFormat.of().formatHex(hash);
+  }
+
   public void send(String line) throws IOException {
     out.write((line + "\r\n").getBytes(StandardCharsets.UTF_8));
     out.flush();

@@ -37,7 +37,26 @@ public record ServerConfiguration(
     int operFailureThreshold,
     int whowasHistorySize) {
 
-  public record Listener(int port, boolean tls) {}
+  /**
+   * {@code certPath}/{@code keyPath} (a PEM certificate/chain and its PEM private key) and {@code
+   * keystorePath}/{@code keystorePassword} (a PKCS12 keystore) are two mutually exclusive ways to
+   * supply a certificate for a {@code tls: true} listener (004-fix-tls-certificate FR-001, FR-002,
+   * FR-005) — at most one form may be set, and a {@code tls: true} listener MUST have exactly one
+   * of them set (validated at load time, {@code ConfigurationLoader}). Ignored for a {@code tls:
+   * false} listener.
+   */
+  public record Listener(
+      int port,
+      boolean tls,
+      String certPath,
+      String keyPath,
+      String keystorePath,
+      String keystorePassword) {
+
+    public Listener(int port, boolean tls) {
+      this(port, tls, null, null, null, null);
+    }
+  }
 
   public record RateLimit(int bucketSize, double refillRatePerSecond) {}
 

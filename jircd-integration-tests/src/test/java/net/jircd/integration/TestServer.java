@@ -17,6 +17,7 @@ package net.jircd.integration;
 
 import at.favre.lib.crypto.bcrypt.BCrypt;
 import java.io.IOException;
+import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import net.jircd.server.JircdServerApplication;
@@ -99,16 +100,37 @@ public final class TestServer implements AutoCloseable {
 
   /**
    * The {@code serverName}/{@code listeners} preamble every config in this test suite starts with.
+   * The TLS listener references a throwaway, long-lived fixture certificate ({@code
+   * src/test/resources/tls/}) — since 004-fix-tls-certificate, a {@code tls: true} listener with no
+   * certificate configured refuses to start, so every test relying on this base config needs a real
+   * (if fake) one.
    */
   public static String baseYaml() {
-    return """
-        serverName: test.jircd.local
-        listeners:
-          - port: 0
-            tls: false
-          - port: 0
-            tls: true
-        """;
+    return "serverName: test.jircd.local\n"
+        + "listeners:\n"
+        + "  - port: 0\n"
+        + "    tls: false\n"
+        + "  - port: 0\n"
+        + "    tls: true\n"
+        + "    certPath: \""
+        + resourcePath("tls/test-fullchain.pem")
+        + "\"\n"
+        + "    keyPath: \""
+        + resourcePath("tls/test-privkey.pem")
+        + "\"\n";
+  }
+
+  /** Absolute filesystem path to a test resource, for config keys that expect a real file path. */
+  public static String resourcePath(String classpathName) {
+    var url = TestServer.class.getClassLoader().getResource(classpathName);
+    if (url == null) {
+      throw new IllegalStateException("Missing test resource: " + classpathName);
+    }
+    try {
+      return Path.of(url.toURI()).toString();
+    } catch (URISyntaxException e) {
+      throw new IllegalStateException("Malformed test resource URL: " + url, e);
+    }
   }
 
   public int plaintextPort() {

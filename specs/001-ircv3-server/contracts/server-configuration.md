@@ -45,6 +45,18 @@ listeners:
     tls: false
   - port: 6697
     tls: true          # optional TLS listener (FR-018); plaintext MUST remain available unless the admin removes it
+    certPath: /etc/letsencrypt/live/example.org/fullchain.pem  # PEM cert/chain (004-fix-tls-certificate FR-001/FR-002)
+    keyPath: /etc/letsencrypt/live/example.org/privkey.pem     # PEM private key — required together with certPath
+  # Alternative certificate form for the same listener (mutually exclusive with certPath/keyPath):
+  #   keystorePath: /etc/jircd/keystore.p12       # PKCS12 keystore (FR-005)
+  #   keystorePassword: <required — no default>   # REQUIRED if keystorePath is set; a well-known
+  #                                                # default like "changeit" would defeat PKCS12's
+  #                                                # own password-based encryption of the key entry
+  # A `tls: true` listener with neither form configured refuses to start (FR-003/FR-004) — no
+  # certificate is ever generated automatically, unlike releases before 004-fix-tls-certificate.
+  # A passphrase-encrypted or legacy PKCS#1 PEM private key is rejected with a specific message
+  # naming the problem, not a generic parse failure — jircd only reads an unencrypted PKCS#8 key
+  # (Let's Encrypt/certbot's own default output).
 
 # channel moderation and capability negotiation are core (FR-035, FR-036)
 # and never appear in either section below — see data-model.md "Extension".
@@ -78,6 +90,22 @@ administratorCredentials:
   `rateLimit` value MUST cause the server to refuse to start with an error
   naming the exact offending key/value (FR-012, SC-008) — not a stack
   trace, not a silent default substitution.
+- **A `tls: true` listener's certificate IS part of the "refuse to start" validation set**
+  (004-fix-tls-certificate FR-003, FR-004, FR-006): it MUST have exactly one of
+  `certPath`+`keyPath` (both required together — an incomplete pair is rejected) or
+  `keystorePath` configured; both forms present, or neither, is rejected the same way a
+  malformed listener or rate-limit value is. `keystorePath` additionally requires
+  `keystorePassword` — no default is substituted (a well-known default like `"changeit"` would
+  defeat PKCS12's own password-based encryption of the key entry), so a `keystorePath` with no
+  `keystorePassword` is rejected the same way. Whichever form is present is actually loaded and
+  parsed at this same startup pass — an unreadable file, invalid PEM, a key that doesn't match
+  the certificate, a wrong keystore password, or a passphrase-encrypted/legacy-PKCS#1 PEM key
+  (both rejected with a specific message naming the problem) all fail startup immediately, never
+  only on a client's first TLS handshake attempt. No certificate is ever generated automatically;
+  a `tls: false` listener's certificate fields, if present, are ignored, not validated. Omitting
+  `listeners` entirely uses the zero-config default of a single plaintext listener on `6667` —
+  no TLS entry, since one with no certificate configured would otherwise fail this same
+  validation.
 - **`nicknameMaxLength`/`channelNameMaxLength`/`topicMaxLength` ARE part
   of the "refuse to start" validation set** (FR-056): each, if set, MUST
   be a positive integer not exceeding `400`; a non-positive value, a

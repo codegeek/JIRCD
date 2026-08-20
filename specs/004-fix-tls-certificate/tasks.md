@@ -46,11 +46,11 @@ TLS listener with no certificate — a working test fixture certificate, without
 existing test suite (every feature from `001` through `003`) would start failing the moment
 Story 2's validation lands.
 
-- [ ] T001 [P] Extend `ServerConfiguration.Listener` with four new optional fields —
+- [X] T001 [P] Extend `ServerConfiguration.Listener` with four new optional fields —
   `certPath`, `keyPath` (the PEM form), `keystorePath`, `keystorePassword` (the PKCS12 form) — in
   `jircd-core/src/main/java/net/jircd/core/config/ServerConfiguration.java`
   (research.md "Config schema for a listener's certificate")
-- [ ] T002 [P] Generate a throwaway self-signed PEM certificate/key pair (`openssl req -x509
+- [X] T002 [P] Generate a throwaway self-signed PEM certificate/key pair (`openssl req -x509
   -newkey rsa:2048 -nodes ...`, matching quickstart.md's Setup section) as committed test
   resources, and update `TestServer.baseYaml()` to reference them via `certPath`/`keyPath` on its
   default TLS listener, so every existing and new integration test that starts a TLS-enabled
@@ -71,7 +71,7 @@ referenced from configuration, and uses it for real TLS handshakes.
 **Independent Test**: Configure a listener with a PEM-encoded certificate and key, start the
 server, and verify a TLS client can complete a handshake and see that exact certificate.
 
-- [ ] T003 [US3] Implement PEM certificate/key loading in `buildServerContext` (or a new helper
+- [X] T003 [US3] Implement PEM certificate/key loading in `buildServerContext` (or a new helper
   it calls): parse the certificate with `CertificateFactory.getInstance("X.509")
   .generateCertificate(...)` directly against the PEM bytes; parse the private key by stripping
   the `-----BEGIN/END PRIVATE KEY-----` PEM delimiters, base64-decoding, and loading via
@@ -80,19 +80,19 @@ server, and verify a TLS client can complete a handshake and see that exact cert
   ever written, in
   `jircd-core/src/main/java/net/jircd/core/session/TlsSupport.java`
   (research.md "PEM parsing")
-- [ ] T004 [US3] Implement PKCS12 keystore-path loading (reusing the existing
+- [X] T004 [US3] Implement PKCS12 keystore-path loading (reusing the existing
   `KeyStore.getInstance("PKCS12")` load logic, now driven by the configured `keystorePath`/
   `keystorePassword` instead of a system property), and remove the
   `jircd.tls.keystore`/`jircd.tls.keystorePassword` system-property reads and
   `selfSignedKeystorePath()`'s `keytool`-shelling entirely, in the same file
   (research.md "Removing the system-property path")
-- [ ] T005 [US3] Change `buildServerContext()`'s signature to accept the resolved
+- [X] T005 [US3] Change `buildServerContext()`'s signature to accept the resolved
   `ServerConfiguration.Listener` (or its cert-bearing fields) instead of reading system
   properties, and update `TlsListener`'s constructor to pass it through, in
   `jircd-core/src/main/java/net/jircd/core/session/TlsSupport.java` and
   `jircd-core/src/main/java/net/jircd/core/session/TlsListener.java`
   (depends on T003, T004)
-- [ ] T006 [US3] Integration test: a listener configured with a PEM cert/key pair completes a TLS
+- [X] T006 [US3] Integration test: a listener configured with a PEM cert/key pair completes a TLS
   handshake presenting that exact certificate (FR-001/FR-002); a listener configured with a
   PKCS12 keystore path and password completes a TLS handshake presenting that exact certificate
   (FR-005), in
@@ -113,7 +113,7 @@ failure.
 the server, and verify no ephemeral certificate is generated or used, and that startup is
 refused with a clear error.
 
-- [ ] T007 [US2] Add startup-time validation to listener config-loading: for `tls: true`, reject
+- [X] T007 [US2] Add startup-time validation to listener config-loading: for `tls: true`, reject
   (`ConfigurationException` naming the offending port) if neither `(certPath` and `keyPath)` nor
   `keystorePath` is present; reject if exactly one of `certPath`/`keyPath` is present; reject if
   both a PEM pair and `keystorePath` are present; when a cert form *is* present, actually load
@@ -124,13 +124,13 @@ refused with a clear error.
   keys, in
   `jircd-core/src/main/java/net/jircd/core/config/ConfigurationLoader.java`
   (research.md "Validation rules", depends on T003, T004)
-- [ ] T008 [US2] [P] Change `JircdServerApplication.start()`'s hardcoded zero-config default
+- [X] T008 [US2] [P] Change `JircdServerApplication.start()`'s hardcoded zero-config default
   listener list from `[{6667, tls=false}, {6697, tls=true}]` to `[{6667, tls=false}]` only, so a
   server started with no `listeners` configured at all runs plaintext-only rather than
   triggering a TLS-without-certificate failure, in
   `jircd-server/src/main/java/net/jircd/server/JircdServerApplication.java`
   (research.md "The zero-config default listener list")
-- [ ] T009 [US2] Integration tests: a listener with `tls: true` and no cert fields fails startup
+- [X] T009 [US2] Integration tests: a listener with `tls: true` and no cert fields fails startup
   with a specific, identifiable error; a listener with only `certPath` (missing `keyPath`) fails;
   a listener with both a PEM pair and `keystorePath` fails; a listener with `tls: true` and a
   `certPath` pointing at a nonexistent file fails at startup, not lazily; a server started with
@@ -152,7 +152,7 @@ occurs anymore.
 fingerprint over a TLS connection, restart the server, connect again, and verify the fingerprint
 is identical.
 
-- [ ] T010 [US1] Integration test: start two independent server instances against identical
+- [X] T010 [US1] Integration test: start two independent server instances against identical
   PEM-cert-configured YAML (same `certPath`/`keyPath`), connect to each over TLS, and verify both
   present a byte-identical certificate (SC-001) — proving certificate identity is a pure function
   of the configured files, not regenerated per process start, in
@@ -166,17 +166,17 @@ feature's core problem statement, now proven fixed.
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T011 [P] Update `specs/001-ircv3-server/data-model.md`'s `listeners` field row to reflect
+- [X] T011 [P] Update `specs/001-ircv3-server/data-model.md`'s `listeners` field row to reflect
   the extended `Listener` shape (the four new optional fields, and which pair is mutually
   exclusive with which)
-- [ ] T012 [P] Update `specs/001-ircv3-server/contracts/server-configuration.md`'s `listeners`
+- [X] T012 [P] Update `specs/001-ircv3-server/contracts/server-configuration.md`'s `listeners`
   example block and "Behavioral Contract" section with the new cert-related fields and their
   startup-validation rules
-- [ ] T013 [P] Code cleanup pass: confirm `./gradlew build` runs Spotless/SpotBugs/PMD clean
+- [X] T013 [P] Code cleanup pass: confirm `./gradlew build` runs Spotless/SpotBugs/PMD clean
   across every touched module, and confirm no dead code remains in `TlsSupport.java` (unused
   `keytool`-`ProcessBuilder` imports, the now-unused `OWNER_ONLY_DIR`/`selfSignedKeystorePath`
   machinery, etc.)
-- [ ] T014 Run the full `specs/004-fix-tls-certificate/quickstart.md` validation pass manually
+- [X] T014 Run the full `specs/004-fix-tls-certificate/quickstart.md` validation pass manually
   against a running `./gradlew :jircd-server:run` instance, including a real stop/start restart
   for the SC-001 scenario (constitution UX Consistency principle's required manual
   usage-scenario check — the same precedent this project's own convergence history already

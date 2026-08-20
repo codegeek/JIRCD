@@ -15,107 +15,40 @@
  */
 package net.jircd.core.session;
 
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.attribute.FileAttribute;
-import java.nio.file.attribute.PosixFilePermission;
-import java.nio.file.attribute.PosixFilePermissions;
 import java.security.GeneralSecurityException;
 import java.security.KeyStore;
-import java.util.Set;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import net.jircd.core.config.ServerConfiguration;
+import net.jircd.core.config.TlsCertificateLoader;
 
 /**
- * Builds the {@link SSLContext} the optional TLS listener uses (FR-018). Certificate management is
- * a deployment concern, not a specification one (spec.md Assumptions) — this loads an
- * administrator-supplied PKCS12 keystore if configured ({@code jircd.tls.keystore}/{@code
- * jircd.tls.keystorePassword} system properties), or generates a self-signed one via the JDK's own
- * {@code keytool} for a usable zero-configuration default.
+ * Builds the {@link SSLContext} the optional TLS listener uses (FR-018), from a listener's
+ * explicitly configured certificate — either a PEM certificate/chain and private key pair, or a
+ * PKCS12 keystore (004-fix-tls-certificate FR-001, FR-002, FR-005), loaded via {@link
+ * TlsCertificateLoader}. {@link net.jircd.core.config.ConfigurationLoader} already guarantees,
+ * before this is ever called, that exactly one of the two forms is present — this never falls back
+ * to generating a certificate of its own.
  */
 public final class TlsSupport {
 
-  private static final Logger LOG = LoggerFactory.getLogger(TlsSupport.class);
-
   private TlsSupport() {}
 
-  public static SSLContext buildServerContext() throws GeneralSecurityException, IOException {
-    String configuredPath = System.getProperty("jircd.tls.keystore");
-    String password = System.getProperty("jircd.tls.keystorePassword", "changeit");
-
-    Path keystorePath =
-        configuredPath != null ? Path.of(configuredPath) : selfSignedKeystorePath(password);
-
-    KeyStore keyStore = KeyStore.getInstance("PKCS12");
-    try (InputStream in = new FileInputStream(keystorePath.toFile())) {
-      keyStore.load(in, password.toCharArray());
-    }
+  public static SSLContext buildServerContext(ServerConfiguration.Listener listener)
+      throws GeneralSecurityException, IOException {
+    KeyStore keyStore = TlsCertificateLoader.load(listener);
+    char[] keyPassword =
+        listener.keystorePath() != null
+            ? TlsCertificateLoader.keystorePassword(listener)
+            : TlsCertificateLoader.PEM_KEY_PASSWORD;
 
     KeyManagerFactory keyManagerFactory =
         KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
-    keyManagerFactory.init(keyStore, password.toCharArray());
+    keyManagerFactory.init(keyStore, keyPassword);
 
     SSLContext context = SSLContext.getInstance("TLS");
     context.init(keyManagerFactory.getKeyManagers(), null, null);
     return context;
-  }
-
-  private static final FileAttribute<Set<PosixFilePermission>> OWNER_ONLY_DIR =
-      PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------"));
-
-  private static Path selfSignedKeystorePath(String password) throws IOException {
-    // The shared system temp directory is world-readable/writable on most platforms (CWE-379),
-    // and keytool controls the keystore file's own permissions once it creates it — so instead,
-    // this file holding a TLS private key lives in its own owner-only-traversable directory,
-    // which keeps it inaccessible to other users regardless of the file's own mode bits.
-    Path dir = Files.createTempDirectory("jircd-tls-", OWNER_ONLY_DIR);
-    dir.toFile().deleteOnExit();
-    Path path = dir.resolve("keystore.p12");
-    path.toFile().deleteOnExit();
-    String javaHome = System.getProperty("java.home");
-    String keytool = Path.of(javaHome, "bin", "keytool").toString();
-    ProcessBuilder pb =
-        new ProcessBuilder(
-            keytool,
-            "-genkeypair",
-            "-alias",
-            "jircd",
-            "-keyalg",
-            "RSA",
-            "-keysize",
-            "2048",
-            "-validity",
-            "3650",
-            "-keystore",
-            path.toString(),
-            "-storetype",
-            "PKCS12",
-            "-storepass",
-            password,
-            "-keypass",
-            password,
-            "-dname",
-            "CN=jircd-self-signed");
-    // No stdout/stderr piping — nothing reads it, and a Process's stream is a Closeable
-    // resource we'd otherwise have to manage; DISCARD avoids creating the pipe at all.
-    pb.redirectOutput(ProcessBuilder.Redirect.DISCARD);
-    pb.redirectError(ProcessBuilder.Redirect.DISCARD);
-    try {
-      Process process = pb.start();
-      int exitCode = process.waitFor();
-      if (exitCode != 0) {
-        throw new IOException("keytool exited with code " + exitCode);
-      }
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw new IOException("Interrupted while generating self-signed keystore", e);
-    }
-    LOG.info("Generated a self-signed TLS keystore at {} (no jircd.tls.keystore configured)", path);
-    return path;
   }
 }
