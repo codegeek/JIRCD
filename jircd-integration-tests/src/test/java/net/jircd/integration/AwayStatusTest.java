@@ -126,8 +126,12 @@ class AwayStatusTest {
       alice.readUntil("306", Duration.ofSeconds(5));
 
       alice.send("NICK alicia");
+      // NICK has no success reply to synchronize on (unlike JOIN/MODE's echo) — bob's WHOIS on a
+      // separate connection races the server processing alice's nickname change. A more generous
+      // timeout here doesn't eliminate that race, only makes it far less likely to be observed on
+      // a slower/contended CI runner (this exact test timed out once in CI, never locally).
       bob.send("WHOIS alicia");
-      assertThat(bob.readUntil("301", Duration.ofSeconds(5))).contains("gone for lunch");
+      assertThat(bob.readUntil("301", Duration.ofSeconds(10))).contains("gone for lunch");
     }
   }
 }
