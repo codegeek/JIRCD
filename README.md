@@ -1,6 +1,11 @@
 # JIRCD
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Quality gate status](https://sonarcloud.io/api/project_badges/measure?project=jircd_jircd-server&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=jircd_jircd-server)
+[![Bugs](https://sonarcloud.io/api/project_badges/measure?project=jircd_jircd-server&metric=bugs)](https://sonarcloud.io/summary/new_code?id=jircd_jircd-server)
+[![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=jircd_jircd-server&metric=code_smells)](https://sonarcloud.io/summary/new_code?id=jircd_jircd-server)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=jircd_jircd-server&metric=coverage)](https://sonarcloud.io/summary/new_code?id=jircd_jircd-server)
+[![Duplicated Lines (%)](https://sonarcloud.io/api/project_badges/measure?project=jircd_jircd-server&metric=duplicated_lines_density)](https://sonarcloud.io/summary/new_code?id=jircd_jircd-server)
 
 A modular IRCv3 chat server, written in Java, designed to be extended
 without touching its core.
