@@ -135,13 +135,17 @@ class IrctestConformanceFixesTest {
   }
 
   @Test
-  void namesOnANeverCreatedChannelReturnsTheSameErrorAsAHiddenChannel() throws Exception {
+  void namesOnANeverCreatedChannelIsIndistinguishableFromAHiddenChannel() throws Exception {
     try (TestServer server = TestServer.start();
         RawIrcClient alice = RawIrcClient.connectPlaintext(server.plaintextPort())) {
       alice.registerAndAwaitWelcome("alice", "alice");
 
+      // 006-complete-core-protocol Polish — NAMES has no error reply for a bad/nonexistent
+      // channel name (RFC1459 §4.2.5/RFC2812 §3.2.5); only the closing RPL_ENDOFNAMES is sent,
+      // never 403 — still indistinguishable from a hidden channel (FR-047), just via a different
+      // numeric than before this feature.
       alice.send("NAMES #never-created");
-      assertThat(alice.readUntil("403", Duration.ofSeconds(5))).contains("403");
+      assertThat(alice.readUntil("366", Duration.ofSeconds(5))).contains("366");
     }
   }
 

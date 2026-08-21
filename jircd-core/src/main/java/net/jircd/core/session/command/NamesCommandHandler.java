@@ -26,7 +26,14 @@ import net.jircd.protocol.NumericReply;
 /**
  * {@code NAMES} — current membership list of a channel, regardless of the requester's own
  * membership (FR-041); a {@code private}/{@code secret} channel is invisible to a non-member,
- * non-administrator requester, indistinguishable from a nonexistent one (FR-047).
+ * non-administrator requester, indistinguishable from a nonexistent one (FR-047). An invalid or
+ * nonexistent single channel name gets only the closing {@code RPL_ENDOFNAMES} — RFC1459
+ * §4.2.5/RFC2812 §3.2.5's own text: "there is no error reply for bad channel names"
+ * (006-complete-core-protocol Polish, a pre-existing gap found and fixed alongside this feature's
+ * bare-form addition below). A bare, argument-less {@code NAMES} lists every visible channel's
+ * membership instead (006-complete-core-protocol FR-010), applying the identical visibility rule
+ * per channel, closed by exactly one {@code RPL_ENDOFNAMES} targeted at {@code *} rather than one
+ * per channel.
  */
 public final class NamesCommandHandler implements CommandHandler {
 
@@ -46,23 +53,29 @@ public final class NamesCommandHandler implements CommandHandler {
   @Override
   public void handle(ClientSession session, Message message) {
     if (message.params().isEmpty()) {
+      for (var channel : channelRegistry.all()) {
+        if (!ChannelVisibility.isHiddenFrom(channel, session, extensionRegistry)) {
+          JoinCommandHandler.sendNamesLine(session, channel, serverName.get());
+        }
+      }
       Replies.send(
-          session,
-          serverName.get(),
-          NumericReply.ERR_NEEDMOREPARAMS,
-          "NAMES",
-          "Not enough parameters");
+          session, serverName.get(), NumericReply.RPL_ENDOFNAMES, "*", "End of /NAMES list");
       return;
     }
-    var found = channelRegistry.lookup(message.params().getFirst());
+    String requestedName = message.params().getFirst();
+    var found = channelRegistry.lookup(requestedName);
     if (found.isEmpty()
         || ChannelVisibility.isHiddenFrom(found.get(), session, extensionRegistry)) {
+      // 006-complete-core-protocol Polish — "There is no error reply for bad channel names"
+      // (RFC1459 §4.2.5/RFC2812 §3.2.5); an invalid or nonexistent single channel gets only the
+      // closing RPL_ENDOFNAMES, the same as it would if it existed but had zero visible members —
+      // never an error, unlike most other channel-targeted commands.
       Replies.send(
           session,
           serverName.get(),
-          NumericReply.ERR_NOSUCHCHANNEL,
-          message.params().getFirst(),
-          "No such channel");
+          NumericReply.RPL_ENDOFNAMES,
+          requestedName,
+          "End of /NAMES list");
       return;
     }
     JoinCommandHandler.sendNamesReply(session, found.get(), serverName.get());

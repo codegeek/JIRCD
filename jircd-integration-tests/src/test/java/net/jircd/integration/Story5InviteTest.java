@@ -77,7 +77,12 @@ class Story5InviteTest {
       carol.send("INVITE bob #lobby");
       assertThat(carol.readUntil("341", Duration.ofSeconds(5))).contains("341");
 
-      // INVITE from a sender who isn't a member of the target channel is rejected
+      // INVITE from a sender who isn't a member of an EXISTING target channel is rejected — using
+      // an existing channel here specifically, since inviting to a not-yet-existing one now
+      // succeeds instead (006-complete-core-protocol FR-013, covered by
+      // InviteNotYetExistingChannelTest).
+      alice.send("JOIN #other");
+      alice.readUntil("353", Duration.ofSeconds(5));
       bob.send("INVITE carol #other");
       assertThat(bob.readUntil("442", Duration.ofSeconds(5))).contains("442");
     }

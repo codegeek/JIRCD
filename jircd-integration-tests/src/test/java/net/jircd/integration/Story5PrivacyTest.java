@@ -44,8 +44,11 @@ class Story5PrivacyTest {
       bob.send("TOPIC #secret");
       assertThat(bob.readUntil("403", Duration.ofSeconds(5))).contains("403");
 
+      // 006-complete-core-protocol Polish — NAMES has no error reply for a bad/hidden channel
+      // name (RFC1459 §4.2.5/RFC2812 §3.2.5); a non-member sees only the closing RPL_ENDOFNAMES,
+      // never 403 — indistinguishable from the channel simply not existing (FR-047).
       bob.send("NAMES #secret");
-      assertThat(bob.readUntil("403", Duration.ofSeconds(5))).contains("403");
+      assertThat(bob.readUntil("366", Duration.ofSeconds(5))).contains("366");
 
       bob.send("LIST");
       String bobList = bob.readUntil("323", Duration.ofSeconds(5)); // RPL_LISTEND

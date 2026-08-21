@@ -24,14 +24,17 @@ import net.jircd.core.session.Channel;
 import net.jircd.core.session.ChannelRegistry;
 import net.jircd.core.session.ChannelVisibility;
 import net.jircd.core.session.ClientSession;
+import net.jircd.core.session.CoreChannelModes;
 import net.jircd.protocol.Command;
 import net.jircd.protocol.Message;
 import net.jircd.protocol.NumericReply;
 
 /**
- * {@code TOPIC} — view (any client, FR-041's discovery framing) or set (operator-only, FR-040) a
- * channel's topic; a {@code private}/{@code secret} channel is invisible to a non-member,
- * non-administrator requester, indistinguishable from a nonexistent one (FR-047).
+ * {@code TOPIC} — view (any client, FR-041's discovery framing) or set a channel's topic; setting
+ * requires operator privilege (FR-040) only while {@code topic-lock} is active
+ * (006-complete-core-protocol FR-008/FR-009) — any member may set it otherwise. A {@code
+ * private}/{@code secret} channel is invisible to a non-member, non-administrator requester,
+ * indistinguishable from a nonexistent one (FR-047).
  */
 public final class TopicCommandHandler implements CommandHandler {
 
@@ -87,7 +90,10 @@ public final class TopicCommandHandler implements CommandHandler {
       return;
     }
 
-    if (!channel.operators().contains(session)) {
+    // 006-complete-core-protocol FR-008/FR-009 — operator privilege is only required while
+    // topic-lock is active; any member may set the topic when it's off.
+    if (channel.activeModes().contains(CoreChannelModes.TOPIC_LOCK)
+        && !channel.operators().contains(session)) {
       Replies.send(
           session,
           serverName.get(),

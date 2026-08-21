@@ -188,20 +188,27 @@ scan `mostRecentFor` already does, collecting every match into a list, sorting b
 `disconnectedAt` descending, then truncating to `count` entries UNLESS `count <= 0`, in which
 case every retained match for that nickname is returned unbounded (RFC1459 §4.5.3/RFC2812
 §3.6.3's own text is explicit: *"If a non-positive number is passed as being `<count>`, then a
-full search is done"* — Modern IRC's docs restate the same rule). `mostRecentFor(nickname)`
-itself is unchanged (still used for the no-count-given path, FR-015) or reimplemented as
-`mostRecentNFor(nickname, 1).stream().findFirst()` — either is behavior-equivalent; the simpler
-one-line delegation is preferred to avoid two independent scan implementations.
+full search is done"* — Modern IRC's docs restate the same rule). `mostRecentFor(nickname)` keeps
+its own narrower single-entry meaning (delegating to `mostRecentNFor(nickname,
+1).stream().findFirst()`), used only where a genuine single-entry lookup is wanted — it is
+deliberately NOT what `WhowasCommandHandler` calls for its own no-count-given path (see below).
 `WhowasCommandHandler.handle()` reads an optional second parameter
-(`message.params().size() > 1`) and parses it as an integer; a present-but-non-numeric value is
-treated the same as `0` (a full search) rather than as absent — leniently satisfying the same
-"don't reject on a malformed optional refinement, fall back to the broadest reasonable behavior"
-posture the RFC text itself already mandates for the numeric-but-non-positive case, not a new
-policy invented for this codebase. The handler then loops `RPL_WHOWASUSER` once per returned
-entry (each resolving `hostname` via the identical FR-038 administrator-vs-presented check the
-current single-entry path already does) before the unconditional closing `369 RPL_ENDOFWHOWAS` —
-confirmed directly against `irctest`'s own `whowas.py::testWhowasCount1`/`testWhowasCount2`/
-`testWhowasCountNegative`/`testWhowasCountZero`.
+(`message.params().size() > 1`) and parses it as an integer; a present-but-non-numeric value, an
+entirely absent one, and an explicit non-positive one are ALL treated identically — full search
+(`count = 0` passed to `mostRecentNFor`) — leniently satisfying the same "don't reject on a
+malformed optional refinement, fall back to the broadest reasonable behavior" posture the RFC
+text itself already mandates for the numeric-but-non-positive case, extended to the omitted case
+too. **Correction during implementation**: this feature's own initial draft assumed an omitted
+count should keep returning exactly one entry (preserving the pre-006 behavior verbatim) — this
+was disproven by `irctest`'s own non-deprecated `whowas.py::testWhowasMultiple`, which sends
+`WHOWAS nick2` with NO count parameter and still asserts BOTH retained entries come back. FR-015
+and this decision were corrected to match once this was caught during the T026 irctest re-run,
+before this feature's implementation was considered complete. The handler loops `RPL_WHOWASUSER`
+once per returned entry (each resolving `hostname` via the identical FR-038
+administrator-vs-presented check the pre-006 single-entry path already did) before the
+unconditional closing `369 RPL_ENDOFWHOWAS` — confirmed against `irctest`'s own
+`whowas.py::testWhowasMultiple`/`testWhowasCount1`/`testWhowasCount2`/`testWhowasCountNegative`/
+`testWhowasCountZero`.
 
 **Rationale**: `WhowasHistory` was already confirmed, by reading its actual source, to be a
 single *global*, bounded ring buffer (`Deque<WhowasEntry>`, capacity-limited across *all*

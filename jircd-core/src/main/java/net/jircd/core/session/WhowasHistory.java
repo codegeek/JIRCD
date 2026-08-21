@@ -16,7 +16,10 @@
 package net.jircd.core.session;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Deque;
+import java.util.List;
 import java.util.Optional;
 import java.util.function.IntSupplier;
 
@@ -49,15 +52,27 @@ public final class WhowasHistory {
 
   /** The most recent entry for {@code nickname} (rfc1459-casemapped), if any. */
   public synchronized Optional<WhowasEntry> mostRecentFor(String nickname) {
+    return mostRecentNFor(nickname, 1).stream().findFirst();
+  }
+
+  /**
+   * Up to {@code count} of the most recently retained entries for {@code nickname}
+   * (rfc1459-casemapped), most recent first (006-complete-core-protocol FR-014/FR-015). A
+   * non-positive {@code count} returns every retained match instead — RFC1459 §4.5.3/RFC2812
+   * §3.6.3's own "if a non-positive number is passed... a full search is done" rule.
+   */
+  public synchronized List<WhowasEntry> mostRecentNFor(String nickname, int count) {
     String folded = CaseMapping.fold(nickname);
-    WhowasEntry mostRecent = null;
+    List<WhowasEntry> matches = new ArrayList<>();
     for (WhowasEntry candidate : entries) {
-      if (CaseMapping.fold(candidate.nickname()).equals(folded)
-          && (mostRecent == null
-              || candidate.disconnectedAt().isAfter(mostRecent.disconnectedAt()))) {
-        mostRecent = candidate;
+      if (CaseMapping.fold(candidate.nickname()).equals(folded)) {
+        matches.add(candidate);
       }
     }
-    return Optional.ofNullable(mostRecent);
+    matches.sort(Comparator.comparing(WhowasEntry::disconnectedAt).reversed());
+    if (count > 0 && matches.size() > count) {
+      return matches.subList(0, count);
+    }
+    return matches;
   }
 }

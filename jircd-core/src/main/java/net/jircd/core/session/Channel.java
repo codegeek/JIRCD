@@ -40,6 +40,8 @@ public final class Channel {
   private final List<BanEntry> bans = new CopyOnWriteArrayList<>();
   private final Set<String> invited = ConcurrentHashMap.newKeySet();
   private volatile String topic;
+  private volatile int memberLimit;
+  private volatile String key;
 
   public Channel(String name) {
     this.name = name;
@@ -80,6 +82,31 @@ public final class Channel {
 
   public void setTopic(String topic) {
     this.topic = topic;
+  }
+
+  /**
+   * The {@code user-limit} channel mode's current value (006-complete-core-protocol FR-001) —
+   * {@code 0} means unset (no limit), mirroring {@code topic}'s {@code null}-means-unset shape but
+   * using {@code 0} since a real limit is always positive.
+   */
+  public int memberLimit() {
+    return memberLimit;
+  }
+
+  public void setMemberLimit(int memberLimit) {
+    this.memberLimit = memberLimit;
+  }
+
+  /**
+   * The {@code channel-key} channel mode's current value (006-complete-core-protocol FR-004) —
+   * {@code null} means unset.
+   */
+  public String key() {
+    return key;
+  }
+
+  public void setKey(String key) {
+    this.key = key;
   }
 
   public boolean isEmpty() {

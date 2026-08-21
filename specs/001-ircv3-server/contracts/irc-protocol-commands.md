@@ -620,11 +620,11 @@ any given server to implement it.
 | `SQUIT` | 3.1.8 | Recognized only — server-to-server command; this release has no server-to-server interface at all (FR-021) |
 | `JOIN` | 3.2.1 | **Implemented** — see "Channel Operations" above |
 | `PART` | 3.2.2 | **Implemented** — see "Channel Operations" above |
-| `MODE` (channel) | 3.2.3 | **Implemented** — see "Moderation" above (`+m`/members-only variants only; other channel mode flags, and a bare mode query, are scoped out per FR-043, not merely recognized-only-and-forgotten) |
+| `MODE` (channel) | 3.2.3 | **Implemented** — see "Moderation" above; every core flag in the Full Channel Mode Catalog below is now implemented (006-complete-core-protocol completes `t`/`l`/`k`) except a bare mode query, still scoped out per FR-043 |
 | `TOPIC` | 3.2.4 | **Implemented** — see "Channel Operations" above |
-| `NAMES` | 3.2.5 | **Implemented** — see "Channel Operations" above (requires a channel argument; a bare, argument-less global `NAMES` is not implemented) |
+| `NAMES` | 3.2.5 | **Implemented** — see "Channel Operations" above; a bare, argument-less `NAMES` (006-complete-core-protocol FR-010) lists every channel visible to the requester, applying the same private/secret visibility rule as the single-channel form, closed by one `366` targeted at `*`. An invalid or nonexistent single channel name gets only the closing `366`, never an error (006-complete-core-protocol Polish — RFC1459 §4.2.5/RFC2812 §3.2.5's own "there is no error reply for bad channel names," a pre-existing gap fixed alongside the bare form) |
 | `LIST` | 3.2.6 | **Implemented** — see "Channel Operations" above |
-| `INVITE` | 3.2.7 | **Implemented** — see "Moderation" above (FR-065); paired with the `invite-only` (`i`) flag in the Full Channel Mode Catalog below, the same way both were previously Reserved/Recognized-only together |
+| `INVITE` | 3.2.7 | **Implemented** — see "Moderation" above (FR-065); paired with the `invite-only` (`i`) flag in the Full Channel Mode Catalog below, the same way both were previously Reserved/Recognized-only together. Inviting to a channel name that doesn't exist anywhere on the server succeeds (006-complete-core-protocol FR-013 — RFC 2812 §3.2.7's own error set has no not-found-channel case) as a one-time notification only, never creating the channel; an existing channel the inviter isn't a member of is still rejected with `442` |
 | `KICK` | 3.2.8 | **Implemented** — see "Moderation" above |
 | `PRIVMSG` | 3.3.1 | **Implemented** — see "Channel Operations" above |
 | `NOTICE` | 3.3.2 | **Implemented** — see "Channel Operations" above |
@@ -704,9 +704,9 @@ represent.
 | `p` | 4.2.1 | `private` | `BOOLEAN` | `DISCOVER` | **Implemented** (`CORE`, FR-047) — see "Moderation" above; treated identically to `secret` in this release (mutually exclusive with it, data-model.md `Channel` validation rules), not the softer "listed but obscured" variant some historical networks gave `private` alone |
 | `s` | 4.2.2 | `secret` | `BOOLEAN` | `DISCOVER` | **Implemented** (`CORE`, FR-047) — see "Moderation" above |
 | `i` | 4.2.3 | `invite-only` | `BOOLEAN` | `JOIN` | **Implemented** (`CORE`, FR-065) — see "Moderation" above; state lives in `Channel.activeModes` like every other `BOOLEAN` flag, with its own dedicated bookkeeping field, `Channel.invited` (data-model.md), for which nicknames currently hold a usable invitation — paired with the `INVITE` command (above), matching RFC 2812 §3.2.7/§4.2.3's own treatment of the two as one feature |
-| `t` | 4.2.4 | `topic-lock` | `BOOLEAN` | — | Reserved — this release's topic-setting restriction (FR-040) is core and unconditionally operator-only, not toggleable the way real `+t` is, and isn't `ChannelMode`-driven at all; see note below |
-| `l` | 4.2.7 | `user-limit` | `VALUE` | `JOIN` | Reserved — not representable by `Channel.activeModes` in this release (data-model.md `ChannelMode` validation rules) |
-| `k` | 4.2.9 | `channel-key` | `VALUE` | `JOIN` | Reserved — same limitation as `user-limit` |
+| `t` | 4.2.4 | `topic-lock` | `BOOLEAN` | — | **Implemented** (`CORE`, 006-complete-core-protocol FR-007 through FR-009) — toggleable; `TOPIC`-setting requires operator privilege only while active, any member may set it otherwise; consulted directly by `TopicCommandHandler`, not through `gates` (topic-setting isn't a modeled `GateAction`) |
+| `l` | 4.2.7 | `user-limit` | `VALUE_SET_ONLY` | `JOIN` | **Implemented** (`CORE`, 006-complete-core-protocol FR-001 through FR-003) — state lives in `Channel.memberLimit`, not `activeModes`; a parameter is present only when setting, per its `CHANMODES` category |
+| `k` | 4.2.9 | `channel-key` | `VALUE_ALWAYS` | `JOIN` | **Implemented** (`CORE`, 006-complete-core-protocol FR-004 through FR-006) — state lives in `Channel.key`, not `activeModes`; a parameter is present on both setting and unsetting, per its `CHANMODES` category — the removed value on `-k` is never checked against the current key. A `+k` value that's empty or contains a space is silently ignored rather than applied (never checked back via `JOIN`'s own space-delimited key grammar) — one of the outcomes `irctest`'s own `testKeyValidation` explicitly accepts |
 | `b` | 4.2.8 | `ban-mask` | `LIST` | `SEND`, `JOIN` | **Implemented** (`CORE`, FR-062) — see "Moderation" above; state lives in `Channel.bans` (data-model.md `BanEntry`), not `activeModes` — the first `LIST`-kind flag this release implements. `gates: {SEND, JOIN}` is wider than RFC 2811's `JOIN`-only wording, but matches the modern IRC client protocol specification's own definition of `ban-mask` (masks "banned from joining or speaking in the channel") — an already-present matching member is muted (`SEND` blocked, `404`), not just future joiners blocked (`JOIN` blocked, `474`); this is the current spec-aligned reading, not an RFC-compliance gap |
 | `o` | 4.1 | `operator` | `MEMBER` | — | **Implemented** (`CORE`, FR-013/FR-046) — see "Moderation" above; state lives in `Channel.operators` (data-model.md), not `activeModes`; first-join-gets-operator (FR-013) is the only path to a channel's *first* operator, `MODE +o`/`-o` (FR-046) is how it spreads afterward |
 | `v` | 4.1 | `voice` | `MEMBER` | — | **Implemented** (`CORE`, FR-045) — see "Moderation" above; state lives in `Channel.voiced` (data-model.md), not `activeModes` |
@@ -755,20 +755,23 @@ represent.
   `voice` never had — it's the only way a channel's very first operator
   is ever established, since `MODE +o` always requires an existing
   operator to issue it.
-- `topic-lock` deserves a specific callout: real IRC's `+t` is a
-  *toggleable* flag (some channels run with `-t`, letting anyone set the
-  topic), but this project's FR-040 hardcodes operator-only topic-setting
-  unconditionally. Implementing real `+t` later means FR-040 itself would
-  need revisiting, not just adding a `ChannelMode` — a bigger change than
-  the other reserved rows, flagged here so it isn't mistaken for a
-  same-effort addition.
-- `user-limit` and `channel-key` remain the two still-unimplemented,
-  `VALUE`-kind modes real IRC clients most commonly expect alongside
-  `ban-mask` (now implemented, FR-062); cataloging them here without
-  implementing them keeps this release's `MODE` behavior honest
-  (FR-043's `472` on anything else) while giving a future extension
-  author a name to converge on instead of inventing `channel-key` vs.
-  `chan-password` vs. `key` independently.
+- `topic-lock` is now a real, toggleable flag (006-complete-core-protocol
+  FR-007 through FR-009) — `TopicCommandHandler`'s topic-set path checks
+  `activeModes` for it directly, only requiring operator privilege while
+  it's active; a channel defaults to `-t` (any member may set the topic)
+  the same way a freshly-created channel defaults to every other
+  `BOOLEAN` flag being off.
+- `user-limit` and `channel-key` are now implemented
+  (006-complete-core-protocol FR-001 through FR-006), the first two
+  `VALUE`-kind modes this release has — split into `VALUE_SET_ONLY`
+  (`user-limit`: a parameter only when setting) and `VALUE_ALWAYS`
+  (`channel-key`: a parameter on both setting and unsetting), matching
+  `SupportedFeatures.formatChanModes()`'s own `CHANMODES` category split.
+  A pending invitation (`Channel.invited`) exempts a join from both, the
+  same exemption `invite-only` already grants — peeked once per join
+  attempt and consumed at most once, not once per gate a single
+  invitation happens to satisfy (006-complete-core-protocol research.md
+  "Story 1").
 
 ## Full User Mode Catalog (`jircd-protocol` — Wire-Protocol Recognition)
 

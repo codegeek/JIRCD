@@ -38,6 +38,12 @@ class Story1TopicTest {
       String noTopic = bob.readUntil("331", Duration.ofSeconds(5));
       assertThat(noTopic).contains("331");
 
+      // 006-complete-core-protocol FR-008/FR-009 — topic-setting is only operator-gated while
+      // topic-lock (+t) is active; a freshly-created channel defaults to +t off, so this scenario
+      // now needs +t explicitly set to exercise the non-operator-rejected case.
+      alice.send("MODE #lobby +t");
+      alice.readUntil("MODE #lobby +t", Duration.ofSeconds(5));
+
       bob.send("TOPIC #lobby :bob's topic");
       String rejected = bob.readUntil("482", Duration.ofSeconds(5));
       assertThat(rejected).contains("482");

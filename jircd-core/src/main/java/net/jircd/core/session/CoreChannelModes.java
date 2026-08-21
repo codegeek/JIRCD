@@ -20,9 +20,9 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 
 /**
- * This release's seven core, always-present channel-mode flags (contracts/irc-protocol-commands.md
- * "Full Channel Mode Catalog") — never gated by FR-011 toggling (FR-036). Command-level enforcement
- * for each rolls out story-by-story, but the catalog itself — what {@code RPL_ISUPPORT}'s {@code
+ * This release's core, always-present channel-mode flags (contracts/irc-protocol-commands.md "Full
+ * Channel Mode Catalog") — never gated by FR-011 toggling (FR-036). Command-level enforcement for
+ * each rolls out story-by-story, but the catalog itself — what {@code RPL_ISUPPORT}'s {@code
  * CHANMODES}/{@code PREFIX} and {@code 004}'s mode-letter list advertise — is complete from
  * registration onward.
  */
@@ -55,6 +55,41 @@ public final class CoreChannelModes {
   public static final ChannelMode VOICE =
       new ChannelMode("voice", 'v', ChannelMode.Kind.MEMBER, Set.of(), ChannelMode.CORE);
 
+  /**
+   * 006-complete-core-protocol FR-001 — state lives in {@code Channel.memberLimit}, not {@code
+   * activeModes} (data-model.md).
+   */
+  public static final ChannelMode USER_LIMIT =
+      new ChannelMode(
+          "user-limit",
+          'l',
+          ChannelMode.Kind.VALUE_SET_ONLY,
+          Set.of(GateAction.JOIN),
+          ChannelMode.CORE);
+
+  /**
+   * 006-complete-core-protocol FR-004 — state lives in {@code Channel.key}, not {@code activeModes}
+   * (data-model.md).
+   */
+  public static final ChannelMode CHANNEL_KEY =
+      new ChannelMode(
+          "channel-key",
+          'k',
+          ChannelMode.Kind.VALUE_ALWAYS,
+          Set.of(GateAction.JOIN),
+          ChannelMode.CORE);
+
+  /**
+   * 006-complete-core-protocol FR-007 through FR-009 — {@code gates} is empty because topic-setting
+   * isn't one of {@link GateAction}'s three modeled actions ({@code SEND}/{@code JOIN}/{@code
+   * DISCOVER} — {@code DISCOVER} covers {@code TOPIC}-*viewing*, not *setting*); consulted directly
+   * by {@code TopicCommandHandler}, the same way {@code operator}/{@code voice} privilege checks
+   * already go straight to {@code Channel.operators()} rather than through a gate abstraction
+   * (research.md "Story 2").
+   */
+  public static final ChannelMode TOPIC_LOCK =
+      new ChannelMode("topic-lock", 't', ChannelMode.Kind.BOOLEAN, Set.of(), ChannelMode.CORE);
+
   /** Order matters for {@code CHANMODES}/{@code PREFIX} formatting (SupportedFeatures). */
   public static final Set<ChannelMode> ALL =
       Collections.unmodifiableSet(
@@ -67,7 +102,10 @@ public final class CoreChannelModes {
                   PRIVATE,
                   SECRET,
                   OPERATOR,
-                  VOICE)));
+                  VOICE,
+                  USER_LIMIT,
+                  CHANNEL_KEY,
+                  TOPIC_LOCK)));
 
   private CoreChannelModes() {}
 }

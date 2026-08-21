@@ -159,6 +159,15 @@ public final class ModeCommandHandler implements CommandHandler {
         continue;
       }
 
+      // 006-complete-core-protocol FR-003 — unsetting a VALUE_SET_ONLY mode (user-limit) takes no
+      // parameter at all, the same no-parameter shape BOOLEAN unsetting already has; only setting
+      // it consumes one, below.
+      if (mode.kind() == ChannelMode.Kind.VALUE_SET_ONLY && change.sign() == '-') {
+        channel.setMemberLimit(0);
+        applied.add(change);
+        continue;
+      }
+
       if (parameterConsumingCount >= maxModesPerCommand.getAsInt()) {
         break; // silent stop — no reply beyond the echo of what was applied so far
       }
@@ -200,6 +209,35 @@ public final class ModeCommandHandler implements CommandHandler {
         }
         applyMember(channel, mode, change, target.get());
         appliedParam = target.get().nickname();
+      } else if (mode.kind() == ChannelMode.Kind.VALUE_SET_ONLY) {
+        // 006-complete-core-protocol FR-001 — +l <n>; -l never reaches here (handled above,
+        // no parameter). An invalid (non-numeric or non-positive) value is silently ignored —
+        // no crash, no error reply, the same "silently ignored" outcome irctest's own
+        // testLimitInvalidValues explicitly accepts as valid server behavior.
+        int limit;
+        try {
+          limit = Integer.parseInt(rawParam);
+        } catch (NumberFormatException e) {
+          break;
+        }
+        if (limit <= 0) {
+          break;
+        }
+        channel.setMemberLimit(limit);
+        appliedParam = rawParam;
+      } else if (mode.kind() == ChannelMode.Kind.VALUE_ALWAYS) {
+        // 006-complete-core-protocol FR-004 — +k/-k both always take a parameter; -k's value is
+        // never checked against the current key (the same "don't require re-proving what you're
+        // removing" precedent -b <mask> already sets). A +k value that's empty or contains a
+        // space can never be supplied back via JOIN's own space-delimited key grammar (RFC 2812's
+        // key grammar excludes both), so it's silently ignored rather than applied — the same
+        // "silently ignored" outcome irctest's own testKeyValidation explicitly accepts, and the
+        // only way to avoid setting a channel key nobody could ever join with again.
+        if (change.sign() == '+' && (rawParam.isEmpty() || rawParam.indexOf(' ') >= 0)) {
+          break;
+        }
+        channel.setKey(change.sign() == '+' ? rawParam : null);
+        appliedParam = rawParam;
       } else {
         // LIST-kind — only ban-mask exists this release.
         String normalized = NickMask.normalize(rawParam);

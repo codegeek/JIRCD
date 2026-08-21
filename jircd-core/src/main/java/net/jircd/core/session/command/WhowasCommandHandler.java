@@ -15,8 +15,10 @@
  */
 package net.jircd.core.session.command;
 
+import java.util.List;
 import java.util.function.Supplier;
 import net.jircd.core.session.ClientSession;
+import net.jircd.core.session.WhowasEntry;
 import net.jircd.core.session.WhowasHistory;
 import net.jircd.protocol.Message;
 import net.jircd.protocol.NumericReply;
@@ -24,7 +26,12 @@ import net.jircd.protocol.NumericReply;
 /**
  * {@code WHOWAS} — last-known identity lookup for a disconnected nickname
  * (002-extended-irc-commands FR-016 through FR-019), backed by the bounded, global {@link
- * WhowasHistory}. Accepts no count parameter this release — always the single most recent entry.
+ * WhowasHistory}. Accepts an optional count parameter (006-complete-core-protocol FR-014/FR-015): a
+ * positive number returns up to that many entries; omitted, zero, a negative number, or a
+ * non-numeric value all mean "do a full search" (RFC1459 §4.5.3/RFC2812 §3.6.3's own rule for a
+ * non-positive count — confirmed against irctest's own non-deprecated {@code testWhowasMultiple},
+ * which sends no count at all and still expects every retained entry back — extended leniently to
+ * an omitted or malformed count too).
  */
 public final class WhowasCommandHandler implements CommandHandler {
 
@@ -44,27 +51,40 @@ public final class WhowasCommandHandler implements CommandHandler {
       return;
     }
     String nickname = message.params().getFirst();
-    var found = whowasHistory.mostRecentFor(nickname);
+    // An omitted count means "do a full search" (irctest's own non-deprecated
+    // testWhowasMultiple sends no count at all and still expects every retained entry back) — the
+    // same "0" sentinel mostRecentNFor already treats as unbounded.
+    int count = message.params().size() > 1 ? parseCount(message.params().get(1)) : 0;
+    List<WhowasEntry> found = whowasHistory.mostRecentNFor(nickname, count);
     if (found.isEmpty()) {
       Replies.send(
           session, server, NumericReply.ERR_WASNOSUCHNICK, nickname, "There was no such nickname");
     } else {
-      var entry = found.get();
-      // Same FR-038 resolution WHOIS/WHO already use: real hostname for an administrator, the
-      // snapshotted presented (cloaked, if it was active) value for everyone else — WHOWAS is
-      // not admin-gated like WHOHOST, so it must not leak the real value to an ordinary client.
-      String hostname =
-          session.isAdministrator() ? entry.realHostname() : entry.presentedHostname();
-      Replies.send(
-          session,
-          server,
-          NumericReply.RPL_WHOWASUSER,
-          entry.nickname(),
-          entry.ident(),
-          hostname,
-          "*",
-          entry.realname());
+      for (WhowasEntry entry : found) {
+        // Same FR-038 resolution WHOIS/WHO already use: real hostname for an administrator, the
+        // snapshotted presented (cloaked, if it was active) value for everyone else — WHOWAS is
+        // not admin-gated like WHOHOST, so it must not leak the real value to an ordinary client.
+        String hostname =
+            session.isAdministrator() ? entry.realHostname() : entry.presentedHostname();
+        Replies.send(
+            session,
+            server,
+            NumericReply.RPL_WHOWASUSER,
+            entry.nickname(),
+            entry.ident(),
+            hostname,
+            "*",
+            entry.realname());
+      }
     }
     Replies.send(session, server, NumericReply.RPL_ENDOFWHOWAS, nickname, "End of WHOWAS");
+  }
+
+  private static int parseCount(String raw) {
+    try {
+      return Integer.parseInt(raw);
+    } catch (NumberFormatException e) {
+      return 0; // a malformed count is treated the same as a non-positive one — full search
+    }
   }
 }

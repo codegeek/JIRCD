@@ -35,9 +35,10 @@ import net.jircd.protocol.NumericReply;
 
 /**
  * {@code JOIN} — create-or-join (FR-003), with the {@code JOIN}-gate check point FR-043 requires:
- * ban-mask (FR-062) and invite-only (FR-065), each checked independently. This release's actual
- * moderation command handlers roll out in Story 5, so these gates never actually reject anything
- * yet — the mechanism exists now, empty of any way to populate a ban or an invitation.
+ * ban-mask (FR-062), invite-only (FR-065), user-limit, and channel-key (006-complete-core-protocol
+ * FR-002/FR-005), each checked independently — a pending invitation exempts the latter three alike,
+ * peeked once and consumed at most once per join, never per gate (research.md "Story 1"
+ * invite-exemption decision).
  *
  * <p>Accepts a comma-separated list of channel names, with an optional matching comma-separated
  * list of keys (RFC1459 §4.2.1, 005-fix-batch-conformance FR-013) — each named channel is processed
@@ -78,12 +79,14 @@ public final class JoinCommandHandler implements CommandHandler {
     // fewer-keys-than-channels list leaves the remainder keyless. Each named channel is
     // processed independently — one failing its own check doesn't stop the others.
     List<String> names = List.of(message.params().getFirst().split(",", -1));
-    for (String name : names) {
-      joinOne(session, name);
+    List<String> keys =
+        message.params().size() > 1 ? List.of(message.params().get(1).split(",", -1)) : List.of();
+    for (int i = 0; i < names.size(); i++) {
+      joinOne(session, names.get(i), i < keys.size() ? keys.get(i) : null);
     }
   }
 
-  private void joinOne(ClientSession session, String name) {
+  private void joinOne(ClientSession session, String name, String suppliedKey) {
     if (!ChannelName.isValid(name, channelNameMaxLength.getAsInt())) {
       Replies.send(
           session, serverName.get(), NumericReply.ERR_BADCHANMASK, name, "Bad Channel Mask");
@@ -101,7 +104,15 @@ public final class JoinCommandHandler implements CommandHandler {
           "Cannot join channel (+b)");
       return;
     }
-    if (!passesInviteOnlyGate(channel, session)) {
+
+    // 006-complete-core-protocol FR-002/FR-005 (spec.md Clarifications) — a pending invitation
+    // exempts a join from +i, +l, and +k alike; peeked here (not consumed) so a channel with more
+    // than one of these active doesn't have its invitation consumed by the first gate checked and
+    // then incorrectly fail the second. Consumed exactly once, below, only once every applicable
+    // gate has passed.
+    boolean invited = channel.invited().contains(CaseMapping.fold(session.nickname()));
+
+    if (!invited && channel.activeModes().contains(CoreChannelModes.INVITE_ONLY)) {
       Replies.send(
           session,
           serverName.get(),
@@ -109,6 +120,30 @@ public final class JoinCommandHandler implements CommandHandler {
           channel.name(),
           "Cannot join channel (+i)");
       return;
+    }
+    if (!invited
+        && channel.memberLimit() > 0
+        && channel.members().size() >= channel.memberLimit()) {
+      Replies.send(
+          session,
+          serverName.get(),
+          NumericReply.ERR_CHANNELISFULL,
+          channel.name(),
+          "Cannot join channel (+l)");
+      return;
+    }
+    if (!invited && channel.key() != null && !channel.key().equals(suppliedKey)) {
+      Replies.send(
+          session,
+          serverName.get(),
+          NumericReply.ERR_BADCHANNELKEY,
+          channel.name(),
+          "Cannot join channel (+k)");
+      return;
+    }
+
+    if (invited) {
+      channel.invited().remove(CaseMapping.fold(session.nickname()));
     }
 
     channel.addMember(session);
@@ -134,6 +169,18 @@ public final class JoinCommandHandler implements CommandHandler {
   }
 
   public static void sendNamesReply(ClientSession requester, Channel channel, String serverName) {
+    sendNamesLine(requester, channel, serverName);
+    Replies.send(
+        requester, serverName, NumericReply.RPL_ENDOFNAMES, channel.name(), "End of /NAMES list");
+  }
+
+  /**
+   * The {@code RPL_NAMREPLY} half of {@link #sendNamesReply} on its own, with no closing {@code
+   * RPL_ENDOFNAMES} — extracted so a bare, argument-less {@code NAMES} (006-complete-core-protocol
+   * FR-010, {@code NamesCommandHandler}) can call this once per visible channel and send exactly
+   * one closing reply of its own afterward, instead of one per channel.
+   */
+  public static void sendNamesLine(ClientSession requester, Channel channel, String serverName) {
     StringBuilder names = new StringBuilder();
     for (ClientSession member : channel.members()) {
       if (!names.isEmpty()) {
@@ -154,8 +201,6 @@ public final class JoinCommandHandler implements CommandHandler {
         visibility,
         channel.name(),
         names.toString());
-    Replies.send(
-        requester, serverName, NumericReply.RPL_ENDOFNAMES, channel.name(), "End of /NAMES list");
   }
 
   private static String visibilitySymbol(Channel channel) {
@@ -180,13 +225,5 @@ public final class JoinCommandHandler implements CommandHandler {
       }
     }
     return true;
-  }
-
-  private boolean passesInviteOnlyGate(Channel channel, ClientSession session) {
-    if (!channel.activeModes().contains(CoreChannelModes.INVITE_ONLY)) {
-      return true;
-    }
-    String folded = CaseMapping.fold(session.nickname());
-    return channel.invited().remove(folded);
   }
 }

@@ -204,10 +204,11 @@ feature.
 **Acceptance Scenarios**:
 
 1. **Given** a nickname with more than one retained prior identity, **When** a client looks it up
-   requesting a specific count greater than one, **Then** up to that many of the most recent
-   entries are returned, most recent first.
-2. **Given** a nickname looked up with no count specified, **When** the lookup is performed,
-   **Then** exactly the single most recent entry is returned, the same as today.
+   requesting a specific positive count, **Then** up to that many of the most recent entries are
+   returned, most recent first.
+2. **Given** a nickname with more than one retained prior identity, **When** it's looked up with no
+   count specified, **Then** every retained prior identity for that nickname is returned, most
+   recent first — omitting the count is not the same as requesting a count of one.
 
 ---
 
@@ -234,9 +235,10 @@ feature.
   someone else joining it) before the invited client accepts? The invitation stands; whether the
   invited client is exempt from that channel's invite-only mode on their eventual join follows the
   same existing invite-exemption behavior already implemented for the existing-channel case.
-- What happens if the former-nickname lookup's count parameter is zero or negative? Per RFC1459/
-  RFC2812's own text for this parameter, that means "do a full search" — every retained prior
-  identity for that nickname is returned, not just one and not treated as if no count were given.
+- What happens if the former-nickname lookup's count parameter is zero, negative, or simply
+  omitted? Per RFC1459/RFC2812's own text for this parameter, all three mean "do a full search" —
+  every retained prior identity for that nickname is returned. Only a positive count narrows the
+  result.
 
 ## Requirements *(mandatory)*
 
@@ -296,11 +298,13 @@ feature.
 
 - **FR-014**: The former-nickname lookup command MUST accept an optional count parameter and, when
   given as a positive number, return up to that many of the most recently retained prior
-  identities for the looked-up nickname, most recent first; when given as zero or a negative
-  number, every retained prior identity for that nickname MUST be returned instead (the RFC's own
-  "non-positive means full search" rule).
-- **FR-015**: The former-nickname lookup command, when given no count parameter, MUST continue to
-  return exactly the single most recent retained identity, unchanged from today.
+  identities for the looked-up nickname, most recent first.
+- **FR-015**: The former-nickname lookup command, when given no count parameter, or when given a
+  count of zero or a negative number, MUST return every retained prior identity for that nickname
+  (the RFC's own "non-positive — including omitted — means full search" rule; verified against
+  irctest's own non-deprecated conformance test for this exact case, which corrected this
+  feature's own initial, narrower assumption that an omitted count should keep returning only one
+  entry).
 
 ### Key Entities
 

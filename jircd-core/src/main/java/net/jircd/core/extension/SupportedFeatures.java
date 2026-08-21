@@ -68,10 +68,10 @@ public record SupportedFeatures(
 
   private static String formatChanModes(java.util.Collection<ChannelMode> modes) {
     String list = letters(modes, ChannelMode.Kind.LIST);
-    String alwaysParam =
-        ""; // VALUE-kind requiring a parameter on both set and unset — none this release
-    String setOnlyParam =
-        ""; // VALUE-kind requiring a parameter only when setting — none this release
+    // 006-complete-core-protocol FR-004/FR-001 — channel-key (k) and user-limit (l) fill these
+    // two groups, previously always empty.
+    String alwaysParam = letters(modes, ChannelMode.Kind.VALUE_ALWAYS);
+    String setOnlyParam = letters(modes, ChannelMode.Kind.VALUE_SET_ONLY);
     String bool = letters(modes, ChannelMode.Kind.BOOLEAN);
     return list + "," + alwaysParam + "," + setOnlyParam + "," + bool;
   }

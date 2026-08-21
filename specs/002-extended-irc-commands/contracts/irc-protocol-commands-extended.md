@@ -25,16 +25,20 @@ whose Full Numeric Catalog already reserves every numeric this feature claims (`
 |---|---|---|---|---|
 | `VERSION` | C→S | `REGISTERED` session | Returns server name/version, then a fresh `RPL_ISUPPORT` burst (Clarifications, 2026-08-19) | `351 RPL_VERSION`, then one or more `005 RPL_ISUPPORT` lines — identical rendering to the registration completion burst's own `005` (`001-ircv3-server` "Registration Completion Burst"), via the shared helper research.md "VERSION + ISUPPORT reuse" describes |
 | `TIME` | C→S | `REGISTERED` session | Returns the server's current local time | `391 RPL_TIME` |
-| `LUSERS` | C→S | `REGISTERED` session | Returns current connected-client and active-channel counts (server-wide totals only — spec.md Assumptions) | `251 RPL_LUSERCLIENT` (`"There are <clients> users and <invisible> invisible on 1 servers"` — the conventional, widely-parsed text shape, 003-irctest-conformance-fixes FR-004), then `254 RPL_LUSERCHANNELS` (channel count) |
+| `LUSERS` | C→S | `REGISTERED` session | Returns current connected-client, connected-operator, and active-channel counts (server-wide totals only — spec.md Assumptions) | `251 RPL_LUSERCLIENT` (`"There are <clients> users and <invisible> invisible on 1 servers"` — the conventional, widely-parsed text shape, 003-irctest-conformance-fixes FR-004), `252 RPL_LUSEROP` (connected-operator count, 006-complete-core-protocol FR-011), `254 RPL_LUSERCHANNELS` (channel count), then `255 RPL_LUSERME` (`"I have <clients> clients and 1 servers"`, always sent, 006-complete-core-protocol FR-012) |
 
 **Contract notes**:
-- `LUSERS` intentionally does not send the fuller RFC 2812 breakdown (`252`
-  `RPL_LUSEROP`/`253` `RPL_LUSERUNKNOWN`/`255` `RPL_LUSERME`) — this server tracks no
-  operator-vs-non-operator connection-count distinction beyond `WHOIS`'s existing
-  per-session `operator` flag, and has no unknown-connection concept (every accepted
-  connection becomes a `ClientSession`, `001-ircv3-server` data-model.md), so those numerics
-  have no meaningful value to report. Reserved in the numeric catalog, still unused after
-  this feature.
+- `LUSERS` still does not send `253 RPL_LUSERUNKNOWN` — this server has no unknown-connection
+  concept (every accepted connection becomes a `ClientSession`, `001-ircv3-server` data-model.md),
+  so that specific numeric has no meaningful value to report; reserved in the numeric catalog,
+  still unused. `252`/`255` were reserved for the same reason `253` originally was
+  (`003-irctest-conformance-fixes`'s and this file's own earlier text) but that blocking reasoning
+  no longer holds for them specifically — `UserMode.OPERATOR` is already tracked per-session
+  (used throughout `WHOIS`/`WHO`/`MODE +o`), and `RPL_LUSERME`'s client count needs no new concept
+  at all.
+- `252`'s operator count is a real, live filter over connected sessions holding the `operator`
+  user mode, the identical filtering shape `251`'s `<invisible>` count already uses against
+  `UserMode.INVISIBLE`.
 - `251`'s `<invisible>` count is a real, live filter over connected sessions holding the
   `invisible` user mode (`001-ircv3-server` `UserMode.INVISIBLE`, FR-044) — not a placeholder
   zero (003-irctest-conformance-fixes FR-004, research.md "LUSERS reply text matches the
@@ -93,7 +97,7 @@ whose Full Numeric Catalog already reserves every numeric this feature claims (`
 
 | Command | Direction | Preconditions | Effect | Replies |
 |---|---|---|---|---|
-| `WHOWAS [nickname]` | C→S | `REGISTERED` session | Returns the most recent `WhowasEntry` for `<nickname>`, if any (data-model.md `WhowasHistory`) | `314 RPL_WHOWASUSER`, then `369 RPL_ENDOFWHOWAS` on a match; `406 ERR_WASNOSUCHNICK`, then `369 RPL_ENDOFWHOWAS`, if no history exists for `<nickname>`; `431 ERR_NONICKNAMEGIVEN` if `<nickname>` is omitted entirely (003-irctest-conformance-fixes FR-005 — the same reply shape `NICK` already uses for a bare `NICK`, replacing the previously-generic `461 ERR_NEEDMOREPARAMS`) |
+| `WHOWAS [nickname] [count]` | C→S | `REGISTERED` session | Returns the most recently retained `WhowasEntry` values for `<nickname>`, most recent first, if any (data-model.md `WhowasHistory`) — up to `[count]` of them when `[count]` is a positive number; every retained one when `[count]` is omitted, zero, negative, or non-numeric (006-complete-core-protocol FR-014/FR-015) | `314 RPL_WHOWASUSER` once per returned entry, then `369 RPL_ENDOFWHOWAS` on a match; `406 ERR_WASNOSUCHNICK`, then `369 RPL_ENDOFWHOWAS`, if no history exists for `<nickname>`; `431 ERR_NONICKNAMEGIVEN` if `<nickname>` is omitted entirely (003-irctest-conformance-fixes FR-005 — the same reply shape `NICK` already uses for a bare `NICK`, replacing the previously-generic `461 ERR_NEEDMOREPARAMS`) |
 
 **Contract notes**:
 - `369 RPL_ENDOFWHOWAS` always closes the response, on both the success and no-history
@@ -107,8 +111,14 @@ whose Full Numeric Catalog already reserves every numeric this feature claims (`
   connected," `406` means "no retained history at all" — a nickname can fail one, the other,
   or both, and the distinction is meaningful to a client deciding whether to keep trying
   later.
-- `WHOWAS` accepts no count parameter in this release (spec.md Assumptions) — always the
-  single most recent entry, unlike RFC 2812's optional count/server parameters.
+- `WHOWAS` accepts an optional count parameter (006-complete-core-protocol FR-014/FR-015) — a
+  positive number returns up to that many entries; an omitted count, zero, a negative number, or a
+  non-numeric value all mean "do a full search" (every retained entry for that nickname), per
+  RFC1459 §4.5.3/RFC2812 §3.6.3's own rule for a non-positive count (confirmed against irctest's
+  own non-deprecated `testWhowasMultiple`, which omits the count entirely and still expects every
+  retained entry), extended leniently to a malformed
+  one too. No server parameter is accepted (this server has no server-to-server interface,
+  `001-ircv3-server` FR-021).
 - `314 RPL_WHOWASUSER`'s hostname field follows the same FR-038 resolution `WHOIS`/`WHO`
   already use — the real hostname/IP for an administrator requester, the presented
   (cloaked, if `cloak` was active) value snapshotted at disconnect time for everyone else.

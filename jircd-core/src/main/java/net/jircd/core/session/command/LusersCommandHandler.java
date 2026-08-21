@@ -24,10 +24,11 @@ import net.jircd.protocol.Message;
 import net.jircd.protocol.NumericReply;
 
 /**
- * {@code LUSERS} — server-wide connected-client and active-channel counts only
- * (002-extended-irc-commands FR-003) — this server has no operator-vs-non-operator or
- * unknown-connection breakdown to report, so the fuller RFC 2812 numeric set ({@code
- * RPL_LUSEROP}/{@code RPL_LUSERUNKNOWN}/{@code RPL_LUSERME}) is not sent.
+ * {@code LUSERS} — server-wide connected-client, connected-operator, and active-channel counts
+ * (002-extended-irc-commands FR-003; operator count and the closing {@code RPL_LUSERME} added by
+ * 006-complete-core-protocol FR-011/FR-012). {@code RPL_LUSERUNKNOWN} stays unsent — this server
+ * still has no notion of a connection that hasn't yet become a full {@code ClientSession}, the one
+ * part of the original blocking reasoning that still holds.
  */
 public final class LusersCommandHandler implements CommandHandler {
 
@@ -52,6 +53,10 @@ public final class LusersCommandHandler implements CommandHandler {
         nicknameRegistry.all().stream()
             .filter(s -> s.userModes().contains(UserMode.INVISIBLE))
             .count();
+    long operatorCount =
+        nicknameRegistry.all().stream()
+            .filter(s -> s.userModes().contains(UserMode.OPERATOR))
+            .count();
     int channelCount = channelRegistry.all().size();
     Replies.send(
         session,
@@ -61,8 +66,19 @@ public final class LusersCommandHandler implements CommandHandler {
     Replies.send(
         session,
         server,
+        NumericReply.RPL_LUSEROP,
+        String.valueOf(operatorCount),
+        "operator(s) online");
+    Replies.send(
+        session,
+        server,
         NumericReply.RPL_LUSERCHANNELS,
         String.valueOf(channelCount),
         "channels formed");
+    Replies.send(
+        session,
+        server,
+        NumericReply.RPL_LUSERME,
+        "I have " + clientCount + " clients and 1 servers");
   }
 }

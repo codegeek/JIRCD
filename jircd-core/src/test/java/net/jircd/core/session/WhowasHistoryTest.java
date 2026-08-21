@@ -71,4 +71,32 @@ class WhowasHistoryTest {
     assertThat(history.mostRecentFor("alice")).isPresent();
     assertThat(history.mostRecentFor("ALICE")).isPresent();
   }
+
+  @Test
+  void mostRecentNForReturnsUpToCountMostRecentEntriesFirst() {
+    WhowasHistory history = new WhowasHistory(() -> 10);
+    Instant t0 = Instant.parse("2026-08-19T00:00:00Z");
+
+    history.record(entry("erin", t0));
+    history.record(entry("erin", t0.plusSeconds(1)));
+    history.record(entry("erin", t0.plusSeconds(2)));
+
+    var result = history.mostRecentNFor("erin", 2);
+    assertThat(result).hasSize(2);
+    assertThat(result.get(0).disconnectedAt()).isEqualTo(t0.plusSeconds(2));
+    assertThat(result.get(1).disconnectedAt()).isEqualTo(t0.plusSeconds(1));
+  }
+
+  @Test
+  void mostRecentNForReturnsEveryRetainedEntryWhenCountIsZeroOrNegative() {
+    WhowasHistory history = new WhowasHistory(() -> 10);
+    Instant t0 = Instant.parse("2026-08-19T00:00:00Z");
+
+    history.record(entry("erin", t0));
+    history.record(entry("erin", t0.plusSeconds(1)));
+    history.record(entry("erin", t0.plusSeconds(2)));
+
+    assertThat(history.mostRecentNFor("erin", 0)).hasSize(3);
+    assertThat(history.mostRecentNFor("erin", -1)).hasSize(3);
+  }
 }

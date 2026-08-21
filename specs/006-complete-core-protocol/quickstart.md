@@ -86,23 +86,45 @@ Run the irctest suite (`github.com/jircd/irctest`'s `irctest.controllers.jircd` 
 `--timeout=60 --timeout-method=signal`) and confirm these tests now pass, with no regression in
 any previously-passing test: `chmodes/limit.py` (`testLimitMode`/`testLimitRemoval`/
 `testLimitChange`/`testLimitDecrease`/`testLimitAfterPart`/`testLimitMultipleChannels`/
-`testLimitWithInvite`), `chmodes/key.py::testKeyNormal`, `topic.py`
-(`testTopicMode`/`TopicPrivilegesTestCase::testTopicPrivileges`), `names.py`
-(`testNamesNoArgumentPublic1459`/`testNamesNoArgumentPublic2812`/
-`testNamesNoArgumentPrivate1459`/`testNamesNoArgumentPrivate2812`), `lusers.py::LuserOpersTestCase`,
-`invite.py::testInviteNonExistingChannelTransmitted`, `whowas.py`
-(`testWhowasCount1`/`testWhowasCount2`/`testWhowasCountNegative`/`testWhowasCountZero`).
+`testLimitWithInvite`/`testLimitInvalidValues`), `chmodes/key.py`
+(`testKeyNormal`/`testKeyValidation[spaces,long,empty,only-space]`), `topic.py::testTopicMode`,
+`names.py` (`testNames2812`/`testNamesModern`/`testNames2812Secret`/
+`testNamesMultipleChannels2812`/`testNamesInvalidChannel`/`testNamesNonexistingChannel`/
+`testNamesNoArgumentPublic2812`/`testNamesNoArgumentPrivate2812`), `lusers.py`
+(`BasicLusersTestCase::testLusers`/`LuserOpersTestCase::testLuserOpers`, allowing for the known-out-of-scope
+`265`/`266` gap noted below), `invite.py::testInvite`, `whowas.py`
+(`testWhowasMultiple`/`testWhowasCount1`/`testWhowasCount2`/`testWhowasCountNegative`/
+`testWhowasCountZero`).
 
-**Expected to already pass without extra validation work**: `chmodes/limit.py::testLimitInvalidValues`
-and `chmodes/key.py::testKeyValidation` both explicitly accept "the mode change is silently
-ignored, no error reply" as a valid outcome (Modern IRC's own key-mode docs: "the key changed
-ignored, and no `MODE` echoed if no other mode change was valid" is one of four
-equally-acceptable server behaviors) — a non-numeric `+l` value or an RFC-illegal `+k` value
-simply failing to apply (no crash, no partial state change) satisfies both without adding a
-dedicated `ERR_INVALIDMODEPARAM`/`ERR_INVALIDKEY` validator, which is NOT required by any FR in
-this feature.
+Verified during the T026 re-run (2026-08-21): all of the above pass. Two real bugs were found and
+fixed along the way, beyond the FRs' original scope of "add the mode/numeric/parameter" —
+both squarely within FR-004's/FR-014's own behavior, not new scope: (1) `+k` accepted an empty or
+space-containing key literally, making the channel permanently unjoinable — now silently ignored
+per `testKeyValidation`'s own accepted outcomes; (2) an omitted `WHOWAS` count was assumed to mean
+"return one entry" (preserving pre-006 behavior) but `testWhowasMultiple` (non-deprecated) proved
+it must mean "full search" instead — FR-015 was corrected accordingly. A pre-existing, adjacent
+bug in the single-channel `NAMES` form (sent `403 ERR_NOSUCHCHANNEL` for an invalid/nonexistent
+channel, when RFC1459/RFC2812 both say there's no error reply for this) was also fixed while
+already in `NamesCommandHandler`, plus `ChannelRegistry` was changed to iterate channels in
+deterministic creation order (needed for a repeatable bare-`NAMES` response shape).
 
-**Confirmed out of scope, not expected to pass**: `chmodes/key.py`'s Ergo-specific-marked cases
-and `invite.py::testInviteNonExistingChannelEchoed` (marked `deprecated=True` in irctest itself —
-RFC1459's own now-obsolete self-notice-via-different-format expectation, superseded by
-`testInviteNonExistingChannelTransmitted`'s modern equivalent, already covered above).
+**Confirmed out of scope, not expected to pass** (each traced to a cause outside this feature's
+FRs, not a regression): `topic.py::TopicPrivilegesTestCase::testTopicPrivileges` (asserts
+`RPL_TOPICTIME`/`333`, a numeric this project has never implemented — no set-at timestamp is
+tracked, an already-documented `001-ircv3-server` design decision, unrelated to `+t` itself, which
+this same test's `+t`-privilege assertions correctly pass); `names.py::testNames1459`/
+`testNamesNoArgumentPublic1459`/`testNamesNoArgumentPrivate1459` (all `deprecated=True` — the
+obsolete RFC1459-only no-`=`-symbol reply shape, superseded by the `2812`/`Modern` variants above,
+which pass); `lusers.py`'s `testLusersFull`-suffixed tests and any assertion requiring `265
+RPL_LOCALUSERS`/`266 RPL_GLOBALUSERS` (Modern-only numerics, explicitly not RFC 2812, never named
+by FR-011/FR-012 — a separate, pre-existing gap surfaced by this being the first time `lusers.py`
+was run against jircd, not a regression); `invite.py::testInviteNonExistingChannelTransmitted`/
+`testInviteNonExistingChannelEchoed` (both `deprecated=True` — and, on inspection, both send
+`INVITE #chan bar` with what appears to be reversed argument order vs. every other test in the
+same file's own `INVITE <nickname> <channel>` convention; FR-013's actual, correct behavior is
+independently verified by `InviteNotYetExistingChannelTest.java` and by `testInvite`'s own passing
+non-deprecated coverage); `invite.py::testInviteExemptsFromBan` (`@mark_specifications("Ergo")` —
+the already-documented, deliberately-excluded Ergo-specific "INVITE exempts from ban" behavior);
+`whowas.py::testWhowasWildcard`/`testWhowasNoParamRfc` (both `deprecated=True` — glob-style
+nickname matching and an obsolete bare-`WHOWAS` reply shape, neither ever implemented or in
+scope).

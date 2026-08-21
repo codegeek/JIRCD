@@ -16,27 +16,34 @@
 package net.jircd.core.session;
 
 import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Server-wide channel-name uniqueness with create-on-first-join (FR-003), compared using the same
  * rfc1459 casemapping as {@link NicknameRegistry} (FR-052) — {@code #Foo} and {@code #foo} resolve
  * to one channel, storing whichever casing created it. Its narrow public surface leaves room to
  * later span servers without callers changing (FR-022).
+ *
+ * <p>Backed by a synchronized, insertion-ordered map rather than a lock-free {@code
+ * ConcurrentHashMap} — {@link #all()}'s iteration order needs to be deterministic (creation order)
+ * for a bare {@code NAMES} (006-complete-core-protocol FR-010) to have a stable, repeatable
+ * response shape; channel creation/removal is low-frequency compared to per-message traffic, so a
+ * single lock here has no measurable contention risk.
  */
 public final class ChannelRegistry {
 
-  private final Map<String, Channel> byFoldedName = new ConcurrentHashMap<>();
+  private final Map<String, Channel> byFoldedName = new LinkedHashMap<>();
 
   /** Returns the existing channel of this name, or atomically creates and returns a new one. */
-  public Channel getOrCreate(String name) {
+  public synchronized Channel getOrCreate(String name) {
     String folded = CaseMapping.fold(name);
     return byFoldedName.computeIfAbsent(folded, ignored -> new Channel(name));
   }
 
-  public Optional<Channel> lookup(String name) {
+  public synchronized Optional<Channel> lookup(String name) {
     return Optional.ofNullable(byFoldedName.get(CaseMapping.fold(name)));
   }
 
@@ -44,7 +51,7 @@ public final class ChannelRegistry {
    * Removes a channel once it has no remaining members (FR-003 — a zero-member channel is not
    * durable).
    */
-  public void removeIfEmpty(Channel channel) {
+  public synchronized void removeIfEmpty(Channel channel) {
     byFoldedName.computeIfPresent(
         CaseMapping.fold(channel.name()),
         (key, existing) -> {
@@ -55,7 +62,7 @@ public final class ChannelRegistry {
         });
   }
 
-  public Collection<Channel> all() {
-    return byFoldedName.values();
+  public synchronized Collection<Channel> all() {
+    return List.copyOf(byFoldedName.values());
   }
 }
