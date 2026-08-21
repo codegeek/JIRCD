@@ -41,9 +41,10 @@ class Story5VoiceTest {
       bob.send("MODE #lobby +v bob");
       assertThat(bob.readUntil("482", Duration.ofSeconds(5))).contains("482");
 
-      // +v naming a non-member is rejected
+      // +v naming a nickname that isn't connected anywhere is rejected (005-fix-batch-conformance
+      // FR-017 — 401, distinct from 441's "connected but not a member of this channel")
       alice.send("MODE #lobby +v nobody");
-      assertThat(alice.readUntil("441", Duration.ofSeconds(5))).contains("441");
+      assertThat(alice.readUntil("401", Duration.ofSeconds(5))).contains("401");
 
       alice.send("MODE #lobby +m");
       alice.readUntil("MODE #lobby +m", Duration.ofSeconds(5));

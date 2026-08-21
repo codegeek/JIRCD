@@ -63,8 +63,10 @@ class Story5ModeGroupingTest {
       bob.send("JOIN #other");
       bob.readUntil("353", Duration.ofSeconds(5));
 
+      // not-a-member isn't connected anywhere, so this is 401, not 441
+      // (005-fix-batch-conformance FR-017)
       alice.send("MODE #other +ov bob not-a-member");
-      assertThat(alice.readUntil("441", Duration.ofSeconds(5))).contains("441");
+      assertThat(alice.readUntil("401", Duration.ofSeconds(5))).contains("401");
       String partial = alice.readUntil("MODE #other", Duration.ofSeconds(5));
       assertThat(partial).contains("+o bob");
     }

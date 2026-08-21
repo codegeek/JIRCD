@@ -60,7 +60,9 @@ public final class KickCommandHandler implements CommandHandler {
     }
     String channelName = message.params().getFirst();
     String targetNickname = message.params().get(1);
-    String reason = message.params().size() > 2 ? message.params().get(2) : null;
+    // 005-fix-batch-conformance FR-015 — a no-comment KICK defaults to the kicker's own
+    // nickname, the widely-implemented Modern IRC convention, rather than omitting it.
+    String reason = message.params().size() > 2 ? message.params().get(2) : session.nickname();
 
     var found = channelRegistry.lookup(channelName);
     if (found.isEmpty()) {

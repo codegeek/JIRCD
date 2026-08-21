@@ -24,11 +24,12 @@ import net.jircd.protocol.Message;
 import net.jircd.protocol.NumericReply;
 
 /**
- * {@code CAP} — the {@code LS}/{@code REQ}/{@code END} negotiation entry points (FR-006/FR-007),
- * delegating the actual state machine to {@link CapabilityNegotiator}; this handler only turns its
- * results into wire replies. {@code LIST} is treated the same as {@code LS} (this release offers
- * the same list either way — no capability is ever negotiated-but-not-currently-offered). A bare
- * {@code CAP ACK}/{@code NAK} from a client (server-originated only, in this design) is a no-op.
+ * {@code CAP} — the {@code LS}/{@code LIST}/{@code REQ}/{@code END} negotiation entry points
+ * (FR-006/FR-007), delegating the actual state machine to {@link CapabilityNegotiator}; this
+ * handler only turns its results into wire replies. {@code LIST} reports the client's own currently
+ * negotiated capabilities, distinct from {@code LS}'s full offered list (005-fix-batch-conformance
+ * FR-007). A bare {@code CAP ACK}/{@code NAK} from a client (server-originated only, in this
+ * design) is a no-op.
  */
 public final class CapCommandHandler implements CommandHandler {
 
@@ -50,12 +51,18 @@ public final class CapCommandHandler implements CommandHandler {
     CapabilityNegotiationGrammar.Subcommand subcommand =
         CapabilityNegotiationGrammar.parseSubcommand(message);
     if (subcommand == null) {
+      String rawSubcommand = message.params().isEmpty() ? "*" : message.params().getFirst();
       Replies.send(
-          session, serverName.get(), NumericReply.ERR_UNKNOWNCOMMAND, "CAP", "Unknown subcommand");
+          session,
+          serverName.get(),
+          NumericReply.ERR_INVALIDCAPCMD,
+          rawSubcommand,
+          "Invalid CAP subcommand");
       return;
     }
     switch (subcommand) {
-      case LS, LIST -> handleLs(session);
+      case LS -> handleLs(session);
+      case LIST -> handleList(session);
       case REQ -> handleReq(session, message);
       case END -> handleEnd(session);
       case ACK, NAK -> {
@@ -70,6 +77,13 @@ public final class CapCommandHandler implements CommandHandler {
         session,
         CapabilityNegotiationGrammar.ls(
             serverName.get(), negotiator.currentlyOfferedCapabilityNames()));
+  }
+
+  private void handleList(ClientSession session) {
+    enqueue(
+        session,
+        CapabilityNegotiationGrammar.list(
+            serverName.get(), List.copyOf(session.negotiatedCapabilities())));
   }
 
   private void handleReq(ClientSession session, Message message) {

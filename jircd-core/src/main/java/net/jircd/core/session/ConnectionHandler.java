@@ -62,10 +62,14 @@ public final class ConnectionHandler {
   private static final Logger LOG = LoggerFactory.getLogger(ConnectionHandler.class);
 
   /**
-   * 512 bytes (command+params, CR-LF inclusive) plus up to 4096 bytes for a message-tags section
-   * (FR-049).
+   * 512 bytes (command+params, CR-LF inclusive) and up to 4096 bytes for a message-tags section
+   * (FR-049) are two INDEPENDENT limits (005-fix-batch-conformance FR-011), not one combined figure
+   * — a tag section alone exceeding 4096 bytes is rejected even if the line's total length would
+   * fit under the old combined 4608-byte check.
    */
-  private static final int MAX_LINE_LENGTH_BYTES = 512 + 4096;
+  private static final int MAX_TAG_SECTION_BYTES = 4096;
+
+  private static final int MAX_COMMAND_SECTION_BYTES = 512;
 
   /** Commands valid before registration completes (FR-001, FR-060, FR-039, FR-006). */
   private static final java.util.Set<Command> PRE_REGISTRATION_COMMANDS =
@@ -235,17 +239,60 @@ public final class ConnectionHandler {
     return length == bytes.length ? bytes : java.util.Arrays.copyOf(bytes, length);
   }
 
+  /**
+   * The tag section's own byte length, {@code 0} if {@code lineBytes} doesn't start with a
+   * message-tags {@code @} prefix at all — a tag value never contains a literal space (spaces are
+   * escaped as {@code \s}), so the section always ends at the first raw space byte, if any. Per the
+   * message-tags spec, the 4096-byte limit counts the leading {@code @} AND the trailing space
+   * separating the tags from the command — so the space itself is included here, not excluded.
+   */
+  private static int tagSectionLength(byte[] lineBytes) {
+    if (lineBytes.length == 0 || lineBytes[0] != '@') {
+      return 0;
+    }
+    int spaceIndex = indexOfSpace(lineBytes);
+    return spaceIndex >= 0 ? spaceIndex + 1 : lineBytes.length;
+  }
+
+  /** The command+params section's own byte length, excluding any leading tag section. */
+  private static int commandSectionLength(byte[] lineBytes) {
+    if (lineBytes.length == 0 || lineBytes[0] != '@') {
+      return lineBytes.length;
+    }
+    int spaceIndex = indexOfSpace(lineBytes);
+    return spaceIndex >= 0 ? lineBytes.length - spaceIndex - 1 : 0;
+  }
+
+  private static int indexOfSpace(byte[] lineBytes) {
+    for (int i = 0; i < lineBytes.length; i++) {
+      if (lineBytes[i] == ' ') {
+        return i;
+      }
+    }
+    return -1;
+  }
+
   private void processLine(ClientSession session, byte[] lineBytes) {
     if (!Utf8Validator.isValidUtf8(lineBytes)) {
-      Replies.send(
-          session,
-          serverName.get(),
-          NumericReply.ERR_UNKNOWNCOMMAND,
-          "*",
-          "Malformed message (invalid UTF-8)");
+      // 005-fix-batch-conformance FR-012 — a definitive, client-visible connection end (the same
+      // enqueue-then-cleanup shape QuitCommandHandler/KillCommandHandler/LivenessMonitor already
+      // use), not a 421-and-return that leaves the session stranded with no path forward.
+      if (session.writer() != null) {
+        session
+            .writer()
+            .enqueueRaw(
+                new Message(
+                    Map.of(),
+                    null,
+                    Command.ERROR,
+                    "ERROR",
+                    java.util.List.of("Malformed message (invalid UTF-8)")));
+      }
+      disconnectCleanup.cleanup(session, "Malformed message (invalid UTF-8)");
       return;
     }
-    if (lineBytes.length + 2 > MAX_LINE_LENGTH_BYTES) {
+    if (tagSectionLength(lineBytes) > MAX_TAG_SECTION_BYTES
+        || commandSectionLength(lineBytes) + 2 > MAX_COMMAND_SECTION_BYTES) {
       Replies.send(
           session, serverName.get(), NumericReply.ERR_INPUTTOOLONG, "Input line was too long");
       return;

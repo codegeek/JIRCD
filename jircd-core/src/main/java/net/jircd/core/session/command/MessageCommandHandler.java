@@ -72,6 +72,14 @@ public final class MessageCommandHandler implements CommandHandler {
     }
     String target = message.params().getFirst();
     String body = message.params().get(1);
+    if (body.isEmpty()) {
+      // 005-fix-batch-conformance FR-004 — an empty body is syntactically present but
+      // semantically equivalent to "no text to send"; NOTICE stays silent on error either way.
+      if (!notice) {
+        Replies.send(session, serverName.get(), NumericReply.ERR_NOTEXTTOSEND, "No text to send");
+      }
+      return;
+    }
 
     Set<ClientSession> recipients =
         resolveRecipients(
@@ -100,7 +108,11 @@ public final class MessageCommandHandler implements CommandHandler {
     }
 
     String presentedForm = PresentedIdentity.presentedForm(session, extensionRegistry);
-    OutboundMessage outbound = OutboundMessage.now(presentedForm, commandName, target, body);
+    // 005-fix-batch-conformance FR-010 — pass the sender's own tags through, the same way
+    // TagmsgCommandHandler already does; CapabilityTagRenderer merges these into the
+    // per-recipient rendered map alongside server-contributed ones (msgid/time).
+    OutboundMessage outbound =
+        OutboundMessage.now(presentedForm, commandName, target, body, message.tags());
     boolean echoToSender = includeSenderInFanOut(extensionRegistry, session);
     for (ClientSession recipient : recipients) {
       if (recipient == session && !echoToSender) {
@@ -109,6 +121,12 @@ public final class MessageCommandHandler implements CommandHandler {
       if (recipient.writer() != null) {
         recipient.writer().enqueue(outbound);
       }
+    }
+    if (echoToSender && !target.startsWith("#") && session.writer() != null) {
+      // 005-fix-batch-conformance FR-003 — a direct message's recipients set is Set.of(target),
+      // structurally never containing the sender (unlike a channel's own member set), so the
+      // loop above can never self-echo a DM on its own.
+      session.writer().enqueue(outbound);
     }
   }
 

@@ -15,6 +15,8 @@
  */
 package net.jircd.serverextensions.admin;
 
+import java.util.List;
+import java.util.Map;
 import java.util.function.Supplier;
 import net.jircd.core.config.ConfigurationReloader;
 import net.jircd.core.session.ClientSession;
@@ -22,6 +24,7 @@ import net.jircd.core.session.DisconnectCleanup;
 import net.jircd.core.session.SecurityEventLog;
 import net.jircd.core.session.command.CommandHandler;
 import net.jircd.core.session.command.Replies;
+import net.jircd.protocol.Command;
 import net.jircd.protocol.Message;
 import net.jircd.protocol.NumericReply;
 
@@ -65,6 +68,20 @@ public final class OperCommandHandler implements CommandHandler {
       session.grantAdministratorPrivilege();
       Replies.send(
           session, serverName.get(), NumericReply.RPL_YOUREOPER, "You are now an IRC operator");
+      // 005-fix-batch-conformance FR-023 — the same unsolicited self-directed MODE echo shape
+      // UserModeCommandHandler already uses for a self mode change, so the client's own state
+      // tracking reflects the new operator status immediately, without a separate query.
+      if (session.writer() != null) {
+        session
+            .writer()
+            .enqueueRaw(
+                new Message(
+                    Map.of(),
+                    serverName.get(),
+                    Command.MODE,
+                    "MODE",
+                    List.of(session.nickname(), "+o")));
+      }
       return;
     }
 

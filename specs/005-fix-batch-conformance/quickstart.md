@@ -83,13 +83,31 @@ one `administratorCredentials` entry configured (needed for Story 6's `OPER` sce
 
 Run the irctest suite (`github.com/jircd/irctest`'s `irctest.controllers.jircd` controller,
 `--timeout=60 --timeout-method=signal`) and confirm every test named in the original triage
-now passes: `regressions.py::testCaseChanges`/`testNickRelease`, `echo_message.py`,
-`labeled_responses.py` (echo-message-dependent subset), `pingpong.py`, `cap.py`
-(`testInvalidCapSubcommand`/`testReqOne`/`testReqTwo`/`testReqOneThenOne`/
-`testReqPostRegistration`/`testNakExactString`/`testCapRemovalByClient`/`testEmptyCapList`),
-`message_tags.py`, `messages.py` (`testEmptyPrivmsg`/`testLineTooLong`/`testLineBeyondLimit`),
+now passes: `regressions.py::testCaseChanges`/`testNickRelease`,
+`echo_message.py::testDirectMessageEcho` (echo-message half only — see note below), `pingpong.py`,
+`cap.py` (`testInvalidCapSubcommand`/`testNakExactString`/`testCapRemovalByClient`/
+`testEmptyCapList`), `message_tags.py`, `messages.py`
+(`testEmptyPrivmsg`/`testLineTooLong`/`testLineBeyondLimit`),
 `connection_registration.py::testNonutf8Realname`, `utf8.py`
-(`testNonutf8Realname`/`testNonutf8Username`), `join.py`, `topic.py::testTopicPrivileges`,
-`kick.py`, `chmodes/ban.py::testBanList`, `chmodes/operator.py`, `away.py`, `oper.py`,
-`who.py::testWhoInvisible`, `whois.py::testWhoisMissingUser`, `info.py` — with no regression
-in any previously-passing test.
+(`testNonutf8Realname`/`testNonutf8Username`), `join.py`, `kick.py`,
+`chmodes/ban.py::testBanList`, `chmodes/operator.py`, `away.py`, `oper.py`,
+`who.py::testWhoInvisible`, `whois.py::testWhoisMissingUser`, `info.py::testInfo` — with no
+regression in any previously-passing test.
+
+**Confirmed out of scope, not fixed by this feature** (verified during the T033 re-run —
+each traces to a capability or mode this codebase has never implemented, not to any FR above):
+`cap.py::testReqOne`/`testReqTwo`/`testReqOneThenOne`/`testReqPostRegistration` and every
+`labeled_responses.py` test require the `multi-prefix`/`userhost-in-names`/`labeled-response`/
+`batch` capabilities, none of which exist in `jircd-capabilities/*` — FR-009's NAK-dedup fix
+only concerns capabilities the server actually offers.
+`echo_message.py::testDirectMessageEcho`'s `label`-tag assertion depends on the same
+unimplemented `labeled-response` capability (its earlier pass was a side effect of the FR-010
+bug this feature fixed — client tags forwarded unconditionally, `label` included; the corrected,
+capability-gated forwarding no longer masks the gap). `topic.py::testTopicMode`/
+`TopicPrivilegesTestCase::testTopicPrivileges` and `chmodes/ban.py::testCaseInsensitive` depend
+on already-documented exclusions (`+t` topic-lock, Ergo-specific ban-mask case sensitivity).
+`messages.py::NoCTCPModeTestCase` and `utf8.py::ErgoUtf8NickEnabledTestCase` are Ergo-specific
+(`+T` no-CTCP mode, PRECIS non-ASCII nicknames). `utf8.py::testNonUtf8Filtering` expects the
+IRCv3 `standard-replies` `FAIL` mechanism, never implemented here. `info.py::testInfoNosuchserver`
+exercises `INFO`'s deprecated remote-server-target form, out of scope for FR-019's single-server,
+non-federated design.

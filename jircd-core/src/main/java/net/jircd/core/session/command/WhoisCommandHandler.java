@@ -66,6 +66,14 @@ public final class WhoisCommandHandler implements CommandHandler {
             NumericReply.ERR_NOSUCHNICK,
             targetNickname,
             "No such nick/channel");
+        // 005-fix-batch-conformance FR-020 — RFC requires WHOIS's reply sequence to always
+        // close with 318, success or not; this path used to skip it.
+        Replies.send(
+            session,
+            serverName.get(),
+            NumericReply.RPL_ENDOFWHOIS,
+            targetNickname,
+            "End of /WHOIS list");
         return;
       }
       target = found.get();

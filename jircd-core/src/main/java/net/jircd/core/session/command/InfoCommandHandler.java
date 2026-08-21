@@ -21,30 +21,25 @@ import net.jircd.protocol.Message;
 import net.jircd.protocol.NumericReply;
 
 /**
- * {@code AWAY} — sets or clears the sender's away status (002-extended-irc-commands
- * FR-004/FR-005/FR-006). A reason given while already away replaces the previous one in place,
- * confirmed the same way as setting it for the first time; no parameter clears it.
+ * {@code INFO} — a short, fixed server-information burst (005-fix-batch-conformance FR-019),
+ * completing a command previously recognized but unhandled. Reuses the same {@code serverVersion}
+ * source {@code VERSION}'s {@code 351} reply already uses, not a second, independent one.
  */
-public final class AwayCommandHandler implements CommandHandler {
+public final class InfoCommandHandler implements CommandHandler {
 
   private final Supplier<String> serverName;
+  private final String serverVersion;
 
-  public AwayCommandHandler(Supplier<String> serverName) {
+  public InfoCommandHandler(Supplier<String> serverName, String serverVersion) {
     this.serverName = serverName;
+    this.serverVersion = serverVersion;
   }
 
   @Override
   public void handle(ClientSession session, Message message) {
     String server = serverName.get();
-    // 005-fix-batch-conformance FR-022 — an empty trailing argument clears away status the same
-    // way a fully-absent one already does, rather than setting an empty-string away reason.
-    if (message.params().isEmpty() || message.params().getFirst().isEmpty()) {
-      session.setAwayReason(null);
-      Replies.send(
-          session, server, NumericReply.RPL_UNAWAY, "You are no longer marked as being away");
-      return;
-    }
-    session.setAwayReason(message.params().getFirst());
-    Replies.send(session, server, NumericReply.RPL_NOWAWAY, "You have been marked as being away");
+    Replies.send(
+        session, server, NumericReply.RPL_INFO, server + " (jircd IRC server) " + serverVersion);
+    Replies.send(session, server, NumericReply.RPL_ENDOFINFO, "End of /INFO list");
   }
 }

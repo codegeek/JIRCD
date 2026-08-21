@@ -23,7 +23,9 @@ import org.junit.jupiter.api.Test;
 /**
  * FR-039: a client-initiated {@code PING} is answered with an immediate {@code PONG} on any
  * connection, at any time — including before registration completes — independently of the server's
- * own keep-alive probing of that connection.
+ * own keep-alive probing of that connection. Since 005-fix-batch-conformance FR-005, {@code PONG}
+ * carries the server's own name as well as the echoed token (two params, in that order); a bare
+ * {@code PING} with no token at all is rejected (FR-006), never given a fabricated one.
  */
 class PingPongTest {
 
@@ -33,7 +35,8 @@ class PingPongTest {
         RawIrcClient alice = RawIrcClient.connectPlaintext(server.plaintextPort())) {
 
       alice.send("PING sometoken");
-      assertThat(alice.readUntil("PONG", Duration.ofSeconds(5))).contains("PONG sometoken");
+      String pong = alice.readUntil("PONG", Duration.ofSeconds(5));
+      assertThat(pong).contains("PONG").contains("test.jircd.local").contains("sometoken");
     }
   }
 
@@ -45,19 +48,20 @@ class PingPongTest {
       alice.registerAndAwaitWelcome("alice", "alice");
 
       alice.send("PING anothertoken");
-      assertThat(alice.readUntil("PONG", Duration.ofSeconds(5))).contains("PONG anothertoken");
+      String pong = alice.readUntil("PONG", Duration.ofSeconds(5));
+      assertThat(pong).contains("PONG").contains("test.jircd.local").contains("anothertoken");
     }
   }
 
   @Test
-  void pingWithNoTokenDefaultsToTheConnectionsOwnId() throws Exception {
+  void pingWithNoTokenIsRejectedNotFabricated() throws Exception {
     try (TestServer server = TestServer.start();
         RawIrcClient alice = RawIrcClient.connectPlaintext(server.plaintextPort())) {
 
       alice.registerAndAwaitWelcome("alice", "alice");
 
       alice.send("PING");
-      assertThat(alice.readUntil("PONG", Duration.ofSeconds(5))).contains("PONG");
+      assertThat(alice.readUntil("409", Duration.ofSeconds(5))).contains("409");
     }
   }
 }

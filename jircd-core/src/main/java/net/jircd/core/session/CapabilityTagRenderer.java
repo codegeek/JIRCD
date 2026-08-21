@@ -28,6 +28,16 @@ import net.jircd.core.extension.ExtensionRegistry;
  */
 public final class CapabilityTagRenderer implements TagRenderer {
 
+  /**
+   * The IRCv3 capability name gating client-tag forwarding — a wire-protocol constant, not an
+   * internal implementation detail (the same {@code jircd-core}-can't-depend-on-{@code
+   * jircd-capabilities} reasoning {@code TagmsgCommandHandler}'s own copy of this constant
+   * documents). A recipient with nothing negotiated has no way to parse a tag section at all, so it
+   * must never appear on the wire for them (005-fix-batch-conformance FR-010, oragono/Ergo issue
+   * 754 regression).
+   */
+  private static final String MESSAGE_TAGS_CAPABILITY = "message-tags";
+
   private final ExtensionRegistry extensionRegistry;
 
   public CapabilityTagRenderer(ExtensionRegistry extensionRegistry) {
@@ -36,7 +46,22 @@ public final class CapabilityTagRenderer implements TagRenderer {
 
   @Override
   public Map<String, String> render(ClientSession recipient, OutboundMessage message) {
+    // 005-fix-batch-conformance FR-010 — seed with the sender's own client tags first, so a
+    // capability-contributed tag (msgid/time, reserved names) still wins on a key collision, but
+    // a client's own tag otherwise survives to the wire instead of being silently dropped. Only
+    // `+`-prefixed client-only tags ever forward, to every recipient alike including the sender's
+    // own echo: a bare tag (message-tags spec's reserved, non-`+` namespace — e.g. an unrecognized
+    // vendor tag) is never a client's to set at all, so it's dropped rather than round-tripped.
+    // Either way, nothing is forwarded unless the recipient negotiated message-tags itself — a
+    // recipient with nothing negotiated has no way to parse a tag section on the wire.
     Map<String, String> tags = new LinkedHashMap<>();
+    if (recipient.negotiatedCapabilities().contains(MESSAGE_TAGS_CAPABILITY)) {
+      for (var entry : message.clientTags().entrySet()) {
+        if (entry.getKey().startsWith("+")) {
+          tags.put(entry.getKey(), entry.getValue());
+        }
+      }
+    }
     for (var extension : extensionRegistry.enabled()) {
       if (extension instanceof CapabilityExtension capability
           && recipient.negotiatedCapabilities().contains(capability.providedCapability().name())) {

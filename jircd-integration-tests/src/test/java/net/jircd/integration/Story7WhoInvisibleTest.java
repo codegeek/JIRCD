@@ -24,8 +24,7 @@ import org.junit.jupiter.api.Test;
 class Story7WhoInvisibleTest {
 
   @Test
-  void invisibleExcludesNonSharingRequesterButSharingOrAdministratorStillMatches()
-      throws Exception {
+  void invisibleExcludesMaskAndBareWhoButNeverExactNicknameOrAdministrator() throws Exception {
     try (TestServer server = TestServer.start(TestServer.adminEnabledYaml());
         RawIrcClient alice = RawIrcClient.connectPlaintext(server.plaintextPort());
         RawIrcClient bob = RawIrcClient.connectPlaintext(server.plaintextPort());
@@ -38,11 +37,11 @@ class Story7WhoInvisibleTest {
       bob.send("MODE bob +i");
       bob.readUntil("MODE bob +i", Duration.ofSeconds(5));
 
-      // No shared channel yet: exact-nickname and mask forms both exclude bob.
+      // No shared channel yet: an exact-nickname WHO still matches bob — only the mask and
+      // no-argument forms respect invisibility (005-fix-batch-conformance FR-021).
       alice.send("WHO bob");
-      List<String> exactLines = alice.readLinesFor(Duration.ofSeconds(2));
-      assertThat(exactLines).noneMatch(line -> line.contains("352"));
-      assertThat(exactLines).anyMatch(line -> line.contains("315"));
+      assertThat(alice.readUntil("352", Duration.ofSeconds(5))).contains("bob");
+      alice.readUntil("315", Duration.ofSeconds(5));
 
       alice.send("WHO bo*");
       List<String> maskLines = alice.readLinesFor(Duration.ofSeconds(2));

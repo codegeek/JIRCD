@@ -171,7 +171,8 @@ public final class JircdServerApplication {
             nicknameRegistry,
             () -> serverName,
             () -> reloader.current().nicknameMaxLength(),
-            registrationCompletion));
+            registrationCompletion,
+            extensionRegistry));
     connectionHandler.registerHandler(
         Command.USER, new UserCommandHandler(() -> serverName, registrationCompletion));
     connectionHandler.registerHandler(
@@ -215,7 +216,7 @@ public final class JircdServerApplication {
             extensionRegistry,
             () -> serverName,
             () -> reloader.current().whoMaskEnabled()));
-    connectionHandler.registerHandler(Command.PING, PingPongCommandHandler.ping());
+    connectionHandler.registerHandler(Command.PING, PingPongCommandHandler.ping(() -> serverName));
     connectionHandler.registerHandler(Command.PONG, PingPongCommandHandler.pong());
     connectionHandler.registerHandler(
         Command.CAP,
@@ -231,6 +232,13 @@ public final class JircdServerApplication {
         Command.VERSION,
         new VersionCommandHandler(() -> serverName, serverVersion, extensionRegistry));
     connectionHandler.registerHandler(Command.TIME, new TimeCommandHandler(() -> serverName));
+    connectionHandler.registerHandler(
+        Command.USERHOST,
+        new net.jircd.core.session.command.UserhostCommandHandler(
+            nicknameRegistry, extensionRegistry, () -> serverName));
+    connectionHandler.registerHandler(
+        Command.INFO,
+        new net.jircd.core.session.command.InfoCommandHandler(() -> serverName, serverVersion));
     connectionHandler.registerHandler(
         Command.LUSERS,
         new LusersCommandHandler(nicknameRegistry, channelRegistry, () -> serverName));
@@ -258,6 +266,7 @@ public final class JircdServerApplication {
     var channelModeHandler =
         new net.jircd.core.session.command.ModeCommandHandler(
             channelRegistry,
+            nicknameRegistry,
             extensionRegistry,
             () -> serverName,
             () -> reloader.current().maxModesPerCommand());

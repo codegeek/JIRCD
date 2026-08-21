@@ -15,7 +15,7 @@
  */
 package net.jircd.core.capability;
 
-import java.util.LinkedHashSet;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import net.jircd.core.extension.ExtensionRegistry;
@@ -44,14 +44,20 @@ public final class CapabilityNegotiator {
     return extensionRegistry.offeredCapabilities().stream().map(Capability::name).toList();
   }
 
-  /** Which requested capabilities were accepted (currently offered) vs. declined (FR-007). */
-  public record NegotiationResult(Set<String> accepted, Set<String> declined) {}
+  /**
+   * Which requested capabilities were accepted (currently offered) vs. declined (FR-007) — a {@link
+   * List}, not a {@link Set}: the {@code ACK}/{@code NAK} reply echo MUST preserve the client's
+   * original request order and any duplicates (005-fix-batch-conformance FR-009), even though
+   * {@link ClientSession#negotiatedCapabilities()} (actual state) is a deduplicating {@link Set}
+   * underneath.
+   */
+  public record NegotiationResult(List<String> accepted, List<String> declined) {}
 
   /** Requests the given capabilities, recording each accepted one on the session. */
   public NegotiationResult request(ClientSession session, List<String> requested) {
     Set<String> offered = Set.copyOf(currentlyOfferedCapabilityNames());
-    Set<String> accepted = new LinkedHashSet<>();
-    Set<String> declined = new LinkedHashSet<>();
+    List<String> accepted = new ArrayList<>();
+    List<String> declined = new ArrayList<>();
     for (String name : requested) {
       if (offered.contains(name)) {
         accepted.add(name);

@@ -44,9 +44,10 @@ class Story5OperatorGrantTest {
       bob.send("MODE #lobby +o bob");
       assertThat(bob.readUntil("482", Duration.ofSeconds(5))).contains("482");
 
-      // +o naming a non-member is rejected
+      // +o naming a nickname that isn't connected anywhere is rejected (005-fix-batch-conformance
+      // FR-017 — 401, distinct from 441's "connected but not a member of this channel")
       alice.send("MODE #lobby +o nobody");
-      assertThat(alice.readUntil("441", Duration.ofSeconds(5))).contains("441");
+      assertThat(alice.readUntil("401", Duration.ofSeconds(5))).contains("401");
 
       alice.send("MODE #lobby +o bob");
       String grantEcho = bob.readUntil("MODE #lobby +o bob", Duration.ofSeconds(5));

@@ -49,8 +49,8 @@ whose Full Numeric Catalog already reserves every numeric this feature claims (`
 
 | Command | Direction | Preconditions | Effect | Replies |
 |---|---|---|---|---|
-| `AWAY :<reason>` | C→S | `REGISTERED` session | Sets `ClientSession.awayReason` (replacing any existing value, FR-006) | `306 RPL_NOWAWAY` |
-| `AWAY` (no parameter) | C→S | `REGISTERED` session | Clears `ClientSession.awayReason` | `305 RPL_UNAWAY` |
+| `AWAY :<reason>` | C→S | `REGISTERED` session; `<reason>` non-empty | Sets `ClientSession.awayReason` (replacing any existing value, FR-006) | `306 RPL_NOWAWAY` |
+| `AWAY` (no parameter) / `AWAY :` (empty trailing argument) | C→S | `REGISTERED` session | Clears `ClientSession.awayReason` — an empty trailing argument is treated the same as an entirely absent one (005-fix-batch-conformance FR-022; previously set an empty-string away reason instead of clearing) | `305 RPL_UNAWAY` |
 
 **Contract notes**:
 - `PRIVMSG`/`NOTICE` to a target with `awayReason` present MUST additionally send

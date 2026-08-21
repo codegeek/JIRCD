@@ -30,6 +30,7 @@ import net.jircd.core.session.ChannelMode;
 import net.jircd.core.session.ChannelRegistry;
 import net.jircd.core.session.ClientSession;
 import net.jircd.core.session.CoreChannelModes;
+import net.jircd.core.session.NicknameRegistry;
 import net.jircd.core.session.PresentedIdentity;
 import net.jircd.core.session.SecurityEventLog;
 import net.jircd.protocol.Command;
@@ -51,16 +52,19 @@ import net.jircd.protocol.NumericReply;
 public final class ModeCommandHandler implements CommandHandler {
 
   private final ChannelRegistry channelRegistry;
+  private final NicknameRegistry nicknameRegistry;
   private final ExtensionRegistry extensionRegistry;
   private final Supplier<String> serverName;
   private final IntSupplier maxModesPerCommand;
 
   public ModeCommandHandler(
       ChannelRegistry channelRegistry,
+      NicknameRegistry nicknameRegistry,
       ExtensionRegistry extensionRegistry,
       Supplier<String> serverName,
       IntSupplier maxModesPerCommand) {
     this.channelRegistry = channelRegistry;
+    this.nicknameRegistry = nicknameRegistry;
     this.extensionRegistry = extensionRegistry;
     this.serverName = serverName;
     this.maxModesPerCommand = maxModesPerCommand;
@@ -103,7 +107,8 @@ public final class ModeCommandHandler implements CommandHandler {
     }
 
     String modeStringArg = message.params().get(1);
-    if (message.params().size() == 2 && modeStringArg.equals("b")) {
+    // 005-fix-batch-conformance FR-016 — both accepted RFC forms of a bare ban-list query.
+    if (message.params().size() == 2 && (modeStringArg.equals("b") || modeStringArg.equals("+b"))) {
       sendBanList(session, channel);
       return;
     }
@@ -173,12 +178,24 @@ public final class ModeCommandHandler implements CommandHandler {
       if (mode.kind() == ChannelMode.Kind.MEMBER) {
         var target = channel.findMember(rawParam);
         if (target.isEmpty()) {
-          Replies.send(
-              session,
-              serverName.get(),
-              NumericReply.ERR_USERNOTINCHANNEL,
-              rawParam,
-              "They aren't on that channel");
+          // 005-fix-batch-conformance FR-017 — the same nickname-registry-existence check
+          // WHOIS/KILL already do: 401 for "not connected anywhere", 441 only once it's
+          // confirmed the nickname exists but isn't a member of THIS channel.
+          if (nicknameRegistry.lookup(rawParam).isEmpty()) {
+            Replies.send(
+                session,
+                serverName.get(),
+                NumericReply.ERR_NOSUCHNICK,
+                rawParam,
+                "No such nick/channel");
+          } else {
+            Replies.send(
+                session,
+                serverName.get(),
+                NumericReply.ERR_USERNOTINCHANNEL,
+                rawParam,
+                "They aren't on that channel");
+          }
           break;
         }
         applyMember(channel, mode, change, target.get());

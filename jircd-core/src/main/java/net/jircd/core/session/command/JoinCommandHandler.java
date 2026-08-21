@@ -38,6 +38,11 @@ import net.jircd.protocol.NumericReply;
  * ban-mask (FR-062) and invite-only (FR-065), each checked independently. This release's actual
  * moderation command handlers roll out in Story 5, so these gates never actually reject anything
  * yet — the mechanism exists now, empty of any way to populate a ban or an invitation.
+ *
+ * <p>Accepts a comma-separated list of channel names, with an optional matching comma-separated
+ * list of keys (RFC1459 §4.2.1, 005-fix-batch-conformance FR-013) — each named channel is processed
+ * independently through the same single-channel logic; one channel failing its own check doesn't
+ * stop the others in the same command from being processed.
  */
 public final class JoinCommandHandler implements CommandHandler {
 
@@ -68,8 +73,17 @@ public final class JoinCommandHandler implements CommandHandler {
           "Not enough parameters");
       return;
     }
-    String name = message.params().getFirst();
+    // 005-fix-batch-conformance FR-013 — comma-separated channel (and optional matching
+    // comma-separated key) lists are core JOIN grammar (RFC1459 §4.2.1), not an extension. A
+    // fewer-keys-than-channels list leaves the remainder keyless. Each named channel is
+    // processed independently — one failing its own check doesn't stop the others.
+    List<String> names = List.of(message.params().getFirst().split(",", -1));
+    for (String name : names) {
+      joinOne(session, name);
+    }
+  }
 
+  private void joinOne(ClientSession session, String name) {
     if (!ChannelName.isValid(name, channelNameMaxLength.getAsInt())) {
       Replies.send(
           session, serverName.get(), NumericReply.ERR_BADCHANMASK, name, "Bad Channel Mask");
@@ -107,6 +121,13 @@ public final class JoinCommandHandler implements CommandHandler {
       if (member.writer() != null) {
         member.writer().enqueueRaw(joinNotification);
       }
+    }
+
+    // 005-fix-batch-conformance FR-014 — the same 332-only shape TopicCommandHandler's own
+    // query path already uses (this project tracks no set-at timestamp, so no 333 either).
+    if (channel.topic() != null) {
+      Replies.send(
+          session, serverName.get(), NumericReply.RPL_TOPIC, channel.name(), channel.topic());
     }
 
     sendNamesReply(session, channel, serverName.get());

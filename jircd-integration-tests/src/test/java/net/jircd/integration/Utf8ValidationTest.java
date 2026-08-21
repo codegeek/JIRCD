@@ -23,9 +23,11 @@ import org.junit.jupiter.api.Test;
 
 /**
  * FR-054: a message containing an invalid UTF-8 byte sequence in any of `PRIVMSG`/`NOTICE` bodies,
- * channel topics, realnames, or `QUIT`/`PART` reasons is rejected as malformed (FR-015), the same
- * way any other malformed protocol message is — never silently passed through, mistranscoded, or
- * partially accepted.
+ * channel topics, realnames, or `QUIT`/`PART` reasons is rejected as malformed (FR-015). Since
+ * 005-fix-batch-conformance FR-012, this now closes the connection with an `ERROR` line — the same
+ * definitive, client-visible resolution every other fatal/malformed pre-registration or mid-session
+ * condition in this codebase already gives, rather than a `421`-and-continue that leaves the client
+ * to guess whether to retry.
  */
 class Utf8ValidationTest {
 
@@ -40,6 +42,13 @@ class Utf8ValidationTest {
     return result;
   }
 
+  private static void assertClosesWithError(RawIrcClient client, byte[] malformedLine)
+      throws Exception {
+    client.sendRawBytes(malformedLine);
+    assertThat(client.readUntil("ERROR", Duration.ofSeconds(5))).contains("ERROR");
+    assertThat(client.readLine()).isNull();
+  }
+
   @Test
   void invalidUtf8InPrivmsgBodyIsRejected() throws Exception {
     try (TestServer server = TestServer.start();
@@ -49,8 +58,7 @@ class Utf8ValidationTest {
       alice.send("JOIN #lobby");
       alice.readUntil("353", Duration.ofSeconds(5));
 
-      alice.sendRawBytes(rawLine("PRIVMSG #lobby :bad", "text"));
-      assertThat(alice.readUntil("421", Duration.ofSeconds(5))).contains("421");
+      assertClosesWithError(alice, rawLine("PRIVMSG #lobby :bad", "text"));
     }
   }
 
@@ -63,8 +71,7 @@ class Utf8ValidationTest {
       alice.send("JOIN #lobby");
       alice.readUntil("353", Duration.ofSeconds(5));
 
-      alice.sendRawBytes(rawLine("NOTICE #lobby :bad", "text"));
-      assertThat(alice.readUntil("421", Duration.ofSeconds(5))).contains("421");
+      assertClosesWithError(alice, rawLine("NOTICE #lobby :bad", "text"));
     }
   }
 
@@ -77,8 +84,7 @@ class Utf8ValidationTest {
       alice.send("JOIN #lobby");
       alice.readUntil("353", Duration.ofSeconds(5));
 
-      alice.sendRawBytes(rawLine("TOPIC #lobby :bad", "topic"));
-      assertThat(alice.readUntil("421", Duration.ofSeconds(5))).contains("421");
+      assertClosesWithError(alice, rawLine("TOPIC #lobby :bad", "topic"));
     }
   }
 
@@ -88,8 +94,7 @@ class Utf8ValidationTest {
         RawIrcClient alice = RawIrcClient.connectPlaintext(server.plaintextPort())) {
 
       alice.send("NICK alice");
-      alice.sendRawBytes(rawLine("USER alice 0 * :bad", "name"));
-      assertThat(alice.readUntil("421", Duration.ofSeconds(5))).contains("421");
+      assertClosesWithError(alice, rawLine("USER alice 0 * :bad", "name"));
     }
   }
 
@@ -100,8 +105,7 @@ class Utf8ValidationTest {
 
       alice.registerAndAwaitWelcome("alice", "alice");
 
-      alice.sendRawBytes(rawLine("QUIT :bad", "reason"));
-      assertThat(alice.readUntil("421", Duration.ofSeconds(5))).contains("421");
+      assertClosesWithError(alice, rawLine("QUIT :bad", "reason"));
     }
   }
 
@@ -114,8 +118,7 @@ class Utf8ValidationTest {
       alice.send("JOIN #lobby");
       alice.readUntil("353", Duration.ofSeconds(5));
 
-      alice.sendRawBytes(rawLine("PART #lobby :bad", "reason"));
-      assertThat(alice.readUntil("421", Duration.ofSeconds(5))).contains("421");
+      assertClosesWithError(alice, rawLine("PART #lobby :bad", "reason"));
     }
   }
 }

@@ -100,10 +100,11 @@ public final class SessionWriter implements AutoCloseable {
   }
 
   private void writeFanOutMessage(OutboundMessage message) {
-    // Client-supplied tags (e.g. a TAGMSG's vendor tags) merge first so a capability-contributed,
-    // server-reserved tag (msgid/time) always wins on key conflict — never the reverse.
-    Map<String, String> tags = new java.util.LinkedHashMap<>(message.clientTags());
-    tags.putAll(tagRenderer.render(session, message));
+    // tagRenderer.render() is the sole source of tags here — it already seeds the (recipient-
+    // filtered) client tags before merging in capability-contributed ones (CapabilityTagRenderer,
+    // 005-fix-batch-conformance FR-010), so this call must not re-seed unfiltered client tags on
+    // top of it.
+    Map<String, String> tags = new java.util.LinkedHashMap<>(tagRenderer.render(session, message));
     java.util.List<String> params =
         message.body() != null
             ? java.util.List.of(message.target(), message.body())

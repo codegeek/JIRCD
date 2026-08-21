@@ -71,6 +71,20 @@ public final class CapabilityNegotiationGrammar {
         java.util.Map.of(), serverName, Command.CAP, "CAP", List.of("*", "LS", join(capabilities)));
   }
 
+  /**
+   * {@code CAP LIST} — the client's currently negotiated capabilities, distinct from {@link #ls}
+   * which reports everything the server offers regardless of negotiation state
+   * (005-fix-batch-conformance FR-007).
+   */
+  public static Message list(String serverName, List<String> capabilities) {
+    return new Message(
+        java.util.Map.of(),
+        serverName,
+        Command.CAP,
+        "CAP",
+        List.of("*", "LIST", join(capabilities)));
+  }
+
   public static Message ack(String serverName, List<String> capabilities) {
     return new Message(
         java.util.Map.of(),

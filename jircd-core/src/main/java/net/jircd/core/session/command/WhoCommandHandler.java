@@ -17,7 +17,6 @@ package net.jircd.core.session.command;
 
 import java.util.Collection;
 import java.util.Collections;
-import java.util.List;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import net.jircd.core.extension.ExtensionRegistry;
@@ -82,17 +81,20 @@ public final class WhoCommandHandler implements CommandHandler {
       return;
     }
 
-    Collection<ClientSession> candidates;
-    if (arg == null) {
-      candidates = nicknameRegistry.all();
-    } else if (isMask) {
-      candidates =
-          nicknameRegistry.all().stream()
-              .filter(s -> CaseMapping.matches(s.nickname(), arg))
-              .toList();
-    } else {
-      candidates = nicknameRegistry.lookup(arg).map(List::of).orElseGet(List::of);
+    if (arg != null && !isMask) {
+      // 005-fix-batch-conformance FR-021 — an exact-nickname lookup bypasses invisibility
+      // entirely; only the mask and no-argument forms respect +i (unchanged below).
+      nicknameRegistry.lookup(arg).ifPresent(target -> sendWhoReply(session, target, "*", null));
+      sendEndOfWho(session, arg);
+      return;
     }
+
+    Collection<ClientSession> candidates =
+        arg == null
+            ? nicknameRegistry.all()
+            : nicknameRegistry.all().stream()
+                .filter(s -> CaseMapping.matches(s.nickname(), arg))
+                .toList();
 
     for (ClientSession target : candidates) {
       if (isVisibleTo(session, target)) {
