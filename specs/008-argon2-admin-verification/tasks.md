@@ -42,16 +42,16 @@ No new module — every path is an existing file from `001-ircv3-server`'s own m
 catalog and every module that declares it, before any production code changes (research.md
 "Password hashing library choice — consolidating onto Password4j").
 
-- [ ] T001 In `gradle/libs.versions.toml`, remove the `bcrypt` version entry and the
+- [X] T001 In `gradle/libs.versions.toml`, remove the `bcrypt` version entry and the
   `bcrypt` library entry (`at.favre.lib:bcrypt`); add a `password4j` version entry and a
   `password4j` library entry (`com.password4j:password4j`)
-- [ ] T002 [P] In `jircd-server-extensions/admin/build.gradle.kts`, replace
+- [X] T002 [P] In `jircd-server-extensions/admin/build.gradle.kts`, replace
   `implementation(rootProject.libs.bcrypt)` with
   `implementation(rootProject.libs.password4j)` (depends on T001)
-- [ ] T003 [P] In `jircd-integration-tests/build.gradle.kts`, replace
+- [X] T003 [P] In `jircd-integration-tests/build.gradle.kts`, replace
   `testImplementation(rootProject.libs.bcrypt)` with
   `testImplementation(rootProject.libs.password4j)` (depends on T001)
-- [ ] T004 [P] In `jircd-core/build.gradle.kts`, remove the unused
+- [X] T004 [P] In `jircd-core/build.gradle.kts`, remove the unused
   `implementation(rootProject.libs.bcrypt)` line entirely — no replacement dependency is
   added; confirmed via source read that no file in `jircd-core` imports `BCrypt`, and
   `ConfigurationLoader`'s prefix check needs no library (research.md)
@@ -70,7 +70,7 @@ fails to compile.
 
 **⚠️ CRITICAL**: No user story task can pass until this phase is complete.
 
-- [ ] T005 In `jircd-server-extensions/admin/src/main/java/net/jircd/serverextensions/admin/AdminCredentialVerifier.java`,
+- [X] T005 In `jircd-server-extensions/admin/src/main/java/net/jircd/serverextensions/admin/AdminCredentialVerifier.java`,
   replace the `import at.favre.lib.crypto.bcrypt.BCrypt` and its `BCrypt.verifyer().verify(...)`
   call with Password4j: branch on `credential.hashedPassword()`'s prefix — `$2a$`/`$2b$`/`$2y$`
   → `Password.check(password, hash).withBcrypt()`; `$argon2id$` → `Password.check(password,
@@ -80,7 +80,7 @@ fails to compile.
   type — expected to be `com.password4j.BadParametersException` or a common superclass —
   against the resolved dependency's actual API once T002 lands) so a corrupted hash returns
   `false` rather than propagating an uncaught exception (FR-003). (depends on T002)
-- [ ] T006 In `jircd-integration-tests/src/test/java/net/jircd/integration/TestServer.java`,
+- [X] T006 In `jircd-integration-tests/src/test/java/net/jircd/integration/TestServer.java`,
   replace the `import at.favre.lib.crypto.bcrypt.BCrypt` and both existing
   `BCrypt.withDefaults().hashToString(10, ADMIN_PASSWORD.toCharArray())` call sites (in
   `adminEnabledYaml()` and `adminAndCloakEnabledYaml()`) with a single private helper using
@@ -104,10 +104,10 @@ succeeds with the correct password.
 credential whose `hashedPassword` is a real Argon2id hash of a known password, start the
 server, issue `OPER` with that password, and confirm administrator privilege is granted.
 
-- [ ] T007 [P] [US1] In `jircd-core/src/main/java/net/jircd/core/config/ConfigurationLoader.java`,
+- [X] T007 [P] [US1] In `jircd-core/src/main/java/net/jircd/core/config/ConfigurationLoader.java`,
   narrow the `"$argon2"` entry in `BASE_64_HASH_PREFIXES` to `"$argon2id$"` (FR-004) — no
   dependency on T005/T006, different file
-- [ ] T008 [US1] New integration test file,
+- [X] T008 [US1] New integration test file,
   `jircd-integration-tests/src/test/java/net/jircd/integration/AdminArgon2CredentialTest.java`:
   using `TestServer.argon2AdminEnabledYaml()`, prove `OPER <admin-username> <correct
   password>` returns `381 RPL_YOUREOPER` and `OPER <admin-username> <wrong password>`
@@ -131,7 +131,7 @@ testable and demonstrable.
 credential (as today), issue `OPER` with the correct and then an incorrect password, and
 confirm both outcomes are unchanged from current behavior.
 
-- [ ] T009 [US2] Run `jircd-integration-tests/src/test/java/net/jircd/integration/Story6OperTest.java`'s
+- [X] T009 [US2] Run `jircd-integration-tests/src/test/java/net/jircd/integration/Story6OperTest.java`'s
   three existing tests unmodified against the Password4j-based bcrypt verification path —
   this file already exercises exactly US2's Independent Test (correct password succeeds,
   incorrect password fails, third failure locks out) via `TestServer.adminEnabledYaml()`, so
@@ -154,12 +154,12 @@ syntactically-plausible but corrupted `$argon2id$`-prefixed string (passes
 `OPER` against it, and confirm a clean `464` refusal rather than a crash or unhandled
 exception.
 
-- [ ] T010 [US3] Extend `AdminArgon2CredentialTest.java` (from T008) with a test configuring
+- [X] T010 [US3] Extend `AdminArgon2CredentialTest.java` (from T008) with a test configuring
   an `administratorCredentials` entry whose `hashedPassword` is a `$argon2id$`-prefixed but
   corrupted/truncated string, confirming `OPER` against it returns `464
   ERR_PASSWDMISMATCH` (not a dropped/reset connection, not a timeout) — this directly
   exercises T005's catch-and-fail-closed branch (FR-003) (depends on T008)
-- [ ] T011 [P] [US3] In `jircd-core/src/test/java/net/jircd/core/config/ConfigurationLoaderTest.java`,
+- [X] T011 [P] [US3] In `jircd-core/src/test/java/net/jircd/core/config/ConfigurationLoaderTest.java`,
   add a test proving an `administratorCredentials` entry with an `$argon2i$`- or
   `$argon2d$`-prefixed `hashedPassword` is rejected at configuration-load time with a
   specific error naming the field (FR-004), alongside a test proving a well-formed
@@ -174,14 +174,14 @@ fails later.
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T012 [P] Update `specs/001-ircv3-server/contracts/server-configuration.md`'s
+- [X] T012 [P] Update `specs/001-ircv3-server/contracts/server-configuration.md`'s
   `hashedPassword` example (currently `"<bcrypt/Argon2 hash — ...>"`) to name the specific
   supported Argon2 variant — `"<bcrypt/Argon2id hash — ...>"` — reflecting FR-004's
   narrowed scope
-- [ ] T013 [P] Code cleanup pass: confirm `./gradlew build` runs Spotless/SpotBugs/PMD
+- [X] T013 [P] Code cleanup pass: confirm `./gradlew build` runs Spotless/SpotBugs/PMD
   clean across every touched module, and that the full existing test suite (not just this
   feature's own tests) passes with zero regressions
-- [ ] T014 Run the full `specs/008-argon2-admin-verification/quickstart.md` validation
+- [X] T014 Run the full `specs/008-argon2-admin-verification/quickstart.md` validation
   pass manually against a running `./gradlew :jircd-server:run` instance (constitution UX
   Consistency principle's required manual usage-scenario check)
 

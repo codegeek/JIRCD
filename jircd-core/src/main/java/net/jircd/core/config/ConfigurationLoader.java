@@ -33,7 +33,7 @@ import org.yaml.snakeyaml.Yaml;
 public final class ConfigurationLoader {
 
   private static final Set<String> BASE_64_HASH_PREFIXES =
-      Set.of("$2a$", "$2b$", "$2y$", "$argon2");
+      Set.of("$2a$", "$2b$", "$2y$", "$argon2id$");
 
   private final Set<String> knownCapabilityIds;
   private final Set<String> knownServerExtensionIds;

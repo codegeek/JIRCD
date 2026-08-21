@@ -15,7 +15,7 @@
  */
 package net.jircd.integration;
 
-import at.favre.lib.crypto.bcrypt.BCrypt;
+import com.password4j.Password;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
@@ -46,7 +46,6 @@ public final class TestServer implements AutoCloseable {
    * itself MUST be enabled for {@code OPER} etc. to work at all.
    */
   public static String adminEnabledYaml() {
-    String hash = BCrypt.withDefaults().hashToString(10, ADMIN_PASSWORD.toCharArray());
     return "server-extensions:\n"
         + "  admin: enabled\n"
         + "administratorCredentials:\n"
@@ -54,7 +53,23 @@ public final class TestServer implements AutoCloseable {
         + ADMIN_USERNAME
         + "\n"
         + "    hashedPassword: \""
-        + hash
+        + bcryptHash()
+        + "\"\n";
+  }
+
+  /**
+   * Same as {@link #adminEnabledYaml()}, but with an Argon2id-hashed credential instead of bcrypt
+   * (008-argon2-admin-verification).
+   */
+  public static String argon2AdminEnabledYaml() {
+    return "server-extensions:\n"
+        + "  admin: enabled\n"
+        + "administratorCredentials:\n"
+        + "  - username: "
+        + ADMIN_USERNAME
+        + "\n"
+        + "    hashedPassword: \""
+        + argon2Hash()
         + "\"\n";
   }
 
@@ -65,7 +80,6 @@ public final class TestServer implements AutoCloseable {
    * Both {@code admin} and {@code cloak} enabled together, one {@code server-extensions:} block.
    */
   public static String adminAndCloakEnabledYaml() {
-    String hash = BCrypt.withDefaults().hashToString(10, ADMIN_PASSWORD.toCharArray());
     return "server-extensions:\n"
         + "  admin: enabled\n"
         + "  cloak: enabled\n"
@@ -74,8 +88,16 @@ public final class TestServer implements AutoCloseable {
         + ADMIN_USERNAME
         + "\n"
         + "    hashedPassword: \""
-        + hash
+        + bcryptHash()
         + "\"\n";
+  }
+
+  private static String bcryptHash() {
+    return Password.hash(ADMIN_PASSWORD).withBcrypt().getResult();
+  }
+
+  private static String argon2Hash() {
+    return Password.hash(ADMIN_PASSWORD).withArgon2().getResult();
   }
 
   public final JircdServerApplication application;

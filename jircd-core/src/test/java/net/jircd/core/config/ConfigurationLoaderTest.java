@@ -108,6 +108,34 @@ class ConfigurationLoaderTest {
   }
 
   @Test
+  void unsupportedArgon2VariantIsRejected() {
+    assertThatThrownBy(
+            () ->
+                load(
+                    "administratorCredentials:\n"
+                        + "  - username: root\n"
+                        + "    hashedPassword: \"$argon2i$v=19$m=65536,t=3,p=4$c2FsdA$aGFzaA\"\n"))
+        .isInstanceOf(ConfigurationException.class);
+    assertThatThrownBy(
+            () ->
+                load(
+                    "administratorCredentials:\n"
+                        + "  - username: root\n"
+                        + "    hashedPassword: \"$argon2d$v=19$m=65536,t=3,p=4$c2FsdA$aGFzaA\"\n"))
+        .isInstanceOf(ConfigurationException.class);
+  }
+
+  @Test
+  void argon2idCredentialParsesCleanly() throws Exception {
+    ServerConfiguration config =
+        load(
+            "administratorCredentials:\n"
+                + "  - username: root\n"
+                + "    hashedPassword: \"$argon2id$v=19$m=65536,t=3,p=4$c2FsdA$aGFzaA\"\n");
+    assertThat(config.administratorCredentials()).hasSize(1);
+  }
+
+  @Test
   void validConfigurationParsesCleanly() throws Exception {
     String yaml =
         """

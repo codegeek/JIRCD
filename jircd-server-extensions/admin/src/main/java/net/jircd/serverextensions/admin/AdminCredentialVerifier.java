@@ -15,14 +15,16 @@
  */
 package net.jircd.serverextensions.admin;
 
-import at.favre.lib.crypto.bcrypt.BCrypt;
+import com.password4j.Password;
 import java.util.List;
 import net.jircd.core.config.ServerConfiguration;
 
 /**
  * Verifies {@code OPER} credentials against {@code ServerConfiguration.administratorCredentials}
  * (FR-034), the same salted, computationally-expensive hashing approach FR-024's account
- * credentials use (research.md "Administrator credential storage") — never plain text.
+ * credentials use (research.md "Administrator credential storage") — never plain text. Supports
+ * bcrypt (`$2a$`/`$2b$`/`$2y$`) and Argon2id (`$argon2id$`) hashes, both verified via Password4j
+ * (008-argon2-admin-verification research.md "Password hashing library choice").
  */
 public final class AdminCredentialVerifier {
 
@@ -34,15 +36,25 @@ public final class AdminCredentialVerifier {
       String password) {
     for (ServerConfiguration.AdministratorCredential credential : credentials) {
       if (credential.username().equals(username)) {
-        try {
-          return BCrypt.verifyer()
-              .verify(password.toCharArray(), credential.hashedPassword())
-              .verified;
-        } catch (IllegalArgumentException unsupportedHashFormat) {
-          return false;
-        }
+        return verifyHash(password, credential.hashedPassword());
       }
     }
     return false;
+  }
+
+  private static boolean verifyHash(String password, String hashedPassword) {
+    try {
+      if (hashedPassword.startsWith("$2a$")
+          || hashedPassword.startsWith("$2b$")
+          || hashedPassword.startsWith("$2y$")) {
+        return Password.check(password, hashedPassword).withBcrypt();
+      }
+      if (hashedPassword.startsWith("$argon2id$")) {
+        return Password.check(password, hashedPassword).withArgon2();
+      }
+      return false;
+    } catch (IllegalArgumentException malformedOrUnsupportedHash) {
+      return false;
+    }
   }
 }

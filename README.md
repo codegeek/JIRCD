@@ -89,6 +89,32 @@ administration (`OPER`, `REHASH`, etc.), see the full annotated schema in
 For a guided, story-by-story walkthrough of every feature, see
 [`quickstart.md`](specs/001-ircv3-server/quickstart.md).
 
+### Generating an administrator credential
+
+`administratorCredentials` entries (see the config schema link above) store a
+bcrypt or Argon2id password hash — never a plaintext password. Generate one
+with `jshell` against the jars already bundled in a standalone build:
+
+```bash
+./gradlew :jircd-server:installDist
+cd jircd-server/build/install/jircd-server
+jshell --class-path "lib/*"
+```
+
+```java
+jshell> com.password4j.Password.hash("your-password-here").withArgon2().getResult()
+$1 ==> "$argon2id$v=19$m=15360,t=2,p=1$..."
+
+jshell> com.password4j.Password.hash("your-password-here").withBcrypt().getResult()
+$2 ==> "$2b$10$..."
+
+jshell> /exit
+```
+
+Paste the printed value into that credential's `hashedPassword` field. Only
+the `$argon2id$` Argon2 variant is accepted — `$argon2i$`/`$argon2d$` hashes
+are rejected at startup, not silently ignored.
+
 ### Running a standalone build
 
 `./gradlew :jircd-server:run` is for development only — it stays attached

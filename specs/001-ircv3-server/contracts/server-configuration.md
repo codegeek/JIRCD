@@ -78,7 +78,7 @@ rateLimit:
 
 administratorCredentials:
   - username: root-admin
-    hashedPassword: "<bcrypt/Argon2 hash — never plain text, see research.md 'Administrator credential storage'>"
+    hashedPassword: "<bcrypt/Argon2id hash — never plain text, see research.md 'Administrator credential storage' and 008-argon2-admin-verification research.md>"
 ```
 
 ## Behavioral Contract
