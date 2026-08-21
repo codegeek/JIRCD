@@ -113,7 +113,7 @@ subprojects {
         // version 69) bytecode — the version bundled with older plugin releases
         // cannot.
         toolVersion.set(rootProject.libs.versions.spotbugsTool)
-        excludeFilter.set(rootProject.file("spotbugs-exclude.xml"))
+        excludeFilter.set(rootProject.file("gradle/spotbugs-exclude.xml"))
         // MAX effort (deeper analysis, same confidence bar) — LOW confidence was
         // tried and reverted: it mostly surfaces style noise (e.g. flagging every
         // test method that declares `throws Exception`) without adding real
@@ -130,7 +130,7 @@ subprojects {
 
     configure<PmdExtension> {
         toolVersion = "7.26.0"
-        ruleSetFiles = rootProject.files("pmd-ruleset.xml")
+        ruleSetFiles = rootProject.files("gradle/pmd-ruleset.xml")
         ruleSets = emptyList()
         isConsoleOutput = true
     }
