@@ -83,7 +83,8 @@ class ExtensionRegistryTest {
             true,
             ServerConfiguration.DEFAULT_MAX_MODES_PER_COMMAND,
             ServerConfiguration.DEFAULT_OPER_FAILURE_THRESHOLD,
-            ServerConfiguration.DEFAULT_WHOWAS_HISTORY_SIZE);
+            ServerConfiguration.DEFAULT_WHOWAS_HISTORY_SIZE,
+            ServerConfiguration.DEFAULT_KEEP_ALIVE_FREQUENCY_SECONDS);
     registry.attachContext(
         new ServerContext(
             nicknameRegistry,

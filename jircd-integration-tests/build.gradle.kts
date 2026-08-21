@@ -5,4 +5,7 @@ dependencies {
     // Only to hash a real test password into administratorCredentials YAML — never to reference
     // jircd-server-extensions:admin directly, which stays runtime-only/ServiceLoader-discovered.
     testImplementation(rootProject.libs.password4j)
+    // Only for ListAppender-based log-capture in tests (009-connection-monitoring-log) —
+    // runtimeOnly everywhere else in this build, but tests need it on the compile classpath too.
+    testImplementation(rootProject.libs.logback.classic)
 }

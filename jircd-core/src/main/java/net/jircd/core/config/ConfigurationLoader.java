@@ -89,6 +89,12 @@ public final class ConfigurationLoader {
             "whowasHistorySize",
             ServerConfiguration.DEFAULT_WHOWAS_HISTORY_SIZE,
             ServerConfiguration.WHOWAS_HISTORY_SIZE_CEILING);
+    int keepAliveFrequencySeconds =
+        positiveIntWithinCeiling(
+            root,
+            "keepAliveFrequencySeconds",
+            ServerConfiguration.DEFAULT_KEEP_ALIVE_FREQUENCY_SECONDS,
+            ServerConfiguration.KEEP_ALIVE_FREQUENCY_CEILING_SECONDS);
 
     boolean whoMaskEnabled =
         root.containsKey("whoMaskEnabled") ? asBoolean(root.get("whoMaskEnabled")) : true;
@@ -123,7 +129,8 @@ public final class ConfigurationLoader {
         whoMaskEnabled,
         maxModesPerCommand,
         operFailureThreshold,
-        whowasHistorySize);
+        whowasHistorySize,
+        keepAliveFrequencySeconds);
   }
 
   private static int positiveIntWithinCeiling(

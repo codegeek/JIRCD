@@ -62,6 +62,10 @@ public final class DisconnectCleanup {
     if (!session.lifecycle().closeIfNotAlreadyClosing()) {
       return;
     }
+    ConnectionMonitorLog.disconnected(
+        session.connectionId(),
+        java.time.Duration.between(session.connectedAt(), java.time.Instant.now()),
+        reason);
     Set<ClientSession> neighbors = new HashSet<>();
     for (Channel channel : Set.copyOf(session.channelMemberships())) {
       channel.removeMember(session);

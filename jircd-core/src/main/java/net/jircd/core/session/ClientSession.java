@@ -36,6 +36,7 @@ public final class ClientSession {
   private final Set<UserMode> userModes = ConcurrentHashMap.newKeySet();
   private final RateLimitBucket rateLimitBucket;
   private final String realHostname;
+  private final Instant connectedAt = Instant.now();
 
   private volatile SessionWriter writer;
   private volatile LivenessMonitor livenessMonitor;
@@ -56,6 +57,10 @@ public final class ClientSession {
 
   public String connectionId() {
     return connectionId;
+  }
+
+  public Instant connectedAt() {
+    return connectedAt;
   }
 
   public ConnectionLifecycle lifecycle() {

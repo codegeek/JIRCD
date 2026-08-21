@@ -99,6 +99,29 @@ class ConfigurationLoaderTest {
   }
 
   @Test
+  void validKeepAliveFrequencyParsesCleanly() throws Exception {
+    ServerConfiguration config = load("keepAliveFrequencySeconds: 60\n");
+    assertThat(config.keepAliveFrequencySeconds()).isEqualTo(60);
+  }
+
+  @Test
+  void keepAliveFrequencyDefaultsWhenUnset() throws Exception {
+    ServerConfiguration config = load("");
+    assertThat(config.keepAliveFrequencySeconds())
+        .isEqualTo(ServerConfiguration.DEFAULT_KEEP_ALIVE_FREQUENCY_SECONDS);
+  }
+
+  @Test
+  void outOfRangeKeepAliveFrequencyIsRejected() {
+    assertThatThrownBy(() -> load("keepAliveFrequencySeconds: 0\n"))
+        .isInstanceOf(ConfigurationException.class);
+    assertThatThrownBy(() -> load("keepAliveFrequencySeconds: -5\n"))
+        .isInstanceOf(ConfigurationException.class);
+    assertThatThrownBy(() -> load("keepAliveFrequencySeconds: 3601\n"))
+        .isInstanceOf(ConfigurationException.class);
+  }
+
+  @Test
   void plainTextCredentialIsRejected() {
     assertThatThrownBy(
             () ->

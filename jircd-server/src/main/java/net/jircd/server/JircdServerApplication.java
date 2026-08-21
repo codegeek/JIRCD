@@ -126,7 +126,8 @@ public final class JircdServerApplication {
             extensionRegistry,
             disconnectCleanup,
             () -> serverName,
-            () -> reloader.current().rateLimit());
+            () -> reloader.current().rateLimit(),
+            () -> reloader.current().keepAliveFrequencySeconds());
     registerStory1Handlers();
 
     extensionRegistry.attachContext(

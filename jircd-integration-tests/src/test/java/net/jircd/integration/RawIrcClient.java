@@ -97,13 +97,22 @@ public final class RawIrcClient implements AutoCloseable {
    * Reads lines until one containing {@code prefix} is found (or the timeout elapses), returning
    * it. A purely-numeric {@code prefix} (a reply code) is matched as an isolated digit run — not a
    * raw substring — so it can't spuriously match inside an unrelated free-text numeric, e.g. a
-   * {@code 221} search matching inside {@code RPL_CREATED}'s {@code ...42.221297Z} timestamp.
+   * {@code 221} search matching inside {@code RPL_CREATED}'s {@code ...42.221297Z} timestamp. A
+   * purely-uppercase-letters {@code prefix} (an IRC command name, e.g. {@code PING}) gets the same
+   * word-boundary protection, for the identical reason — {@code CASEMAPPING=rfc1459} in a {@code
+   * 005 RPL_ISUPPORT} line ends in the literal substring {@code PING} (from {@code ...maPPING}),
+   * which a raw substring search would spuriously match well before any real {@code PING} arrives.
    */
   public String readUntil(String prefix, Duration timeout) throws IOException {
-    java.util.regex.Pattern numericBoundary =
-        prefix.chars().allMatch(Character::isDigit)
+    boolean isNumeric = prefix.chars().allMatch(Character::isDigit);
+    boolean isUppercaseWord =
+        !prefix.isEmpty() && prefix.chars().allMatch(c -> Character.isUpperCase((char) c));
+    java.util.regex.Pattern wordBoundary =
+        isNumeric
             ? java.util.regex.Pattern.compile("(?<!\\d)" + prefix + "(?!\\d)")
-            : null;
+            : isUppercaseWord
+                ? java.util.regex.Pattern.compile("(?<![A-Za-z])" + prefix + "(?![A-Za-z])")
+                : null;
     Instant deadline = Instant.now().plus(timeout);
     socket.setSoTimeout(Math.max(1, (int) timeout.toMillis()));
     while (Instant.now().isBefore(deadline)) {
@@ -112,7 +121,7 @@ public final class RawIrcClient implements AutoCloseable {
         throw new IOException("Connection closed while waiting for: " + prefix);
       }
       boolean matches =
-          numericBoundary != null ? numericBoundary.matcher(line).find() : line.contains(prefix);
+          wordBoundary != null ? wordBoundary.matcher(line).find() : line.contains(prefix);
       if (matches) {
         return line;
       }

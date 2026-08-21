@@ -35,7 +35,8 @@ public record ServerConfiguration(
     boolean whoMaskEnabled,
     int maxModesPerCommand,
     int operFailureThreshold,
-    int whowasHistorySize) {
+    int whowasHistorySize,
+    int keepAliveFrequencySeconds) {
 
   /**
    * {@code certPath}/{@code keyPath} (a PEM certificate/chain and its PEM private key) and {@code
@@ -75,6 +76,15 @@ public record ServerConfiguration(
   public static final int DEFAULT_WHOWAS_HISTORY_SIZE = 100;
 
   public static final int WHOWAS_HISTORY_SIZE_CEILING = 10_000;
+
+  /**
+   * The server-initiated keep-alive's idle interval (009-connection-monitoring-log) — how long a
+   * connection may sit idle before the server probes it with a PING. Previously a hardcoded,
+   * deliberately-non-configurable 30-second constant in {@code ConnectionHandler}.
+   */
+  public static final int DEFAULT_KEEP_ALIVE_FREQUENCY_SECONDS = 120;
+
+  public static final int KEEP_ALIVE_FREQUENCY_CEILING_SECONDS = 3600;
 
   /** The single source of truth for {@link RateLimit}'s default — never redefine this elsewhere. */
   public static final int DEFAULT_RATE_LIMIT_BUCKET_SIZE = 20;

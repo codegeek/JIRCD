@@ -24,8 +24,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import net.jircd.core.config.ServerConfiguration;
 import net.jircd.core.extension.ConnectionAdmissionExtension;
@@ -76,13 +76,7 @@ public final class ConnectionHandler {
       java.util.Set.of(
           Command.NICK, Command.USER, Command.CAP, Command.PING, Command.PONG, Command.QUIT);
 
-  /**
-   * Reasonable, industry-standard keep-alive defaults (FR-039) — deliberately not exposed as an
-   * administrator-configurable {@code ServerConfiguration} setting (spec.md Assumptions), unlike
-   * {@link #rateLimit}'s thresholds.
-   */
-  private static final Duration KEEP_ALIVE_IDLE_INTERVAL = Duration.ofSeconds(30);
-
+  /** Reasonable, industry-standard keep-alive response-timeout default (FR-039). */
   private static final Duration KEEP_ALIVE_TIMEOUT = Duration.ofSeconds(10);
 
   /** How often the per-connection liveness loop re-evaluates {@link LivenessMonitor#checkNow()}. */
@@ -92,19 +86,21 @@ public final class ConnectionHandler {
   private final DisconnectCleanup disconnectCleanup;
   private final Supplier<String> serverName;
   private final Supplier<ServerConfiguration.RateLimit> rateLimit;
+  private final Supplier<Integer> keepAliveFrequencySeconds;
   private final TagRenderer tagRenderer;
   private final Map<Command, CommandHandler> handlers = new ConcurrentHashMap<>();
-  private final AtomicLong connectionIdCounter = new AtomicLong();
 
   public ConnectionHandler(
       ExtensionRegistry extensionRegistry,
       DisconnectCleanup disconnectCleanup,
       Supplier<String> serverName,
-      Supplier<ServerConfiguration.RateLimit> rateLimit) {
+      Supplier<ServerConfiguration.RateLimit> rateLimit,
+      Supplier<Integer> keepAliveFrequencySeconds) {
     this.extensionRegistry = extensionRegistry;
     this.disconnectCleanup = disconnectCleanup;
     this.serverName = serverName;
     this.rateLimit = rateLimit;
+    this.keepAliveFrequencySeconds = keepAliveFrequencySeconds;
     this.tagRenderer = new CapabilityTagRenderer(extensionRegistry);
   }
 
@@ -114,12 +110,13 @@ public final class ConnectionHandler {
 
   /** Spawns one virtual thread to own this connection's lifetime end to end. */
   public void accept(Socket socket) {
+    String connectionId = UUID.randomUUID().toString();
     Thread.ofVirtual()
-        .name("connection-" + connectionIdCounter.get())
-        .start(() -> handleConnection(socket));
+        .name("connection-" + connectionId)
+        .start(() -> handleConnection(socket, connectionId));
   }
 
-  private void handleConnection(Socket socket) {
+  private void handleConnection(Socket socket, String connectionId) {
     String remoteAddress =
         socket.getInetAddress() == null ? "unknown" : socket.getInetAddress().getHostAddress();
     if (!isAdmitted(remoteAddress)) {
@@ -127,7 +124,6 @@ public final class ConnectionHandler {
       return;
     }
 
-    String connectionId = "c" + connectionIdCounter.incrementAndGet();
     ServerConfiguration.RateLimit configuredRateLimit = rateLimit.get();
     ClientSession session =
         new ClientSession(
@@ -137,6 +133,7 @@ public final class ConnectionHandler {
                 configuredRateLimit.bucketSize(),
                 configuredRateLimit.refillRatePerSecond(),
                 java.time.Clock.systemUTC()));
+    ConnectionMonitorLog.connected(connectionId, remoteAddress);
     // Attached to the session and closed later via DisconnectCleanup, not in this method.
     @SuppressWarnings("PMD.CloseResource")
     SessionWriter writer;
@@ -153,7 +150,7 @@ public final class ConnectionHandler {
         new LivenessMonitor(
             session,
             disconnectCleanup,
-            KEEP_ALIVE_IDLE_INTERVAL,
+            Duration.ofSeconds(keepAliveFrequencySeconds.get()),
             KEEP_ALIVE_TIMEOUT,
             Clock.systemUTC());
     session.attachLivenessMonitor(livenessMonitor);

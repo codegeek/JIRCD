@@ -57,19 +57,19 @@ disconnect-event (with duration) are logged for it through a new facility distin
 connect-event log entry and a disconnect-event log entry both appear, both referencing the
 same connection token.
 
-- [ ] T001 [US1] Add a `private final Instant connectedAt = Instant.now();` field (with a
+- [X] T001 [US1] Add a `private final Instant connectedAt = Instant.now();` field (with a
   `connectedAt()` accessor) to
   `jircd-core/src/main/java/net/jircd/core/session/ClientSession.java` — a field
   initializer, not a constructor parameter, mirroring `Channel.createdAt`'s identical
   precedent (data-model.md)
-- [ ] T002 [P] [US1] Create
+- [X] T002 [P] [US1] Create
   `jircd-core/src/main/java/net/jircd/core/session/ConnectionMonitorLog.java` — a
   static-only utility sibling to `SecurityEventLog.java` (private constructor, one `slf4j`
   `Logger`): `connected(String connectionId, String remoteAddress)` logs
   `connection-event=connected connection={} remoteAddress={}`; `disconnected(String
   connectionId, Duration duration, String reason)` logs `connection-event=disconnected
   connection={} durationMs={} reason={}` (data-model.md)
-- [ ] T003 [US1] In `jircd-core/src/main/java/net/jircd/core/session/ConnectionHandler.java`:
+- [X] T003 [US1] In `jircd-core/src/main/java/net/jircd/core/session/ConnectionHandler.java`:
   remove `connectionIdCounter` (the `AtomicLong` field) and its `"c" +
   counter.incrementAndGet()` usage; generate `UUID.randomUUID().toString()` once inside
   `accept()`, before spawning the per-connection virtual thread, and use it both for the
@@ -77,13 +77,13 @@ same connection token.
   off-by-one in the current thread-name value — research.md "Constraints") and pass it into
   `handleConnection`; call `ConnectionMonitorLog.connected(connectionId, remoteAddress)`
   right after `ClientSession` is constructed (depends on T001, T002)
-- [ ] T004 [US1] In
+- [X] T004 [US1] In
   `jircd-core/src/main/java/net/jircd/core/session/DisconnectCleanup.java`, inside the
   existing idempotency guard (`if (!session.lifecycle().closeIfNotAlreadyClosing())
   return;`), compute `Duration.between(session.connectedAt(), Instant.now())` and call
   `ConnectionMonitorLog.disconnected(session.connectionId(), duration, reason)`, reusing the
   `reason` parameter the method already receives (depends on T001, T002)
-- [ ] T005 [US1] New integration test file,
+- [X] T005 [US1] New integration test file,
   `jircd-integration-tests/src/test/java/net/jircd/integration/ConnectionMonitorLogTest.java`:
   add a small reusable log-capture helper (a Logback `ListAppender` attached to
   `net.jircd.core.session.ConnectionMonitorLog`'s logger — `TestServer` runs the server
@@ -110,18 +110,18 @@ wait for (or trigger) a server-sent keep-alive check, and confirm the keep-alive
 carries the identical token; separately, confirm the check's frequency follows a configured
 value instead of the old hardcoded 30-second constant.
 
-- [ ] T006 [P] [US2] In
+- [X] T006 [P] [US2] In
   `jircd-core/src/main/java/net/jircd/core/config/ServerConfiguration.java`, add `int
   keepAliveFrequencySeconds` to the record, plus `DEFAULT_KEEP_ALIVE_FREQUENCY_SECONDS =
   120` and `KEEP_ALIVE_FREQUENCY_CEILING_SECONDS = 3600` constants (data-model.md) — no
   dependency on US1's tasks, different file
-- [ ] T007 [US2] In
+- [X] T007 [US2] In
   `jircd-core/src/main/java/net/jircd/core/config/ConfigurationLoader.java`, add one more
   `positiveIntWithinCeiling(root, "keepAliveFrequencySeconds",
   ServerConfiguration.DEFAULT_KEEP_ALIVE_FREQUENCY_SECONDS,
   ServerConfiguration.KEEP_ALIVE_FREQUENCY_CEILING_SECONDS)` call site, the same pattern
   `operFailureThreshold`/`whowasHistorySize` already use (FR-011) (depends on T006)
-- [ ] T008 [US2] In `ConnectionHandler.java`, remove the `KEEP_ALIVE_IDLE_INTERVAL` constant
+- [X] T008 [US2] In `ConnectionHandler.java`, remove the `KEEP_ALIVE_IDLE_INTERVAL` constant
   and its javadoc claiming keep-alive timing is "deliberately not exposed as an
   administrator-configurable setting" (now false); add a `Supplier<Integer>
   keepAliveFrequencySeconds` constructor parameter; in `handleConnection`, resolve it once
@@ -129,29 +129,39 @@ value instead of the old hardcoded 30-second constant.
   call site) into `Duration.ofSeconds(...)` and pass that to `LivenessMonitor`'s existing
   constructor, unchanged otherwise (depends on T003 [same file/constructor as US1's own
   edit — land after it], T007)
-- [ ] T009 [US2] In
+- [X] T009 [US2] In
   `jircd-server/src/main/java/net/jircd/server/JircdServerApplication.java`, add `() ->
   reloader.current().keepAliveFrequencySeconds()` as the new argument to `ConnectionHandler`'s
   constructor call, mirroring `rateLimit`'s own existing wiring immediately above it
   (depends on T008)
-- [ ] T010 [P] [US2] In
+- [X] T010 [P] [US2] In
   `jircd-core/src/test/java/net/jircd/core/config/ConfigurationLoaderTest.java`, add tests
   proving a valid `keepAliveFrequencySeconds` value parses cleanly and that zero, a
   negative value, and a value above the ceiling are each rejected with a
   `ConfigurationException` (depends on T007)
-- [ ] T011 [US2] Update
+- [X] T011 [US2] Update
   `jircd-integration-tests/src/test/java/net/jircd/integration/KeepAliveLoadTest.java` to
   configure a short `keepAliveFrequencySeconds` (e.g. `2`) via its own server configuration
   YAML instead of relying on the new 120-second default, and update its comments that
   currently reference the old hardcoded "30s idle interval" (research.md "Test impact of
   changing the default idle interval") (depends on T008, T009)
-- [ ] T012 [US2] New integration test file,
+- [X] T012 [US2] New integration test file,
   `jircd-integration-tests/src/test/java/net/jircd/integration/PingTokenConsistencyTest.java`:
   using T005's log-capture helper, connect a client, capture its monitoring-log token, wait
   for a server-sent `PING` (configuring a short `keepAliveFrequencySeconds` for the test),
   and assert the `PING` payload equals that exact token; add a second test proving a
   configured frequency other than the default actually changes how soon the `PING` arrives
   (depends on T005, T009)
+
+  **Addendum discovered while implementing this task**: `RawIrcClient.readUntil("PING", ...)`
+  used a raw substring match, which spuriously matched the `005 RPL_ISUPPORT` line's
+  `CASEMAPPING=rfc1459` token (its final four letters, `...maPPING`, contain the literal
+  substring `PING`) well before any real `PING` arrived — a latent bug in shared test
+  infrastructure that predates this feature (it also silently weakened
+  `KeepAliveLoadTest`'s own pre-existing assertions, which happened to still "pass" against
+  the false match). Fixed by extending `readUntil`'s existing numeric-reply word-boundary
+  protection to also cover purely-uppercase-letter prefixes (IRC command names), the same
+  reasoning already documented for the numeric case.
 
 **Checkpoint**: Live keep-alive correlation and configurable frequency are both fully
 functional and independently testable.
@@ -166,7 +176,7 @@ implement anything new.
 **Independent Test**: Connect several clients in sequence and compare their tokens; confirm
 no arithmetic or lexical relationship reveals connection order or count.
 
-- [ ] T013 [US3] New integration test file,
+- [X] T013 [US3] New integration test file,
   `jircd-integration-tests/src/test/java/net/jircd/integration/ConnectionTokenOpacityTest.java`:
   connect three clients in sequence, capture their three tokens (via T005's log-capture
   helper), and assert each matches the standard UUID format (`^[0-9a-f]{8}-[0-9a-f]{4}-
@@ -181,18 +191,22 @@ no arithmetic or lexical relationship reveals connection order or count.
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T014 [P] Update
-  `specs/001-ircv3-server/contracts/server-configuration.md`'s Server Configuration schema
-  documentation to add the new `keepAliveFrequencySeconds` key alongside the existing
-  numeric settings (e.g. `operFailureThreshold`)
-- [ ] T015 [P] Correct `specs/001-ircv3-server/spec.md`'s Assumptions section (the sentence
+- [X] T014 [P] Document `keepAliveFrequencySeconds` — **deviated from plan.md**: rather
+  than editing `001-ircv3-server/contracts/server-configuration.md` directly, discovered
+  during implementation that `002-extended-irc-commands` already established the real
+  precedent for a later feature adding a new top-level config key — a small, dedicated
+  `<feature>/contracts/server-configuration-extensions.md` file that extends `001`'s schema
+  without modifying it. Created
+  `specs/009-connection-monitoring-log/contracts/server-configuration-extensions.md`
+  following that exact structure instead
+- [X] T015 [P] Correct `specs/001-ircv3-server/spec.md`'s Assumptions section (the sentence
   stating keep-alive timing is "not exposed as an administrator-configurable Server
   Configuration setting in this release") and FR-063's cross-reference to that same claim,
   both now false (research.md "Prior-feature contract correction required")
-- [ ] T016 [P] Code cleanup pass: confirm `./gradlew build` runs Spotless/SpotBugs/PMD
+- [X] T016 [P] Code cleanup pass: confirm `./gradlew build` runs Spotless/SpotBugs/PMD
   clean across every touched module, and that the full existing test suite (not just this
   feature's own tests) passes with zero regressions
-- [ ] T017 Run the full `specs/009-connection-monitoring-log/quickstart.md` validation pass
+- [X] T017 Run the full `specs/009-connection-monitoring-log/quickstart.md` validation pass
   manually against a running `./gradlew :jircd-server:run` instance (constitution UX
   Consistency principle's required manual usage-scenario check)
 

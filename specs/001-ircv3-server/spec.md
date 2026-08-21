@@ -1172,7 +1172,8 @@ their presented (not real) hostname.
   defines — an unbounded, operator-populated list is the kind of
   unbounded growth this specification consistently guards against
   elsewhere (e.g., FR-016's rate limiting, FR-049's line-length limit).
-  Unlike FR-016's rate-limiting thresholds or FR-039's keep-alive timing,
+  Unlike FR-016's rate-limiting thresholds or FR-039's keep-alive
+  interval (administrator-configurable since 009-connection-monitoring-log),
   this specific ceiling is a fixed value, not administrator-configurable
   — see Assumptions for why a ban list gets a hard number where those
   others don't.
@@ -1379,11 +1380,17 @@ their presented (not real) hostname.
 - Rate limiting/flood protection (FR-016, SC-006) uses reasonable
   industry-standard defaults, configurable by the administrator, rather
   than a single fixed universal threshold.
-- Connection keep-alive (FR-039) uses reasonable industry-standard
-  probe-interval and response-timeout defaults, not exposed as an
-  administrator-configurable Server Configuration setting in this
-  release — unlike rate limiting's thresholds, which FR-016 already
-  requires to be tunable.
+- Connection keep-alive (FR-039) originally used reasonable
+  industry-standard probe-interval and response-timeout defaults with
+  neither exposed as an administrator-configurable Server Configuration
+  setting. As of 009-connection-monitoring-log, the probe interval
+  (how long a connection may sit idle before being probed) is
+  administrator-configurable (`keepAliveFrequencySeconds`, default 120
+  seconds, contracts/`009-connection-monitoring-log`/
+  server-configuration-extensions.md) — the same tunability posture
+  FR-016's rate-limiting thresholds already had. The response timeout
+  and the internal check cadence remain fixed, non-configurable
+  implementation details.
 - The server does not enforce its own maximum-connections cap or send a
   dedicated capacity-exceeded rejection at the protocol level; SC-003's
   1,000-connection floor is a sustained-operation target the server MUST
