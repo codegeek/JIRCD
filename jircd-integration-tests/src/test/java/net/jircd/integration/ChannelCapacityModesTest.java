@@ -135,4 +135,34 @@ class ChannelCapacityModesTest {
       assertThat(invitee.readUntil("353", Duration.ofSeconds(5))).contains("#chan");
     }
   }
+
+  @Test
+  void loweringTheLimitBelowCurrentMembershipDoesNotRemoveExistingMembers() throws Exception {
+    try (TestServer server = TestServer.start();
+        RawIrcClient chanop = RawIrcClient.connectPlaintext(server.plaintextPort());
+        RawIrcClient user2 = RawIrcClient.connectPlaintext(server.plaintextPort())) {
+
+      chanop.registerAndAwaitWelcome("chanop", "chanop");
+      chanop.send("JOIN #chan");
+      chanop.readUntil("353", Duration.ofSeconds(5));
+      user2.registerAndAwaitWelcome("user2", "user2");
+      user2.send("JOIN #chan");
+      user2.readUntil("353", Duration.ofSeconds(5));
+      chanop.readUntil("JOIN #chan", Duration.ofSeconds(5));
+
+      // Two members present; lower the limit to 1 — below current membership. The limit only
+      // gates future JOIN attempts, so neither existing member is removed (spec.md Edge Cases).
+      chanop.send("MODE #chan +l 1");
+      chanop.readUntil("MODE #chan +l", Duration.ofSeconds(5));
+
+      // Both members are still present: a message from user2 still reaches chanop, and a
+      // fresh NAMES query still lists both.
+      user2.send("PRIVMSG #chan :still here");
+      assertThat(chanop.readUntil("PRIVMSG #chan", Duration.ofSeconds(5))).contains("still here");
+
+      chanop.send("NAMES #chan");
+      String namreply = chanop.readUntil("353", Duration.ofSeconds(5));
+      assertThat(namreply).contains("chanop").contains("user2");
+    }
+  }
 }

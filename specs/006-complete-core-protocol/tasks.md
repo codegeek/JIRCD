@@ -284,3 +284,15 @@ nickname's history requesting more than one entry, and verify more than one is r
   (T020 depends only on T018, not on T019).
 - Across stories: T014 (US4), T016 (US5), T018 (US6) are all `[P]` — no shared files, no
   cross-story dependency.
+
+## Phase 10: Convergence
+
+- [X] T027 [P] Add a regression test verifying a channel's existing members are not removed when
+  `+l` is lowered below current membership, in
+  `jircd-integration-tests/src/test/java/net/jircd/integration/ChannelCapacityModesTest.java`
+  per spec.md Edge Cases (partial)
+- [X] T028 [P] Add a regression test verifying a bare `NAMES` includes a private/secret channel's
+  membership for a client who IS a member of it (only the exclusion case for a non-member is
+  currently covered), in
+  `jircd-integration-tests/src/test/java/net/jircd/integration/BareNamesTest.java` per spec.md
+  Edge Cases (partial)

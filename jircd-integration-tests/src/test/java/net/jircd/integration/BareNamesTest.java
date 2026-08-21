@@ -53,4 +53,25 @@ class BareNamesTest {
       assertThat(end).contains(" * ");
     }
   }
+
+  @Test
+  void bareNamesIncludesASecretChannelForOneOfItsOwnMembers() throws Exception {
+    try (TestServer server = TestServer.start();
+        RawIrcClient bob = RawIrcClient.connectPlaintext(server.plaintextPort())) {
+
+      bob.registerAndAwaitWelcome("bob", "bob");
+      bob.send("JOIN #priv");
+      bob.readUntil("353", Duration.ofSeconds(5));
+      bob.send("MODE #priv +s");
+      bob.readUntil("MODE #priv +s", Duration.ofSeconds(5));
+
+      // bob IS a member of #priv, so the same visibility rule that hides it from a non-member
+      // (ChannelVisibility.isHiddenFrom) must still include it for bob himself.
+      bob.send("NAMES");
+      String namreply = bob.readUntil("353", Duration.ofSeconds(5));
+      assertThat(namreply).contains("#priv").contains("bob");
+
+      assertThat(bob.readUntil("366", Duration.ofSeconds(5))).contains(" * ");
+    }
+  }
 }
