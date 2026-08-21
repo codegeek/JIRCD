@@ -15,6 +15,7 @@
  */
 package net.jircd.core.session;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -42,6 +43,7 @@ public final class Channel {
   private volatile String topic;
   private volatile int memberLimit;
   private volatile String key;
+  private final Instant createdAt = Instant.now();
 
   public Channel(String name) {
     this.name = name;
@@ -50,6 +52,16 @@ public final class Channel {
 
   public String name() {
     return name;
+  }
+
+  /**
+   * When this channel instance was created (007-bare-mode-query FR-007) — a field initializer, not
+   * a constructor parameter, so it resets naturally whenever a zero-member channel is recreated as
+   * a fresh {@code Channel} object (FR-008), the same way {@code topic}/{@code memberLimit}/{@code
+   * key} already reset.
+   */
+  public Instant createdAt() {
+    return createdAt;
   }
 
   public Set<ClientSession> members() {

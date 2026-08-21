@@ -102,9 +102,10 @@ trigger them is "Recognized only" per irc-protocol-commands.md).
 | `001` | `RPL_WELCOME` *(Used)* | `211` | `RPL_STATSLINKINFO` | `321` | `RPL_LISTSTART` |
 | `002` | `RPL_YOURHOST` *(Used)* | `212` | `RPL_STATSCOMMANDS` | `322` | `RPL_LIST` *(Used)* |
 | `003` | `RPL_CREATED` *(Used)* | `219` | `RPL_ENDOFSTATS` | `323` | `RPL_LISTEND` *(Used)* |
-| `004` | `RPL_MYINFO` *(Used)* | `221` | `RPL_UMODEIS` *(Used)* | `324` | `RPL_CHANNELMODEIS` |
+| `004` | `RPL_MYINFO` *(Used)* | `221` | `RPL_UMODEIS` *(Used)* | `324` | `RPL_CHANNELMODEIS` *(Used)* |
 | `005` | `RPL_BOUNCE` *(Used, as `RPL_ISUPPORT`)* | `234` | `RPL_SERVLIST` | `325` | `RPL_UNIQOPIS` |
-| `200` | `RPL_TRACELINK` | `235` | `RPL_SERVLISTEND` | `331` | `RPL_NOTOPIC` *(Used)* |
+| `200` | `RPL_TRACELINK` | `235` | `RPL_SERVLISTEND` | `329` | `RPL_CHANNELCREATED` *(Used)* |
+| | | | | `331` | `RPL_NOTOPIC` *(Used)* |
 | `201` | `RPL_TRACECONNECTING` | `242` | `RPL_STATSUPTIME` | `332` | `RPL_TOPIC` *(Used)* |
 | `202` | `RPL_TRACEHANDSHAKE` | `243` | `RPL_STATSOLINE` | `341` | `RPL_INVITING` *(Used)* |
 | `203` | `RPL_TRACEUNKNOWN` | `251` | `RPL_LUSERCLIENT` | `342` | `RPL_SUMMONING` |

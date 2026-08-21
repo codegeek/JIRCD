@@ -28,6 +28,7 @@ import net.jircd.core.session.BanEntry;
 import net.jircd.core.session.Channel;
 import net.jircd.core.session.ChannelMode;
 import net.jircd.core.session.ChannelRegistry;
+import net.jircd.core.session.ChannelVisibility;
 import net.jircd.core.session.ClientSession;
 import net.jircd.core.session.CoreChannelModes;
 import net.jircd.core.session.NicknameRegistry;
@@ -95,14 +96,10 @@ public final class ModeCommandHandler implements CommandHandler {
     Channel channel = found.get();
 
     if (message.params().size() < 2) {
-      // A bare "MODE #chan" with no flag argument at all is treated the same as an unrecognized
-      // flag (T114) — there is no flag character to name in the reply.
-      Replies.send(
-          session,
-          serverName.get(),
-          NumericReply.ERR_UNKNOWNMODE,
-          "*",
-          "is unknown mode char to me");
+      // 007-bare-mode-query FR-001/FR-005/FR-006 — a bare "MODE #chan" is a read-only settings
+      // query, not treated as an unrecognized flag anymore; runs before the operator-privilege
+      // check below, the same structural position the bare ban-list query already occupies.
+      sendChannelModeIs(session, channel);
       return;
     }
 
@@ -298,6 +295,64 @@ public final class ModeCommandHandler implements CommandHandler {
       }
     }
     return null;
+  }
+
+  /**
+   * {@code 324 RPL_CHANNELMODEIS} — every currently active {@code BOOLEAN}/{@code
+   * VALUE_SET_ONLY}/{@code VALUE_ALWAYS}-kind flag as one mode string, each value-carrying flag's
+   * current value appended as a trailing param in the same order its letter appears
+   * (007-bare-mode-query FR-001 through FR-004). {@code LIST}/{@code MEMBER}-kind flags are
+   * deliberately excluded — {@code b} (ban masks) and {@code o}/{@code v} (per-member privileges)
+   * already have their own dedicated query forms ({@code MODE #chan +b}, {@code NAMES}'s
+   * {@code @}/{@code +} prefixes) and are not duplicated here (research.md "Mode string composition
+   * and scope boundary"). No operator privilege is required — this is a read-only query, mirroring
+   * {@code TOPIC}'s own view-vs-set split (FR-005); a private/secret channel is hidden from a
+   * non-member the same way {@code TOPIC}/{@code NAMES} already hide theirs (FR-006).
+   */
+  private void sendChannelModeIs(ClientSession session, Channel channel) {
+    if (ChannelVisibility.isHiddenFrom(channel, session, extensionRegistry)) {
+      Replies.send(
+          session,
+          serverName.get(),
+          NumericReply.ERR_NOSUCHCHANNEL,
+          channel.name(),
+          "No such channel");
+      return;
+    }
+    Collection<ChannelMode> recognized =
+        extensionRegistry.recognizedChannelModes(CoreChannelModes.ALL);
+    StringBuilder letters = new StringBuilder("+");
+    List<String> values = new ArrayList<>();
+    for (ChannelMode mode : recognized) {
+      if (mode.kind() == ChannelMode.Kind.LIST || mode.kind() == ChannelMode.Kind.MEMBER) {
+        continue;
+      }
+      if (mode.kind() == ChannelMode.Kind.BOOLEAN) {
+        if (channel.activeModes().contains(mode)) {
+          letters.append(mode.flag());
+        }
+      } else if (mode.kind() == ChannelMode.Kind.VALUE_SET_ONLY) {
+        if (channel.memberLimit() > 0) {
+          letters.append(mode.flag());
+          values.add(String.valueOf(channel.memberLimit()));
+        }
+      } else if (mode.kind() == ChannelMode.Kind.VALUE_ALWAYS && channel.key() != null) {
+        letters.append(mode.flag());
+        values.add(channel.key());
+      }
+    }
+    List<String> params = new ArrayList<>();
+    params.add(channel.name());
+    params.add(letters.toString());
+    params.addAll(values);
+    Replies.send(
+        session, serverName.get(), NumericReply.RPL_CHANNELMODEIS, params.toArray(new String[0]));
+    Replies.send(
+        session,
+        serverName.get(),
+        NumericReply.RPL_CHANNELCREATED,
+        channel.name(),
+        String.valueOf(channel.createdAt().getEpochSecond()));
   }
 
   private void sendBanList(ClientSession session, Channel channel) {

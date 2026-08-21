@@ -79,6 +79,10 @@ public enum NumericReply {
   RPL_LISTEND(323),
   RPL_CHANNELMODEIS(324),
   RPL_UNIQOPIS(325),
+  /**
+   * 007-bare-mode-query FR-007 — a channel's creation time, alongside {@code RPL_CHANNELMODEIS}.
+   */
+  RPL_CHANNELCREATED(329),
   RPL_NOTOPIC(331),
   RPL_TOPIC(332),
   RPL_INVITING(341),
