@@ -53,6 +53,15 @@ public final class DisconnectCleanup {
   }
 
   public void cleanup(ClientSession session, String reason) {
+    // Idempotency guard: two disconnect triggers can race for the same session (a client-sent
+    // QUIT racing an abrupt TCP-level close of the same socket is the concrete case that
+    // surfaced this — an OS-level RST can hit the read loop's IOException path before the QUIT
+    // line's own cleanup call has finished, or vice versa). Whichever call actually claims the
+    // CLOSING transition proceeds; every other call for this session is a no-op — otherwise a
+    // WHOWAS entry (among other things) could be recorded twice for one logical disconnect.
+    if (!session.lifecycle().closeIfNotAlreadyClosing()) {
+      return;
+    }
     Set<ClientSession> neighbors = new HashSet<>();
     for (Channel channel : Set.copyOf(session.channelMemberships())) {
       channel.removeMember(session);
@@ -97,7 +106,8 @@ public final class DisconnectCleanup {
       nicknameRegistry.release(session.nickname(), session);
     }
 
-    session.lifecycle().close();
+    // The CLOSING transition already happened at the top of this method (the idempotency guard)
+    // — nothing left to do here but close the writer.
     // This session's own writer — this is exactly where it gets closed; PMD's
     // CloseResource heuristic doesn't credit a conditional close() here.
     @SuppressWarnings("PMD.CloseResource")

@@ -45,8 +45,15 @@ public final class ConnectionLifecycle {
     state.compareAndSet(State.CONNECTING, State.REGISTERED);
   }
 
-  /** Any state -> CLOSING. Terminal; there is no path back. */
-  public void close() {
-    state.set(State.CLOSING);
+  /**
+   * Any state -&gt; CLOSING, atomically claimed by at most one caller — {@code true} only for
+   * whichever call actually performed the transition (the session was not already {@code CLOSING}),
+   * {@code false} for every other call, whether truly concurrent or simply later. {@link
+   * net.jircd.core.session.DisconnectCleanup#cleanup} uses this to stay idempotent: two disconnect
+   * triggers racing for the same session (e.g. a client-sent {@code QUIT} racing an abrupt
+   * TCP-level close of the same socket) must run cleanup exactly once, not once per trigger.
+   */
+  public boolean closeIfNotAlreadyClosing() {
+    return state.getAndSet(State.CLOSING) != State.CLOSING;
   }
 }
