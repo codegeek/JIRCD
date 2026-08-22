@@ -57,12 +57,16 @@ final class AdminPrivilege {
   }
 
   /**
-   * Rejects with {@code 461 ERR_NEEDMOREPARAMS} and returns {@code true} if {@code params} is
-   * empty; returns {@code false} without side effects otherwise.
+   * Rejects with {@code 461 ERR_NEEDMOREPARAMS} and returns {@code true} if {@code params} has
+   * fewer than {@code minParams} elements; returns {@code false} without side effects otherwise.
    */
-  static boolean rejectIfNoParams(
-      ClientSession session, String serverName, String commandName, List<String> params) {
-    if (!params.isEmpty()) {
+  static boolean rejectIfTooFewParams(
+      ClientSession session,
+      String serverName,
+      String commandName,
+      List<String> params,
+      int minParams) {
+    if (params.size() >= minParams) {
       return false;
     }
     Replies.send(

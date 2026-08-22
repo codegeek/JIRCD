@@ -56,7 +56,8 @@ public final class WallopsCommandHandler implements CommandHandler {
     if (AdminPrivilege.rejectUnlessAuthorized(session, extensionRegistry, serverName.get())) {
       return;
     }
-    if (AdminPrivilege.rejectIfNoParams(session, serverName.get(), "WALLOPS", message.params())) {
+    if (AdminPrivilege.rejectIfTooFewParams(
+        session, serverName.get(), "WALLOPS", message.params(), 1)) {
       return;
     }
     String text = message.params().getFirst();

@@ -57,21 +57,11 @@ public final class SajoinCommandHandler implements CommandHandler {
 
   @Override
   public void handle(ClientSession session, Message message) {
-    if (!AdminPrivilege.isAuthorized(session, extensionRegistry)) {
-      Replies.send(
-          session,
-          serverName.get(),
-          NumericReply.ERR_NOPRIVILEGES,
-          "Permission Denied- You're not an IRC operator");
+    if (AdminPrivilege.rejectUnlessAuthorized(session, extensionRegistry, serverName.get())) {
       return;
     }
-    if (message.params().isEmpty()) {
-      Replies.send(
-          session,
-          serverName.get(),
-          NumericReply.ERR_NEEDMOREPARAMS,
-          "SAJOIN",
-          "Not enough parameters");
+    if (AdminPrivilege.rejectIfTooFewParams(
+        session, serverName.get(), "SAJOIN", message.params(), 1)) {
       return;
     }
     String name = message.params().getFirst();
