@@ -52,21 +52,11 @@ public final class SamodeCommandHandler implements CommandHandler {
 
   @Override
   public void handle(ClientSession session, Message message) {
-    if (!AdminPrivilege.isAuthorized(session, extensionRegistry)) {
-      Replies.send(
-          session,
-          serverName.get(),
-          NumericReply.ERR_NOPRIVILEGES,
-          "Permission Denied- You're not an IRC operator");
+    if (AdminPrivilege.rejectUnlessAuthorized(session, extensionRegistry, serverName.get())) {
       return;
     }
-    if (message.params().size() < 2) {
-      Replies.send(
-          session,
-          serverName.get(),
-          NumericReply.ERR_NEEDMOREPARAMS,
-          "SAMODE",
-          "Not enough parameters");
+    if (AdminPrivilege.rejectIfTooFewParams(
+        session, serverName.get(), "SAMODE", message.params(), 2)) {
       return;
     }
     String channelName = message.params().getFirst();

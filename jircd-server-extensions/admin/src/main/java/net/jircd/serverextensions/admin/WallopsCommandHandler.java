@@ -15,27 +15,34 @@
  */
 package net.jircd.serverextensions.admin;
 
+import java.util.List;
+import java.util.Map;
 import java.util.function.Supplier;
 import net.jircd.core.extension.ExtensionRegistry;
 import net.jircd.core.session.ClientSession;
 import net.jircd.core.session.NicknameRegistry;
+import net.jircd.core.session.UserMode;
 import net.jircd.core.session.command.CommandHandler;
 import net.jircd.core.session.command.Replies;
+import net.jircd.protocol.Command;
+import net.jircd.protocol.Hostmask;
 import net.jircd.protocol.Message;
 import net.jircd.protocol.NumericReply;
 
 /**
- * {@code WHOHOST} — reads {@link ClientSession#realHostname()} directly, bypassing any active
- * {@code cloak} extension (FR-031/FR-032), the same real-value source of truth {@code
- * UserIdentity.presentedForm} reads before applying cloak's display transform.
+ * {@code WALLOPS} — administrator broadcast to every connected session that has opted in via the
+ * {@code wallops} (`+w`) user mode (010-wallops-notices FR-001 through FR-011). Delivers no
+ * confirmation reply to the sender on success (research.md "reuse existing numeric replies") — the
+ * sender sees their own notice only if their own {@code +w} is set, the same as any other
+ * recipient.
  */
-public final class WhohostCommandHandler implements CommandHandler {
+public final class WallopsCommandHandler implements CommandHandler {
 
   private final NicknameRegistry nicknameRegistry;
   private final ExtensionRegistry extensionRegistry;
   private final Supplier<String> serverName;
 
-  public WhohostCommandHandler(
+  public WallopsCommandHandler(
       NicknameRegistry nicknameRegistry,
       ExtensionRegistry extensionRegistry,
       Supplier<String> serverName) {
@@ -50,23 +57,21 @@ public final class WhohostCommandHandler implements CommandHandler {
       return;
     }
     if (AdminPrivilege.rejectIfTooFewParams(
-        session, serverName.get(), "WHOHOST", message.params(), 1)) {
+        session, serverName.get(), "WALLOPS", message.params(), 1)) {
       return;
     }
-    String targetNickname = message.params().getFirst();
-    var target = nicknameRegistry.lookup(targetNickname);
-    if (target.isEmpty()) {
-      Replies.send(
-          session,
-          serverName.get(),
-          NumericReply.ERR_NOSUCHNICK,
-          targetNickname,
-          "No such nick/channel");
+    String text = message.params().getFirst();
+    if (text.isBlank()) {
+      Replies.send(session, serverName.get(), NumericReply.ERR_NOTEXTTOSEND, "No text to send");
       return;
     }
-    AdminNotices.send(
-        session,
-        serverName.get(),
-        target.get().nickname() + " is connecting from " + target.get().realHostname());
+
+    String prefix = Hostmask.format(session.nickname(), session.ident(), session.realHostname());
+    Message notice = new Message(Map.of(), prefix, Command.WALLOPS, "WALLOPS", List.of(text));
+    for (ClientSession recipient : nicknameRegistry.all()) {
+      if (recipient.userModes().contains(UserMode.WALLOPS) && recipient.writer() != null) {
+        recipient.writer().enqueueRaw(notice);
+      }
+    }
   }
 }
