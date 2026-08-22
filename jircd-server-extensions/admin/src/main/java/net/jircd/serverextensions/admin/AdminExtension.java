@@ -20,12 +20,12 @@ import net.jircd.core.extension.ServerExtension;
 import net.jircd.protocol.Command;
 
 /**
- * Registers the six {@code OPER}/{@code EXTENSION}/{@code REHASH}/{@code WHOHOST}/{@code
- * SAJOIN}/{@code SAMODE} handlers with {@code jircd-core}'s command dispatch when enabled
- * (research.md "Administrator channel override", "OPER failed-attempt lockout"). Handlers stay
- * registered even after this extension is later disabled — there's no unregister mechanism — {@link
- * AdminPrivilege} is what makes {@code EXTENSION DISABLE admin}'s self-lockout work instead
- * (contracts/irc-protocol-commands.md "Self-lockout").
+ * Registers the eight {@code OPER}/{@code EXTENSION}/{@code REHASH}/{@code WHOHOST}/{@code
+ * SAJOIN}/{@code SAMODE}/{@code KILL}/{@code WALLOPS} handlers with {@code jircd-core}'s command
+ * dispatch when enabled (research.md "Administrator channel override", "OPER failed-attempt
+ * lockout"). Handlers stay registered even after this extension is later disabled — there's no
+ * unregister mechanism — {@link AdminPrivilege} is what makes {@code EXTENSION DISABLE admin}'s
+ * self-lockout work instead (contracts/irc-protocol-commands.md "Self-lockout").
  */
 public final class AdminExtension implements ServerExtension {
 
@@ -71,6 +71,9 @@ public final class AdminExtension implements ServerExtension {
             extensionRegistry,
             serverName,
             context.disconnectCleanup()));
+    registrar.register(
+        Command.WALLOPS,
+        new WallopsCommandHandler(context.nicknameRegistry(), extensionRegistry, serverName));
   }
 
   @Override

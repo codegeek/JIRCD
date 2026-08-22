@@ -39,7 +39,7 @@ Existing multi-module Gradle project (plan.md "Project Structure") — no new mo
 
 **Purpose**: Confirm a clean baseline before touching any source.
 
-- [ ] T001 Run `./gradlew build` from the repo root and confirm it succeeds with no
+- [X] T001 Run `./gradlew build` from the repo root and confirm it succeeds with no
       source changes yet, establishing the pre-feature baseline.
 
 ---
@@ -50,7 +50,7 @@ Existing multi-module Gradle project (plan.md "Project Structure") — no new mo
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T002 Add the `WALLOPS` user-mode constant to `UserMode.CORE_CATALOG` in
+- [X] T002 Add the `WALLOPS` user-mode constant to `UserMode.CORE_CATALOG` in
       `jircd-core/src/main/java/net/jircd/core/session/UserMode.java`:
       `public static final UserMode WALLOPS = new UserMode("wallops", 'w', CORE, true);`
       added to the `CORE_CATALOG` set alongside `OPERATOR`/`INVISIBLE` (data-model.md
@@ -77,7 +77,7 @@ receives it — per quickstart.md Scenarios 1-3 and 6.
 
 ### Tests for User Story 1
 
-- [ ] T003 [US1] Write integration tests in
+- [X] T003 [US1] Write integration tests in
       `jircd-integration-tests/src/test/java/net/jircd/integration/WallopsCommandTest.java`
       covering: (a) an `OPER`'d sender's `WALLOPS` is delivered, prefixed with the sender's
       own hostmask, to a connected session with `+w` set (quickstart.md Scenario 1); (b) a
@@ -90,7 +90,7 @@ receives it — per quickstart.md Scenarios 1-3 and 6.
 
 ### Implementation for User Story 1
 
-- [ ] T004 [US1] Create
+- [X] T004 [US1] Create
       `jircd-server-extensions/admin/src/main/java/net/jircd/serverextensions/admin/WallopsCommandHandler.java`
       implementing `CommandHandler`, following `KillCommandHandler`'s established shape:
       constructor takes `NicknameRegistry`, `ExtensionRegistry`, and `Supplier<String> serverName`;
@@ -105,7 +105,7 @@ receives it — per quickstart.md Scenarios 1-3 and 6.
       `userModes()` contains `UserMode.WALLOPS` (contracts/wallops-command.md "`WALLOPS`
       command"; data-model.md "`WALLOPS` notice"). No confirmation reply is sent to the
       sender on success (research.md, decision 4).
-- [ ] T005 [US1] Register the new handler in
+- [X] T005 [US1] Register the new handler in
       `jircd-server-extensions/admin/src/main/java/net/jircd/serverextensions/admin/AdminExtension.java`'s
       `start(ServerContext context)`: add
       `registrar.register(Command.WALLOPS, new WallopsCommandHandler(context.nicknameRegistry(), extensionRegistry, serverName));`
@@ -128,7 +128,7 @@ quickstart.md Scenario 4. No `WALLOPS` send is needed to verify this story.
 
 ### Tests for User Story 2
 
-- [ ] T006 [US2] Add integration tests to the same
+- [X] T006 [US2] Add integration tests to the same
       `jircd-integration-tests/src/test/java/net/jircd/integration/WallopsCommandTest.java`
       covering: self `MODE <self> +w` is accepted and reflected in a subsequent
       `MODE <self>` query; self `MODE <self> -w` is accepted and reflected the same way;
@@ -155,7 +155,7 @@ notice to anyone, and is told why.
 
 ### Tests for User Story 3
 
-- [ ] T007 [US3] Add integration tests to the same
+- [X] T007 [US3] Add integration tests to the same
       `jircd-integration-tests/src/test/java/net/jircd/integration/WallopsCommandTest.java`
       covering: a non-administrator's `WALLOPS` attempt yields `481 ERR_NOPRIVILEGES` and
       no connected session (including one with `+w` set) receives anything (quickstart.md
@@ -175,14 +175,14 @@ notice to anyone, and is told why.
 
 **Purpose**: Final checks spanning all three stories.
 
-- [ ] T008 [P] Re-read `specs/010-wallops-notices/contracts/wallops-command.md` against the
+- [X] T008 [P] Re-read `specs/010-wallops-notices/contracts/wallops-command.md` against the
       finished `WallopsCommandHandler.java` and `UserMode.java` changes and correct any
       wording that has drifted from the actual implementation (no source-code change
       expected — this is a documentation-accuracy pass).
-- [ ] T009 Walk through every scenario in `specs/010-wallops-notices/quickstart.md`
+- [X] T009 Walk through every scenario in `specs/010-wallops-notices/quickstart.md`
       end-to-end (manually or by confirming the corresponding T003/T006/T007 test methods
       cover it) and check off any scenario not already exercised by an automated test.
-- [ ] T010 [P] Run `./gradlew check` to execute the full test suite plus Spotless/SpotBugs/PMD
+- [X] T010 [P] Run `./gradlew check` to execute the full test suite plus Spotless/SpotBugs/PMD
       across `jircd-core`, `jircd-server-extensions:admin`, and `jircd-integration-tests`,
       satisfying the Constitution's Quality Gates (automated tests green, static analysis
       clean) before this feature is considered mergeable.
