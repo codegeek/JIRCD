@@ -15,9 +15,12 @@
  */
 package net.jircd.serverextensions.admin;
 
+import java.util.List;
 import net.jircd.core.extension.Extension;
 import net.jircd.core.extension.ExtensionRegistry;
 import net.jircd.core.session.ClientSession;
+import net.jircd.core.session.command.Replies;
+import net.jircd.protocol.NumericReply;
 
 /**
  * The shared authorization check every admin command but {@code OPER} itself uses: the sender must
@@ -34,5 +37,36 @@ final class AdminPrivilege {
   static boolean isAuthorized(ClientSession session, ExtensionRegistry extensionRegistry) {
     return session.isAdministrator()
         && extensionRegistry.stateOf(AdminExtension.ID) == Extension.State.ENABLED;
+  }
+
+  /**
+   * Rejects with {@code 481 ERR_NOPRIVILEGES} and returns {@code true} unless {@code session} is
+   * authorized; returns {@code false} without side effects otherwise.
+   */
+  static boolean rejectUnlessAuthorized(
+      ClientSession session, ExtensionRegistry extensionRegistry, String serverName) {
+    if (isAuthorized(session, extensionRegistry)) {
+      return false;
+    }
+    Replies.send(
+        session,
+        serverName,
+        NumericReply.ERR_NOPRIVILEGES,
+        "Permission Denied- You're not an IRC operator");
+    return true;
+  }
+
+  /**
+   * Rejects with {@code 461 ERR_NEEDMOREPARAMS} and returns {@code true} if {@code params} is
+   * empty; returns {@code false} without side effects otherwise.
+   */
+  static boolean rejectIfNoParams(
+      ClientSession session, String serverName, String commandName, List<String> params) {
+    if (!params.isEmpty()) {
+      return false;
+    }
+    Replies.send(
+        session, serverName, NumericReply.ERR_NEEDMOREPARAMS, commandName, "Not enough parameters");
+    return true;
   }
 }
